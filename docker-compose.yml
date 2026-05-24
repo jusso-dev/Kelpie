@@ -26,6 +26,8 @@ services:
       APP_URL: ${APP_URL:-http://localhost:3000}
       EMAIL_FROM: ${EMAIL_FROM:-kelpie@example.com}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
+      CRON_SECRET: ${CRON_SECRET:-dev_only_change_me_cron_secret}
+      VIRUSTOTAL_API_KEY: ${VIRUSTOTAL_API_KEY:-}
       STORAGE_DRIVER: local
       STORAGE_LOCAL_DIR: /data/uploads
       NODE_ENV: production
@@ -37,6 +39,27 @@ services:
     volumes:
       - kelpie_uploads:/data/uploads
     command: ["node", "server.js"]
+
+  cron:
+    image: alpine:3.20
+    depends_on:
+      app:
+        condition: service_started
+    environment:
+      CRON_SECRET: ${CRON_SECRET:-dev_only_change_me_cron_secret}
+    command:
+      - sh
+      - -c
+      - |
+        apk add --no-cache curl >/dev/null
+        echo "Kelpie cron sidecar ready"
+        while true; do
+          for path in sla webhooks enrichment; do
+            curl -sS -X POST -H "Authorization: Bearer $$CRON_SECRET" \
+              "http://app:3000/api/cron/$$path" >/dev/null || true
+          done
+          sleep 60
+        done
 
 volumes:
   kelpie_pg:

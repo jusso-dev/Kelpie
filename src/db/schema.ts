@@ -253,6 +253,7 @@ export const cases = pgTable(
     acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
     containedAt: timestamp("contained_at", { withTimezone: true }),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    slaState: jsonb("sla_state").notNull().default(sql`'{}'::jsonb`),
   },
   (t) => [
     uniqueIndex("cases_org_number_idx").on(t.organisationId, t.caseNumber),
@@ -441,20 +442,29 @@ export const attachments = pgTable(
 /* SLA policies (foundation for phase 2 work)                                 */
 /* ────────────────────────────────────────────────────────────────────────── */
 
-export const slaPolicies = pgTable("sla_policies", {
-  id: text("id").primaryKey(),
-  organisationId: text("organisation_id")
-    .notNull()
-    .references(() => organisations.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  severity: severityEnum("severity").notNull(),
-  timeToAcknowledgeMinutes: integer("time_to_acknowledge_minutes").notNull(),
-  timeToContainMinutes: integer("time_to_contain_minutes").notNull(),
-  timeToResolveMinutes: integer("time_to_resolve_minutes").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const slaPolicies = pgTable(
+  "sla_policies",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    severity: severityEnum("severity").notNull(),
+    timeToAcknowledgeMinutes: integer("time_to_acknowledge_minutes").notNull(),
+    timeToContainMinutes: integer("time_to_contain_minutes").notNull(),
+    timeToResolveMinutes: integer("time_to_resolve_minutes").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("sla_policies_org_severity_idx").on(
+      t.organisationId,
+      t.severity,
+    ),
+  ],
+);
 
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Case templates                                                             */
@@ -497,11 +507,89 @@ export const apiTokens = pgTable("api_tokens", {
     onDelete: "set null",
   }),
   lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  lastUsedIp: text("last_used_ip"),
   expiresAt: timestamp("expires_at", { withTimezone: true }),
+  deprecatedAt: timestamp("deprecated_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
 });
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Webhooks                                                                   */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+export const webhooks = pgTable("webhooks", {
+  id: text("id").primaryKey(),
+  organisationId: text("organisation_id")
+    .notNull()
+    .references(() => organisations.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  url: text("url").notNull(),
+  secret: text("secret").notNull(),
+  events: jsonb("events").notNull().default(sql`'[]'::jsonb`),
+  isActive: boolean("is_active").notNull().default(true),
+  createdBy: text("created_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const webhookDeliveries = pgTable(
+  "webhook_deliveries",
+  {
+    id: text("id").primaryKey(),
+    webhookId: text("webhook_id")
+      .notNull()
+      .references(() => webhooks.id, { onDelete: "cascade" }),
+    event: text("event").notNull(),
+    payload: jsonb("payload").notNull().default(sql`'{}'::jsonb`),
+    status: text("status").notNull().default("pending"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    lastResponseCode: integer("last_response_code"),
+    lastResponseBody: text("last_response_body"),
+    lastError: text("last_error"),
+    latencyMs: integer("latency_ms"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("webhook_deliveries_pending_idx").on(t.status, t.nextAttemptAt),
+    index("webhook_deliveries_webhook_idx").on(t.webhookId, t.createdAt),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Enrichment cache                                                           */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+export const enrichmentCache = pgTable(
+  "enrichment_cache",
+  {
+    id: text("id").primaryKey(),
+    provider: text("provider").notNull(),
+    valueHash: text("value_hash").notNull(),
+    type: text("type").notNull(),
+    response: jsonb("response").notNull().default(sql`'{}'::jsonb`),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("enrichment_cache_provider_type_value_idx").on(
+      t.provider,
+      t.type,
+      t.valueHash,
+    ),
+    index("enrichment_cache_expires_idx").on(t.expiresAt),
+  ],
+);
 
 export type Organisation = typeof organisations.$inferSelect;
 export type User = typeof users.$inferSelect;
@@ -517,6 +605,9 @@ export type PlaybookRun = typeof playbookRuns.$inferSelect;
 export type SlaPolicy = typeof slaPolicies.$inferSelect;
 export type CaseTemplate = typeof caseTemplates.$inferSelect;
 export type ApiToken = typeof apiTokens.$inferSelect;
+export type Webhook = typeof webhooks.$inferSelect;
+export type WebhookDelivery = typeof webhookDeliveries.$inferSelect;
+export type EnrichmentCacheRow = typeof enrichmentCache.$inferSelect;
 
 export type PlaybookStep = {
   id: string;

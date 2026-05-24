@@ -3,40 +3,23 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { cases, users } from "@/db/schema";
-import { and, eq, sql } from "drizzle-orm";
-import { requireRole, requireUser } from "@/lib/session";
-import { newId } from "@/lib/utils";
-import { nextCaseNumber } from "@/lib/case-number";
+import { cases } from "@/db/schema";
+import { and, eq } from "drizzle-orm";
+import { requireRole } from "@/lib/session";
+import {
+  CASE_ENUMS,
+  closeCaseCore,
+  createCaseCore,
+  patchCaseCore,
+  setCaseStatusCore,
+  type CaseClassification,
+  type CasePap,
+  type CaseSeverity,
+  type CaseStatus,
+  type CaseTlp,
+} from "@/lib/cases-core";
 import { writeTimelineEvent } from "@/lib/timeline";
-
-const STATUS_VALUES = [
-  "open",
-  "in_progress",
-  "contained",
-  "eradicated",
-  "recovered",
-  "closed",
-] as const;
-
-const SEVERITY_VALUES = ["low", "medium", "high", "critical"] as const;
-const TLP_VALUES = ["clear", "green", "amber", "amber_strict", "red"] as const;
-const PAP_VALUES = ["clear", "green", "amber", "red"] as const;
-const CLASSIFICATION_VALUES = [
-  "malware",
-  "phishing",
-  "unauthorised_access",
-  "data_breach",
-  "dos",
-  "policy_violation",
-  "other",
-] as const;
-
-type Status = (typeof STATUS_VALUES)[number];
-type Severity = (typeof SEVERITY_VALUES)[number];
-type Tlp = (typeof TLP_VALUES)[number];
-type Pap = (typeof PAP_VALUES)[number];
-type Classification = (typeof CLASSIFICATION_VALUES)[number];
+import { fireWebhook } from "@/lib/webhooks";
 
 function pickEnum<T extends readonly string[]>(
   values: T,
@@ -49,79 +32,37 @@ function pickEnum<T extends readonly string[]>(
 
 export async function createCase(formData: FormData) {
   const user = await requireRole(["admin", "analyst"]);
-  const title = String(formData.get("title") ?? "").trim();
-  if (!title) throw new Error("Title is required");
-  const summary = String(formData.get("summary") ?? "").trim();
-  const severity = pickEnum(SEVERITY_VALUES, formData.get("severity"), "medium");
-  const tlp = pickEnum(TLP_VALUES, formData.get("tlp"), "amber");
-  const pap = pickEnum(PAP_VALUES, formData.get("pap"), "amber");
-  const classification = pickEnum(
-    CLASSIFICATION_VALUES,
-    formData.get("classification"),
-    "other",
-  );
-
-  const id = newId("case");
-  const caseNumber = await nextCaseNumber(user.organisationId);
-  await db.insert(cases).values({
-    id,
-    organisationId: user.organisationId,
-    caseNumber,
-    title,
-    summary,
-    severity,
-    tlp,
-    pap,
-    classification,
-    reporterId: user.id,
-    assigneeId: user.id,
+  const result = await createCaseCore(user.organisationId, user.id, {
+    title: String(formData.get("title") ?? ""),
+    summary: String(formData.get("summary") ?? ""),
+    severity: pickEnum(CASE_ENUMS.severity, formData.get("severity"), "medium"),
+    tlp: pickEnum(CASE_ENUMS.tlp, formData.get("tlp"), "amber"),
+    pap: pickEnum(CASE_ENUMS.pap, formData.get("pap"), "amber"),
+    classification: pickEnum(
+      CASE_ENUMS.classification,
+      formData.get("classification"),
+      "other",
+    ),
   });
-  await writeTimelineEvent({
-    caseId: id,
-    actorId: user.id,
-    eventType: "case_created",
-    payload: { title, severity, classification },
+  await fireWebhook(user.organisationId, "case.created", {
+    case_id: result.id,
+    case_number: result.caseNumber,
+    title: String(formData.get("title") ?? ""),
   });
   revalidatePath("/cases");
-  redirect(`/cases/${id}`);
+  redirect(`/cases/${result.id}`);
 }
 
-async function loadCaseInOrg(id: string, organisationId: string) {
-  const [c] = await db
-    .select()
-    .from(cases)
-    .where(and(eq(cases.id, id), eq(cases.organisationId, organisationId)))
-    .limit(1);
-  return c ?? null;
-}
-
-export async function updateCaseStatus(caseId: string, nextStatus: Status) {
+export async function updateCaseStatus(caseId: string, nextStatus: CaseStatus) {
   const user = await requireRole(["admin", "analyst"]);
-  const existing = await loadCaseInOrg(caseId, user.organisationId);
-  if (!existing) throw new Error("Case not found");
-  if (existing.status === nextStatus) return;
-
-  const patch: Partial<typeof cases.$inferInsert> = { status: nextStatus };
-  // Mark lifecycle milestones the first time we cross them.
-  if (nextStatus === "in_progress" && !existing.acknowledgedAt) {
-    patch.acknowledgedAt = new Date();
-  }
-  if (nextStatus === "contained" && !existing.containedAt) {
-    patch.containedAt = new Date();
-  }
-  if (
-    (nextStatus === "recovered" || nextStatus === "closed") &&
-    !existing.resolvedAt
-  ) {
-    patch.resolvedAt = new Date();
-  }
-  await db.update(cases).set(patch).where(eq(cases.id, caseId));
-  await writeTimelineEvent({
-    caseId,
-    actorId: user.id,
-    eventType: "status_change",
-    payload: { from: existing.status, to: nextStatus },
+  await setCaseStatusCore(user.organisationId, user.id, caseId, nextStatus);
+  await fireWebhook(user.organisationId, "case.status_changed", {
+    case_id: caseId,
+    to: nextStatus,
   });
+  if (nextStatus === "closed") {
+    await fireWebhook(user.organisationId, "case.closed", { case_id: caseId });
+  }
   revalidatePath(`/cases/${caseId}`);
   revalidatePath("/cases");
 }
@@ -132,80 +73,49 @@ export async function updateCaseField(
   value: string | null,
 ) {
   const user = await requireRole(["admin", "analyst"]);
-  const existing = await loadCaseInOrg(caseId, user.organisationId);
-  if (!existing) throw new Error("Case not found");
-
-  let patch: Partial<typeof cases.$inferInsert> = {};
-  let eventType: "severity_change" | "assignment_change" | "custom" = "custom";
-  let payload: Record<string, unknown> = { field };
-
+  const patch: Parameters<typeof patchCaseCore>[3] = {};
   if (field === "severity") {
-    if (!(SEVERITY_VALUES as readonly string[]).includes(value ?? "")) {
+    if (!(CASE_ENUMS.severity as readonly string[]).includes(value ?? "")) {
       throw new Error("Invalid severity");
     }
-    patch.severity = value as Severity;
-    eventType = "severity_change";
-    payload = { from: existing.severity, to: value };
-  } else if (field === "assigneeId") {
-    patch.assigneeId = value;
-    eventType = "assignment_change";
-    payload = { from: existing.assigneeId, to: value };
+    patch.severity = value as CaseSeverity;
   } else if (field === "tlp") {
-    if (!(TLP_VALUES as readonly string[]).includes(value ?? "")) {
+    if (!(CASE_ENUMS.tlp as readonly string[]).includes(value ?? "")) {
       throw new Error("Invalid TLP");
     }
-    patch.tlp = value as Tlp;
-    payload = { field: "tlp", from: existing.tlp, to: value };
+    patch.tlp = value as CaseTlp;
   } else if (field === "pap") {
-    if (!(PAP_VALUES as readonly string[]).includes(value ?? "")) {
+    if (!(CASE_ENUMS.pap as readonly string[]).includes(value ?? "")) {
       throw new Error("Invalid PAP");
     }
-    patch.pap = value as Pap;
-    payload = { field: "pap", from: existing.pap, to: value };
+    patch.pap = value as CasePap;
   } else if (field === "classification") {
-    if (!(CLASSIFICATION_VALUES as readonly string[]).includes(value ?? "")) {
+    if (!(CASE_ENUMS.classification as readonly string[]).includes(value ?? "")) {
       throw new Error("Invalid classification");
     }
-    patch.classification = value as Classification;
-    payload = { field: "classification", from: existing.classification, to: value };
+    patch.classification = value as CaseClassification;
+  } else if (field === "assigneeId") {
+    patch.assigneeId = value;
   }
-  await db.update(cases).set(patch).where(eq(cases.id, caseId));
-  await writeTimelineEvent({
-    caseId,
-    actorId: user.id,
-    eventType,
-    payload,
-  });
+  await patchCaseCore(user.organisationId, user.id, caseId, patch);
   revalidatePath(`/cases/${caseId}`);
 }
 
 export async function closeCase(formData: FormData) {
   const user = await requireRole(["admin", "analyst"]);
   const caseId = String(formData.get("caseId") ?? "");
-  const reason = String(formData.get("reason") ?? "").trim();
-  const summary = String(formData.get("summary") ?? "").trim();
+  const reason = String(formData.get("reason") ?? "");
+  const summary = String(formData.get("summary") ?? "");
   if (!caseId) throw new Error("caseId required");
-  if (!reason) throw new Error("Closure reason is required");
-  if (!summary) throw new Error("Closure summary is required");
-
-  const existing = await loadCaseInOrg(caseId, user.organisationId);
-  if (!existing) throw new Error("Case not found");
-
-  await db
-    .update(cases)
-    .set({
-      status: "closed",
-      closedAt: new Date(),
-      resolvedAt: existing.resolvedAt ?? new Date(),
-      closureReason: reason,
-      closureSummary: summary,
-    })
-    .where(eq(cases.id, caseId));
-  await writeTimelineEvent({
-    caseId,
-    actorId: user.id,
-    eventType: "status_change",
-    payload: { from: existing.status, to: "closed", reason },
+  await closeCaseCore(user.organisationId, user.id, caseId, reason, summary);
+  await fireWebhook(user.organisationId, "case.status_changed", {
+    case_id: caseId,
+    to: "closed",
+    reason,
+  });
+  await fireWebhook(user.organisationId, "case.closed", {
+    case_id: caseId,
+    reason,
   });
   revalidatePath(`/cases/${caseId}`);
   revalidatePath("/cases");
@@ -216,7 +126,11 @@ export async function updateMitreTechniques(
   techniqueIds: string[],
 ) {
   const user = await requireRole(["admin", "analyst"]);
-  const existing = await loadCaseInOrg(caseId, user.organisationId);
+  const [existing] = await db
+    .select()
+    .from(cases)
+    .where(and(eq(cases.id, caseId), eq(cases.organisationId, user.organisationId)))
+    .limit(1);
   if (!existing) throw new Error("Case not found");
   await db
     .update(cases)

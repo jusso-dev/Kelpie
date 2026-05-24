@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { organisations, users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { newId, slugify } from "@/lib/utils";
+import { seedDefaultSlaPolicies } from "@/actions/sla";
 
 export async function POST(req: Request) {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -43,6 +44,7 @@ export async function POST(req: Request) {
     .update(users)
     .set({ organisationId: orgId, role: "admin" })
     .where(eq(users.id, session.user.id));
+  await seedDefaultSlaPolicies(orgId);
 
   return NextResponse.json({ organisationId: orgId });
 }

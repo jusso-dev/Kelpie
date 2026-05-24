@@ -27,7 +27,9 @@ export default async function CaseObservablesPage({ params }: Props) {
         ) : (
           rows.map((o) => {
             const enrichment = (o.enrichment as Record<string, unknown>) ?? {};
-            const hasEnrichment = Object.keys(enrichment).length > 1;
+            const providerEntries = Object.entries(enrichment).filter(
+              ([k, v]) => k !== "enriched_at" && typeof v === "object" && v !== null,
+            ) as Array<[string, { ok?: boolean; data?: Record<string, unknown>; error?: string; latency_ms?: number; cached?: boolean; at?: string }]>;
             return (
               <div key={o.id} className="kelpie-card p-4">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -46,15 +48,32 @@ export default async function CaseObservablesPage({ params }: Props) {
                 {o.description ? (
                   <p className="text-sm text-slate-300 mt-2">{o.description}</p>
                 ) : null}
-                {hasEnrichment ? (
-                  <details className="mt-3">
-                    <summary className="text-xs text-slate-400 cursor-pointer">
-                      Enrichment
-                    </summary>
-                    <pre className="text-xs bg-[color:var(--color-navy-800)] p-2 mt-1 rounded overflow-auto">
-                      {JSON.stringify(enrichment, null, 2)}
-                    </pre>
-                  </details>
+                {providerEntries.length > 0 ? (
+                  <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {providerEntries.map(([provider, result]) => (
+                      <details
+                        key={provider}
+                        className="border border-[color:var(--color-navy-700)] rounded p-2"
+                      >
+                        <summary className="text-xs cursor-pointer flex items-center justify-between gap-2">
+                          <span className="font-medium text-slate-300">{provider}</span>
+                          <span className="text-slate-500 text-[10px]">
+                            {result.ok === false ? (
+                              <span className="text-red-400">error</span>
+                            ) : result.cached ? (
+                              "cached"
+                            ) : null}
+                            {typeof result.latency_ms === "number"
+                              ? ` ${result.latency_ms}ms`
+                              : null}
+                          </span>
+                        </summary>
+                        <pre className="text-xs bg-[color:var(--color-navy-800)] p-2 mt-1 rounded overflow-auto">
+                          {JSON.stringify(result.data ?? result.error ?? result, null, 2)}
+                        </pre>
+                      </details>
+                    ))}
+                  </div>
                 ) : null}
               </div>
             );

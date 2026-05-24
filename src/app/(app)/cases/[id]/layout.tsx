@@ -67,6 +67,20 @@ export default async function CaseLayout({ children, params }: Props) {
             </span>
           </div>
         </div>
+        <div className="flex items-center gap-2 text-sm">
+          <a
+            href={`/api/cases/${id}/report.md`}
+            className="kelpie-btn kelpie-btn-secondary"
+          >
+            Markdown report
+          </a>
+          <a
+            href={`/api/cases/${id}/report.pdf`}
+            className="kelpie-btn kelpie-btn-secondary"
+          >
+            PDF report
+          </a>
+        </div>
       </div>
 
       <nav className="flex border-b border-[color:var(--color-navy-700)] gap-1 overflow-x-auto">

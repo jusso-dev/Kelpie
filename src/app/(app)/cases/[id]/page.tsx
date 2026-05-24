@@ -13,6 +13,8 @@ import { CaseControls } from "@/components/case-controls";
 import { MITRE_TECHNIQUES, findTechnique } from "@/data/mitre";
 import MitrePicker from "@/components/mitre-picker";
 import PlaybookStarter from "@/components/playbook-starter";
+import SlaPanel from "@/components/sla-panel";
+import { evaluateSla, loadSlaPolicy } from "@/lib/sla";
 import { format } from "date-fns";
 
 type Props = { params: Promise<{ id: string }> };
@@ -54,6 +56,8 @@ export default async function CaseOverviewPage({ params }: Props) {
   ]);
 
   const techniques = (c.mitreTechniques as string[]) ?? [];
+  const slaPolicy = await loadSlaPolicy(user.organisationId, c.severity);
+  const slaEvaluation = slaPolicy ? evaluateSla(c, slaPolicy) : null;
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -148,6 +152,7 @@ export default async function CaseOverviewPage({ params }: Props) {
       </div>
 
       <aside className="space-y-4">
+        <SlaPanel evaluation={slaEvaluation} />
         <CaseControls
           caseId={c.id}
           status={c.status}

@@ -1,30 +1,49 @@
 import { db } from "@/db";
-import { playbooks } from "@/db/schema";
+import { caseTemplates, playbooks } from "@/db/schema";
 import { eq, asc } from "drizzle-orm";
 import { requireUser } from "@/lib/session";
+import { deleteCaseTemplate } from "@/actions/case-templates";
 import Link from "next/link";
 
 export default async function PlaybooksPage() {
   const user = await requireUser();
-  const rows = await db
-    .select()
-    .from(playbooks)
-    .where(eq(playbooks.organisationId, user.organisationId))
-    .orderBy(asc(playbooks.name));
+  const [rows, templates] = await Promise.all([
+    db
+      .select()
+      .from(playbooks)
+      .where(eq(playbooks.organisationId, user.organisationId))
+      .orderBy(asc(playbooks.name)),
+    db
+      .select()
+      .from(caseTemplates)
+      .where(eq(caseTemplates.organisationId, user.organisationId))
+      .orderBy(asc(caseTemplates.name)),
+  ]);
+  const isAdmin = user.role === "admin";
 
   return (
     <div className="space-y-5">
       <header className="flex items-end justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Playbooks</h1>
+          <h1 className="text-2xl font-semibold">Playbooks & templates</h1>
           <p className="text-sm text-slate-400">
-            Define ordered steps with cadence offsets. Apply to a case to spawn
-            its tasks with due times.
+            Playbooks define ordered steps with cadence offsets. Templates
+            prefill a new case in one click.
           </p>
         </div>
-        <Link href="/playbooks/new" className="kelpie-btn kelpie-btn-primary">
-          New playbook
-        </Link>
+        <div className="flex gap-2">
+          {isAdmin ? (
+            <Link
+              href="/playbooks/templates/new"
+              className="kelpie-btn kelpie-btn-secondary"
+            >
+              New template
+            </Link>
+          ) : null}
+          <Link href="/playbooks/new" className="kelpie-btn kelpie-btn-primary">
+            New playbook
+          </Link>
+        </div>
       </header>
 
       <div className="kelpie-card overflow-hidden">
@@ -83,6 +102,70 @@ export default async function PlaybooksPage() {
                       <Link href={`/playbooks/${p.id}`} className="kelpie-link text-sm">
                         Edit →
                       </Link>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="kelpie-card overflow-hidden">
+        <div className="px-4 py-3 border-b border-[color:var(--color-navy-700)]">
+          <h2 className="text-sm font-medium text-slate-300">Case templates</h2>
+        </div>
+        <table className="kelpie-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Classification</th>
+              <th>Default severity</th>
+              <th>TLP</th>
+              <th>Default tasks</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {templates.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="text-center text-slate-500 py-8">
+                  No case templates yet.
+                </td>
+              </tr>
+            ) : (
+              templates.map((t) => {
+                const tasks = Array.isArray(t.defaultTasks)
+                  ? (t.defaultTasks as unknown[])
+                  : [];
+                return (
+                  <tr key={t.id}>
+                    <td className="font-medium">{t.name}</td>
+                    <td className="text-slate-300 text-xs capitalize">
+                      {t.classification.replace(/_/g, " ")}
+                    </td>
+                    <td className="text-slate-300 text-xs">
+                      {t.defaultSeverity}
+                    </td>
+                    <td className="text-slate-300 text-xs">
+                      {t.defaultTlp.replace("_", "+")}
+                    </td>
+                    <td className="tabular-nums text-slate-400">{tasks.length}</td>
+                    <td className="text-right">
+                      {isAdmin ? (
+                        <form
+                          action={async (fd) => {
+                            "use server";
+                            fd.set("id", t.id);
+                            await deleteCaseTemplate(fd);
+                          }}
+                          className="inline"
+                        >
+                          <button className="kelpie-btn kelpie-btn-ghost text-red-400 text-xs">
+                            Delete
+                          </button>
+                        </form>
+                      ) : null}
                     </td>
                   </tr>
                 );

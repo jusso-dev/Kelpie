@@ -1,8 +1,9 @@
 import { db } from "@/db";
-import { cases, alerts, observables } from "@/db/schema";
+import { cases, alerts, observables, slaPolicies } from "@/db/schema";
 import { and, count, eq, sql, gte } from "drizzle-orm";
 import { requireUser } from "@/lib/session";
 import { StatusBadge, SeverityBadge } from "@/components/badges";
+import { evaluateSla } from "@/lib/sla";
 import Link from "next/link";
 
 function minutesBetween(a: Date, b: Date): number {
@@ -21,8 +22,16 @@ export default async function DashboardPage() {
 
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-  const [openCases, casesBySeverity, recentlyClosed, recentOpened, openAlertsRow, recentCases] =
-    await Promise.all([
+  const [
+    openCases,
+    casesBySeverity,
+    recentlyClosed,
+    recentOpened,
+    openAlertsRow,
+    recentCases,
+    openCasesForSla,
+    slaRows,
+  ] = await Promise.all([
       db
         .select({ count: count() })
         .from(cases)
@@ -79,7 +88,66 @@ export default async function DashboardPage() {
         .where(eq(cases.organisationId, user.organisationId))
         .orderBy(sql`${cases.openedAt} desc`)
         .limit(8),
+      db
+        .select()
+        .from(cases)
+        .where(
+          and(
+            eq(cases.organisationId, user.organisationId),
+            sql`${cases.status} <> 'closed'`,
+          ),
+        ),
+      db
+        .select()
+        .from(slaPolicies)
+        .where(eq(slaPolicies.organisationId, user.organisationId)),
     ]);
+
+  const policyBySeverity = new Map(slaRows.map((p) => [p.severity, p]));
+  type SlaState = { breached?: Partial<Record<"acknowledge" | "contain" | "resolve", string>> };
+  const breaching: Array<{
+    id: string;
+    caseNumber: string;
+    title: string;
+    severity: string;
+    gate: "acknowledge" | "contain" | "resolve";
+    minutesOver: number;
+  }> = [];
+  let breachCount = 0;
+  let warningCount = 0;
+  const recentBreachThreshold = thirtyDaysAgo.getTime();
+  let recentBreaches = 0;
+  for (const c of openCasesForSla) {
+    const policy = policyBySeverity.get(c.severity);
+    if (!policy) continue;
+    const evalResult = evaluateSla(c, policy);
+    const state = (c.slaState as SlaState) ?? {};
+    for (const t of evalResult.targets) {
+      if (t.achievedAt) continue;
+      if (t.isBreached) {
+        breachCount++;
+        breaching.push({
+          id: c.id,
+          caseNumber: c.caseNumber,
+          title: c.title,
+          severity: c.severity,
+          gate: t.gate,
+          minutesOver: t.minutesOver,
+        });
+        const breachedAtIso = state.breached?.[t.gate];
+        if (
+          breachedAtIso &&
+          Date.parse(breachedAtIso) >= recentBreachThreshold
+        ) {
+          recentBreaches++;
+        }
+      } else if (t.isWarning) {
+        warningCount++;
+      }
+    }
+  }
+  breaching.sort((a, b) => b.minutesOver - a.minutesOver);
+  const topBreaches = breaching.slice(0, 5);
 
   const ackTimes: number[] = [];
   const containTimes: number[] = [];
@@ -124,11 +192,16 @@ export default async function DashboardPage() {
         </Link>
       </header>
 
-      <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <section className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <Stat label="Open cases" value={openCases[0]?.count ?? 0} />
         <Stat label="New alerts" value={openAlertsRow[0]?.count ?? 0} accent />
         <Stat label="Opened (30d)" value={recentOpened.length} />
         <Stat label="Closed (30d)" value={recentlyClosed.length} />
+        <Stat
+          label="SLA breaches (30d)"
+          value={recentBreaches}
+          accent={recentBreaches > 0}
+        />
       </section>
 
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -160,6 +233,34 @@ export default async function DashboardPage() {
             Acknowledge, contain, resolve — measured from case open.
           </p>
         </div>
+      </section>
+
+      <section className="kelpie-card p-5">
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="text-sm font-medium text-slate-300">SLA breaches (live)</h2>
+          <span className="text-xs text-slate-500">
+            {breachCount} breached · {warningCount} within {15} min
+          </span>
+        </div>
+        {topBreaches.length === 0 ? (
+          <p className="text-sm text-slate-500">No breaches. Stay on top.</p>
+        ) : (
+          <ul className="divide-y divide-[color:var(--color-navy-800)]">
+            {topBreaches.map((b) => (
+              <li key={`${b.id}-${b.gate}`} className="py-2 flex items-center justify-between gap-3 text-sm">
+                <div className="min-w-0 flex items-center gap-2">
+                  <SeverityBadge value={b.severity} />
+                  <Link href={`/cases/${b.id}`} className="kelpie-link truncate">
+                    {b.caseNumber} {b.title}
+                  </Link>
+                </div>
+                <div className="text-xs text-red-400 tabular-nums">
+                  {b.gate} +{b.minutesOver}m
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4">

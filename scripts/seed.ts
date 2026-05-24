@@ -23,6 +23,7 @@ import { eq } from "drizzle-orm";
 import { newId } from "../src/lib/utils";
 import { auth } from "../src/lib/auth";
 import { nextCaseNumber } from "../src/lib/case-number";
+import { seedDefaultSlaPolicies } from "../src/actions/sla";
 
 const ORG_SLUG = "acme-soc";
 
@@ -43,6 +44,7 @@ async function main() {
     name: "Acme SOC",
     slug: ORG_SLUG,
   });
+  await seedDefaultSlaPolicies(orgId);
 
   // Create admin user via BetterAuth so the password is hashed correctly.
   const signUp = await auth.api.signUpEmail({

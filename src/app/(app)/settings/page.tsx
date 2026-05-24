@@ -1,13 +1,15 @@
 import { db } from "@/db";
-import { apiTokens, users } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
-import { format } from "date-fns";
+import { apiTokens, slaPolicies, users, webhooks } from "@/db/schema";
+import { eq, desc, asc } from "drizzle-orm";
 import { requireUser } from "@/lib/session";
 import TokenCreator from "@/components/token-creator";
+import SlaSettings from "@/components/sla-settings";
+import WebhookSettings from "@/components/webhook-settings";
+import TokenList from "@/components/token-list";
 
 export default async function SettingsPage() {
   const user = await requireUser();
-  const [tokens, teamMembers] = await Promise.all([
+  const [tokens, teamMembers, slaRows, webhookRows] = await Promise.all([
     db
       .select()
       .from(apiTokens)
@@ -22,6 +24,16 @@ export default async function SettingsPage() {
       })
       .from(users)
       .where(eq(users.organisationId, user.organisationId)),
+    db
+      .select()
+      .from(slaPolicies)
+      .where(eq(slaPolicies.organisationId, user.organisationId))
+      .orderBy(asc(slaPolicies.severity)),
+    db
+      .select()
+      .from(webhooks)
+      .where(eq(webhooks.organisationId, user.organisationId))
+      .orderBy(desc(webhooks.createdAt)),
   ]);
   const isAdmin = user.role === "admin";
 
@@ -57,48 +69,63 @@ export default async function SettingsPage() {
       </section>
 
       <section className="kelpie-card p-5">
+        <h2 className="text-sm font-medium text-slate-300 mb-3">SLA policies</h2>
+        <p className="text-xs text-slate-500 mb-3">
+          One policy per severity. The breach checker uses these to flag the
+          timeline and email the assignee when a target slips.
+        </p>
+        <SlaSettings
+          policies={slaRows.map((p) => ({
+            id: p.id,
+            name: p.name,
+            severity: p.severity,
+            timeToAcknowledgeMinutes: p.timeToAcknowledgeMinutes,
+            timeToContainMinutes: p.timeToContainMinutes,
+            timeToResolveMinutes: p.timeToResolveMinutes,
+          }))}
+          isAdmin={isAdmin}
+        />
+      </section>
+
+      <section className="kelpie-card p-5">
         <h2 className="text-sm font-medium text-slate-300 mb-3">API tokens</h2>
         {!isAdmin ? (
           <p className="text-xs text-slate-500">Only admins can manage tokens.</p>
         ) : (
           <TokenCreator />
         )}
-        <div className="mt-4">
-          <table className="kelpie-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Scopes</th>
-                <th>Created</th>
-                <th>Last used</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tokens.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="text-center text-slate-500 py-6">
-                    No tokens.
-                  </td>
-                </tr>
-              ) : (
-                tokens.map((t) => (
-                  <tr key={t.id}>
-                    <td>{t.name}</td>
-                    <td className="text-xs text-slate-400 font-mono">
-                      {(t.scopes as string[])?.join(", ") || "(any)"}
-                    </td>
-                    <td className="text-xs text-slate-500">
-                      {format(t.createdAt, "PP")}
-                    </td>
-                    <td className="text-xs text-slate-500">
-                      {t.lastUsedAt ? format(t.lastUsedAt, "PP p") : "Never"}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+        <TokenList
+          tokens={tokens.map((t) => ({
+            id: t.id,
+            name: t.name,
+            scopes: (t.scopes as string[]) ?? [],
+            createdAt: t.createdAt.toISOString(),
+            lastUsedAt: t.lastUsedAt ? t.lastUsedAt.toISOString() : null,
+            lastUsedIp: t.lastUsedIp,
+            expiresAt: t.expiresAt ? t.expiresAt.toISOString() : null,
+            deprecatedAt: t.deprecatedAt ? t.deprecatedAt.toISOString() : null,
+          }))}
+          isAdmin={isAdmin}
+        />
+      </section>
+
+      <section className="kelpie-card p-5">
+        <h2 className="text-sm font-medium text-slate-300 mb-3">Outbound webhooks</h2>
+        <p className="text-xs text-slate-500 mb-3">
+          POST a JSON event to your URL on case and alert activity. Signed with
+          HMAC-SHA256 in the <code>X-Kelpie-Signature</code> header.
+        </p>
+        <WebhookSettings
+          webhooks={webhookRows.map((w) => ({
+            id: w.id,
+            name: w.name,
+            url: w.url,
+            events: (w.events as string[]) ?? [],
+            isActive: w.isActive,
+            createdAt: w.createdAt.toISOString(),
+          }))}
+          isAdmin={isAdmin}
+        />
       </section>
 
       <section className="kelpie-card p-5 text-sm text-slate-300 space-y-2">

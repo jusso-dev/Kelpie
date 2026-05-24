@@ -1,13 +1,66 @@
+import { db } from "@/db";
+import { caseTemplates } from "@/db/schema";
+import { asc, eq } from "drizzle-orm";
+import { requireUser } from "@/lib/session";
 import { createCase } from "@/actions/cases";
+import { applyCaseTemplate } from "@/actions/case-templates";
 
-export default function NewCasePage() {
+export default async function NewCasePage() {
+  const user = await requireUser();
+  const templates = await db
+    .select({
+      id: caseTemplates.id,
+      name: caseTemplates.name,
+      classification: caseTemplates.classification,
+    })
+    .from(caseTemplates)
+    .where(eq(caseTemplates.organisationId, user.organisationId))
+    .orderBy(asc(caseTemplates.name));
+
   return (
-    <div className="max-w-2xl mx-auto">
-      <h1 className="text-2xl font-semibold mb-1">Open a new case</h1>
-      <p className="text-sm text-slate-400 mb-5">
-        A case number is generated automatically per organisation.
-      </p>
+    <div className="max-w-2xl mx-auto space-y-5">
+      <header>
+        <h1 className="text-2xl font-semibold mb-1">Open a new case</h1>
+        <p className="text-sm text-slate-400">
+          A case number is generated automatically per organisation.
+        </p>
+      </header>
+
+      {templates.length > 0 ? (
+        <form action={applyCaseTemplate} className="kelpie-card p-5 space-y-3">
+          <h2 className="text-sm font-medium text-slate-300">
+            Start from a template
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+            <div className="md:col-span-2">
+              <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+                Template
+              </label>
+              <select name="templateId" className="kelpie-input" defaultValue={templates[0].id}>
+                {templates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} — {t.classification.replace(/_/g, " ")}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+                Title override (optional)
+              </label>
+              <input name="title" className="kelpie-input" placeholder="(uses template name)" />
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <button className="kelpie-btn kelpie-btn-primary">
+              Open case from template
+            </button>
+          </div>
+        </form>
+      ) : null}
+
       <form action={createCase} className="kelpie-card p-6 space-y-4">
+        <h2 className="text-sm font-medium text-slate-300">Or fill in by hand</h2>
         <Field label="Title" name="title" required />
         <Field
           label="Summary"
