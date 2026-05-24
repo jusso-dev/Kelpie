@@ -1,0 +1,188 @@
+@import "tailwindcss";
+
+@theme {
+  --color-navy-950: #0a0f1d;
+  --color-navy-900: #0f172a;
+  --color-navy-800: #1a2236;
+  --color-navy-700: #243049;
+  --color-navy-600: #2f3d5c;
+  --color-tan-500: #d4a86a;
+  --color-tan-400: #e2bd84;
+  --color-tan-300: #efd1a3;
+  --color-amber-soc: #f5a524;
+  --color-status-open: #60a5fa;
+  --color-status-progress: #facc15;
+  --color-status-contained: #fb923c;
+  --color-status-eradicated: #c084fc;
+  --color-status-recovered: #4ade80;
+  --color-status-closed: #94a3b8;
+  --color-sev-low: #4ade80;
+  --color-sev-medium: #facc15;
+  --color-sev-high: #fb923c;
+  --color-sev-critical: #f87171;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+html,
+body {
+  background: var(--color-navy-950);
+  color: #e2e8f0;
+  font-family: var(--font-sans);
+  min-height: 100%;
+}
+
+* {
+  border-color: var(--color-navy-700);
+}
+
+:root {
+  color-scheme: dark;
+}
+
+a {
+  color: inherit;
+}
+
+.kelpie-link {
+  color: var(--color-tan-400);
+}
+.kelpie-link:hover {
+  color: var(--color-tan-300);
+  text-decoration: underline;
+}
+
+.kelpie-card {
+  background: var(--color-navy-900);
+  border: 1px solid var(--color-navy-700);
+  border-radius: 0.5rem;
+}
+
+.kelpie-input {
+  background: var(--color-navy-900);
+  border: 1px solid var(--color-navy-700);
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  color: #f1f5f9;
+  width: 100%;
+}
+.kelpie-input:focus {
+  outline: 2px solid var(--color-tan-500);
+  outline-offset: 0;
+}
+
+.kelpie-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.875rem;
+  font-weight: 500;
+  font-size: 0.875rem;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.kelpie-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.kelpie-btn-primary {
+  background: var(--color-tan-500);
+  color: #0a0f1d;
+}
+.kelpie-btn-primary:hover {
+  background: var(--color-tan-400);
+}
+.kelpie-btn-secondary {
+  background: var(--color-navy-800);
+  color: #e2e8f0;
+  border-color: var(--color-navy-700);
+}
+.kelpie-btn-secondary:hover {
+  background: var(--color-navy-700);
+}
+.kelpie-btn-ghost {
+  background: transparent;
+  color: #e2e8f0;
+}
+.kelpie-btn-ghost:hover {
+  background: var(--color-navy-800);
+}
+.kelpie-btn-danger {
+  background: #b91c1c;
+  color: #fff;
+}
+.kelpie-btn-danger:hover {
+  background: #dc2626;
+}
+
+.kelpie-table {
+  width: 100%;
+  text-align: left;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.kelpie-table th {
+  padding: 0.625rem 0.875rem;
+  font-weight: 600;
+  color: #94a3b8;
+  border-bottom: 1px solid var(--color-navy-700);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.7rem;
+}
+.kelpie-table td {
+  padding: 0.75rem 0.875rem;
+  border-bottom: 1px solid var(--color-navy-800);
+}
+.kelpie-table tr:hover td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.kelpie-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  padding: 0.125rem 0.625rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border: 1px solid currentColor;
+}
+
+.prose-markdown {
+  line-height: 1.6;
+}
+.prose-markdown a {
+  color: var(--color-tan-400);
+  text-decoration: underline;
+}
+.prose-markdown code {
+  background: var(--color-navy-800);
+  border-radius: 0.25rem;
+  padding: 0.125rem 0.25rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+}
+.prose-markdown pre {
+  background: var(--color-navy-800);
+  border-radius: 0.375rem;
+  padding: 0.75rem;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+.prose-markdown p {
+  margin: 0.5rem 0;
+}
+.prose-markdown ul,
+.prose-markdown ol {
+  margin: 0.5rem 0 0.5rem 1.25rem;
+}
+.prose-markdown ul {
+  list-style: disc;
+}
+.prose-markdown ol {
+  list-style: decimal;
+}

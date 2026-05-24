@@ -1,0 +1,87 @@
+import { db } from "@/db";
+import { cases } from "@/db/schema";
+import { and, eq } from "drizzle-orm";
+import { notFound } from "next/navigation";
+import Link from "next/link";
+import { requireUser } from "@/lib/session";
+import {
+  SeverityBadge,
+  StatusBadge,
+  TlpBadge,
+} from "@/components/badges";
+
+const tabs = [
+  { key: "overview", label: "Overview", path: "" },
+  { key: "tasks", label: "Tasks", path: "/tasks" },
+  { key: "observables", label: "Observables", path: "/observables" },
+  { key: "timeline", label: "Timeline", path: "/timeline" },
+  { key: "comments", label: "Comments", path: "/comments" },
+  { key: "attachments", label: "Attachments", path: "/attachments" },
+];
+
+type Props = {
+  children: React.ReactNode;
+  params: Promise<{ id: string }>;
+};
+
+export default async function CaseLayout({ children, params }: Props) {
+  const { id } = await params;
+  const user = await requireUser();
+  const [c] = await db
+    .select()
+    .from(cases)
+    .where(
+      and(eq(cases.id, id), eq(cases.organisationId, user.organisationId)),
+    )
+    .limit(1);
+  if (!c) notFound();
+
+  const isStrict = c.tlp === "amber_strict" || c.tlp === "red";
+
+  return (
+    <div className="space-y-4">
+      {isStrict ? (
+        <div className="rounded-md border border-red-700 bg-red-950/40 text-red-200 px-4 py-2 text-sm">
+          <strong className="font-semibold">TLP:{c.tlp.toUpperCase().replace("_", "+")}</strong>
+          {" — restricted distribution. Share only with the named recipients per the TLP definition."}
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <Link href="/cases" className="text-xs text-slate-400 hover:text-slate-200">
+            ← Back to cases
+          </Link>
+          <h1 className="text-2xl font-semibold mt-1">
+            <span className="font-mono text-base text-slate-400 mr-2">
+              {c.caseNumber}
+            </span>
+            {c.title}
+          </h1>
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
+            <StatusBadge value={c.status} />
+            <SeverityBadge value={c.severity} />
+            <TlpBadge value={c.tlp} />
+            <span className="text-xs text-slate-500 capitalize">
+              {c.classification.replace(/_/g, " ")}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <nav className="flex border-b border-[color:var(--color-navy-700)] gap-1 overflow-x-auto">
+        {tabs.map((t) => (
+          <Link
+            key={t.key}
+            href={`/cases/${id}${t.path}`}
+            className="px-4 py-2 text-sm text-slate-300 hover:text-white hover:bg-[color:var(--color-navy-800)] rounded-t"
+          >
+            {t.label}
+          </Link>
+        ))}
+      </nav>
+
+      {children}
+    </div>
+  );
+}
