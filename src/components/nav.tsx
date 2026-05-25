@@ -1,6 +1,6 @@
 import Link from "next/link";
+import Image from "next/image";
 import {
-  Activity,
   Bell,
   BookOpen,
   BriefcaseBusiness,
@@ -34,12 +34,14 @@ export default async function Nav({
       <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 sm:px-6 lg:flex-row lg:items-center lg:gap-6">
         <div className="flex items-center justify-between gap-3">
           <Link href="/dashboard" className="flex min-h-11 items-center gap-2 rounded-sm">
-            <span
-              className="grid h-8 w-8 place-items-center rounded-full bg-[color:var(--color-tan-500)] text-white"
+            <Image
+              src="/brand/kelpie-mark.png"
+              alt=""
+              width={32}
+              height={32}
+              className="h-8 w-8 rounded-full"
               aria-hidden="true"
-            >
-              <Activity size={18} />
-            </span>
+            />
             <span className="font-semibold tracking-tight text-slate-50">
               Kelpie
             </span>

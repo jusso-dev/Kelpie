@@ -1,8 +1,10 @@
 # Kelpie
 
+<img src="public/brand/kelpie-logo.png" alt="Kelpie logo" width="360" />
+
 Incident response and case management for small SOC teams. Open source, self-hosted.
 
-> Herd the incident from alert to closed.
+> Incidents. Managed. Closed.
 
 Kelpie is a SOC case management tool built as a single Next.js application backed by Postgres. It is designed to run cleanly on one modest VM.
 
