@@ -27,7 +27,11 @@ export default function PlaybookStarter({
       }}
       className="space-y-2"
     >
+      <label htmlFor="playbook-starter-select" className="kelpie-sr-only">
+        Playbook
+      </label>
       <select
+        id="playbook-starter-select"
         className="kelpie-input"
         value={selected}
         onChange={(e) => setSelected(e.target.value)}

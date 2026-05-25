@@ -68,8 +68,12 @@ export default async function ObservablesSearchPage({
         </p>
       </header>
 
-      <form className="flex gap-2 items-center">
+      <form className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <label htmlFor="observable-query" className="kelpie-sr-only">
+          Observable value
+        </label>
         <input
+          id="observable-query"
           name="q"
           defaultValue={q}
           placeholder="IP, domain, hash, email..."
@@ -90,8 +94,8 @@ export default async function ObservablesSearchPage({
         <div className="space-y-4">
           {[...grouped.entries()].map(([value, list]) => (
             <div key={value} className="kelpie-card p-4">
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-slate-100">{value}</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="break-all font-mono text-slate-100">{value}</span>
                 <span className="text-xs text-slate-500">
                   ({list.length} case{list.length === 1 ? "" : "s"})
                 </span>
@@ -100,15 +104,15 @@ export default async function ObservablesSearchPage({
                 {list.map((r) => (
                   <li
                     key={r.id}
-                    className="flex items-center gap-3 border-t border-[color:var(--color-navy-800)] py-1.5"
+                    className="flex flex-col gap-1 border-t border-[color:var(--color-navy-800)] py-2 sm:flex-row sm:items-center sm:gap-3"
                   >
-                    <span className="text-xs text-slate-500 uppercase w-24">
+                    <span className="w-24 text-xs uppercase text-slate-500">
                       {r.type.replace(/_/g, " ")}
                     </span>
                     <Link href={`/cases/${r.caseId}`} className="kelpie-link">
                       {r.caseNumber} {r.caseTitle}
                     </Link>
-                    <span className="ml-auto flex items-center gap-2">
+                    <span className="flex items-center gap-2 sm:ml-auto">
                       <TlpBadge value={r.tlp} />
                       {r.isIoc ? (
                         <span className="kelpie-badge text-amber-400">IOC</span>

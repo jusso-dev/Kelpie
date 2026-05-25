@@ -48,24 +48,26 @@ export default async function SettingsPage() {
 
       <section className="kelpie-card p-5">
         <h2 className="text-sm font-medium text-slate-300 mb-3">Team</h2>
-        <table className="kelpie-table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Email</th>
-              <th>Role</th>
-            </tr>
-          </thead>
-          <tbody>
-            {teamMembers.map((u) => (
-              <tr key={u.id}>
-                <td>{u.name}</td>
-                <td className="text-slate-400">{u.email}</td>
-                <td className="text-slate-300">{u.role}</td>
+        <div className="kelpie-scroll-x" tabIndex={0} aria-label="Team members table">
+          <table className="kelpie-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {teamMembers.map((u) => (
+                <tr key={u.id}>
+                  <td>{u.name}</td>
+                  <td className="text-slate-400">{u.email}</td>
+                  <td className="text-slate-300">{u.role}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className="kelpie-card p-5">
@@ -134,7 +136,7 @@ export default async function SettingsPage() {
           POST a JSON alert to the URL below with{" "}
           <code className="text-xs">Authorization: Bearer &lt;token&gt;</code>.
         </p>
-        <pre className="text-xs bg-[color:var(--color-navy-800)] p-3 rounded">
+        <pre className="overflow-x-auto rounded bg-[color:var(--color-navy-800)] p-3 text-xs">
 {`POST /api/v1/alerts
 Content-Type: application/json
 Authorization: Bearer klp_xxxxxxxx

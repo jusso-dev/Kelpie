@@ -32,16 +32,16 @@ export default async function CaseObservablesPage({ params }: Props) {
             ) as Array<[string, { ok?: boolean; data?: Record<string, unknown>; error?: string; latency_ms?: number; cached?: boolean; at?: string }]>;
             return (
               <div key={o.id} className="kelpie-card p-4">
-                <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="text-xs uppercase tracking-wider text-slate-500">
                     {o.type.replace(/_/g, " ")}
                   </span>
-                  <span className="font-mono text-slate-100">{o.value}</span>
+                  <span className="break-all font-mono text-slate-100">{o.value}</span>
                   <TlpBadge value={o.tlp} />
                   {o.isIoc ? (
                     <span className="kelpie-badge text-amber-400">IOC</span>
                   ) : null}
-                  <span className="text-xs text-slate-500 ml-auto">
+                  <span className="text-xs text-slate-500 sm:ml-auto">
                     {format(o.createdAt, "PP p")}
                   </span>
                 </div>
@@ -85,10 +85,13 @@ export default async function CaseObservablesPage({ params }: Props) {
           <input type="hidden" name="caseId" value={id} />
           <h2 className="text-sm font-medium text-slate-300">Add observable</h2>
           <div>
-            <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+            <label
+              htmlFor="observable-type"
+              className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+            >
               Type
             </label>
-            <select name="type" className="kelpie-input" defaultValue="ip">
+            <select id="observable-type" name="type" className="kelpie-input" defaultValue="ip">
               {[
                 "ip",
                 "domain",
@@ -107,16 +110,22 @@ export default async function CaseObservablesPage({ params }: Props) {
             </select>
           </div>
           <div>
-            <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+            <label
+              htmlFor="observable-value"
+              className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+            >
               Value
             </label>
-            <input name="value" className="kelpie-input font-mono" required />
+            <input id="observable-value" name="value" className="kelpie-input font-mono" required />
           </div>
           <div>
-            <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+            <label
+              htmlFor="observable-tlp"
+              className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+            >
               TLP
             </label>
-            <select name="tlp" className="kelpie-input" defaultValue="amber">
+            <select id="observable-tlp" name="tlp" className="kelpie-input" defaultValue="amber">
               {["clear", "green", "amber", "amber_strict", "red"].map((t) => (
                 <option key={t} value={t}>
                   {t.replace("_", "+")}
@@ -125,13 +134,16 @@ export default async function CaseObservablesPage({ params }: Props) {
             </select>
           </div>
           <div>
-            <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+            <label
+              htmlFor="observable-description"
+              className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+            >
               Description
             </label>
-            <textarea name="description" className="kelpie-input" rows={2} />
+            <textarea id="observable-description" name="description" className="kelpie-input" rows={2} />
           </div>
           <label className="text-xs text-slate-400 flex items-center gap-2">
-            <input type="checkbox" name="isIoc" />
+            <input type="checkbox" name="isIoc" className="kelpie-checkbox" />
             Mark as IOC
           </label>
           <button className="kelpie-btn kelpie-btn-primary w-full justify-center">

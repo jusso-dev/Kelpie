@@ -56,6 +56,7 @@ export default function WebhookSettings({
 
   return (
     <div className="space-y-3">
+      <div className="kelpie-scroll-x" tabIndex={0} aria-label="Webhooks table">
       <table className="kelpie-table">
         <thead>
           <tr>
@@ -121,6 +122,7 @@ export default function WebhookSettings({
           )}
         </tbody>
       </table>
+      </div>
       {issuedSecret ? (
         <div className="rounded border border-[color:var(--color-tan-500)] bg-[color:var(--color-navy-800)] p-3 text-sm">
           <p className="text-slate-200 mb-1">
@@ -140,10 +142,14 @@ export default function WebhookSettings({
           <form onSubmit={onCreate} className="kelpie-card p-4 space-y-3">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               <div>
-                <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+                <label
+                  htmlFor="webhook-name"
+                  className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+                >
                   Name
                 </label>
                 <input
+                  id="webhook-name"
                   className="kelpie-input"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
@@ -151,10 +157,14 @@ export default function WebhookSettings({
                 />
               </div>
               <div>
-                <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+                <label
+                  htmlFor="webhook-url"
+                  className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+                >
                   URL
                 </label>
                 <input
+                  id="webhook-url"
                   className="kelpie-input"
                   type="url"
                   value={url}
@@ -173,6 +183,7 @@ export default function WebhookSettings({
                   <label key={e} className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
+                      className="kelpie-checkbox"
                       checked={events.includes(e)}
                       onChange={() => toggleEvent(e)}
                     />

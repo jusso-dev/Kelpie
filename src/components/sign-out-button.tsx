@@ -7,6 +7,7 @@ export default function SignOutButton() {
   const router = useRouter();
   return (
     <button
+      type="button"
       className="kelpie-btn kelpie-btn-ghost text-slate-300"
       onClick={async () => {
         await signOut();

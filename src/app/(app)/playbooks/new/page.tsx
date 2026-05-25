@@ -12,22 +12,31 @@ export default function NewPlaybookPage() {
       </p>
       <form action={createPlaybook} className="kelpie-card p-6 space-y-4">
         <div>
-          <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+          <label
+            htmlFor="playbook-name"
+            className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+          >
             Name
           </label>
-          <input name="name" className="kelpie-input" required />
+          <input id="playbook-name" name="name" className="kelpie-input" required />
         </div>
         <div>
-          <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+          <label
+            htmlFor="playbook-description"
+            className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+          >
             Description
           </label>
-          <textarea name="description" className="kelpie-input" rows={3} />
+          <textarea id="playbook-description" name="description" className="kelpie-input" rows={3} />
         </div>
         <div>
-          <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+          <label
+            htmlFor="playbook-classification"
+            className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+          >
             Classification
           </label>
-          <select name="classification" className="kelpie-input" defaultValue="other">
+          <select id="playbook-classification" name="classification" className="kelpie-input" defaultValue="other">
             {[
               "malware",
               "phishing",

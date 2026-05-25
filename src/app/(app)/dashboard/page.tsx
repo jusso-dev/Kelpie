@@ -180,7 +180,7 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex items-end justify-between">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Dashboard</h1>
           <p className="text-sm text-slate-400">
@@ -192,7 +192,7 @@ export default async function DashboardPage() {
         </Link>
       </header>
 
-      <section className="grid grid-cols-1 md:grid-cols-5 gap-4">
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <Stat label="Open cases" value={openCases[0]?.count ?? 0} />
         <Stat label="New alerts" value={openAlertsRow[0]?.count ?? 0} accent />
         <Stat label="Opened (30d)" value={recentOpened.length} />
@@ -204,7 +204,7 @@ export default async function DashboardPage() {
         />
       </section>
 
-      <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="kelpie-card p-5">
           <h2 className="text-sm font-medium text-slate-300 mb-3">
             Open cases by severity
@@ -224,7 +224,7 @@ export default async function DashboardPage() {
           <h2 className="text-sm font-medium text-slate-300 mb-3">
             Response timeliness (30 days, closed cases)
           </h2>
-          <div className="grid grid-cols-3 gap-3 text-center">
+          <div className="grid grid-cols-1 gap-3 text-center sm:grid-cols-3">
             <Metric label="MTTA" value={formatMinutes(mean(ackTimes))} />
             <Metric label="MTTC" value={formatMinutes(mean(containTimes))} />
             <Metric label="MTTR" value={formatMinutes(mean(resolveTimes))} />
@@ -236,7 +236,7 @@ export default async function DashboardPage() {
       </section>
 
       <section className="kelpie-card p-5">
-        <div className="flex items-baseline justify-between mb-3">
+        <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
           <h2 className="text-sm font-medium text-slate-300">SLA breaches (live)</h2>
           <span className="text-xs text-slate-500">
             {breachCount} breached · {warningCount} within {15} min
@@ -247,7 +247,7 @@ export default async function DashboardPage() {
         ) : (
           <ul className="divide-y divide-[color:var(--color-navy-800)]">
             {topBreaches.map((b) => (
-              <li key={`${b.id}-${b.gate}`} className="py-2 flex items-center justify-between gap-3 text-sm">
+              <li key={`${b.id}-${b.gate}`} className="flex flex-col gap-1 py-2 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                 <div className="min-w-0 flex items-center gap-2">
                   <SeverityBadge value={b.severity} />
                   <Link href={`/cases/${b.id}`} className="kelpie-link truncate">
@@ -263,7 +263,7 @@ export default async function DashboardPage() {
         )}
       </section>
 
-      <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="kelpie-card p-5">
           <h2 className="text-sm font-medium text-slate-300 mb-3">
             Top classifications (30 days)
@@ -292,7 +292,7 @@ export default async function DashboardPage() {
           ) : (
             <ul className="divide-y divide-[color:var(--color-navy-800)]">
               {recentCases.map((c) => (
-                <li key={c.id} className="py-2 flex items-center justify-between gap-3">
+                <li key={c.id} className="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                   <div className="min-w-0">
                     <Link
                       href={`/cases/${c.id}`}
@@ -301,7 +301,7 @@ export default async function DashboardPage() {
                       {c.caseNumber} {c.title}
                     </Link>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <SeverityBadge value={c.severity} />
                     <StatusBadge value={c.status} />
                   </div>

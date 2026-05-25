@@ -34,7 +34,7 @@ export default async function AlertsPage({
 
   return (
     <div className="space-y-5">
-      <header className="flex items-end justify-between">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Alerts</h1>
           <p className="text-sm text-slate-400">
@@ -48,7 +48,7 @@ export default async function AlertsPage({
 
       <FilterBar current={params} />
 
-      <div className="kelpie-card overflow-hidden">
+      <div className="kelpie-card kelpie-scroll-x" tabIndex={0} aria-label="Alerts table">
         <table className="kelpie-table">
           <thead>
             <tr>
@@ -135,7 +135,7 @@ function FilterBar({
     return qs ? `?${qs}` : "";
   }
   return (
-    <div className="flex flex-wrap gap-2 text-xs items-center">
+    <div className="flex flex-wrap gap-2 text-xs items-center" aria-label="Alert filters">
       <span className="text-slate-500 mr-1">Status:</span>
       <FilterChip label="any" href={`/alerts${buildQuery({ status: undefined })}`} active={!current.status} />
       {statuses.map((s) => (
@@ -173,7 +173,7 @@ function FilterChip({
     <Link
       href={href}
       className={
-        "px-2.5 py-1 rounded border " +
+        "kelpie-chip " +
         (active
           ? "border-[color:var(--color-tan-500)] text-[color:var(--color-tan-300)] bg-[color:var(--color-navy-800)]"
           : "border-[color:var(--color-navy-700)] text-slate-400 hover:text-slate-200")

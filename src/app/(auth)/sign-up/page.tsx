@@ -44,10 +44,14 @@ export default function SignUpPage() {
       <h2 className="text-lg font-medium mb-4">Create account</h2>
       <form onSubmit={onSubmit} className="space-y-4">
         <div>
-          <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+          <label
+            htmlFor="sign-up-name"
+            className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+          >
             Your name
           </label>
           <input
+            id="sign-up-name"
             className="kelpie-input"
             required
             value={name}
@@ -56,10 +60,14 @@ export default function SignUpPage() {
           />
         </div>
         <div>
-          <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+          <label
+            htmlFor="sign-up-organisation"
+            className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+          >
             Organisation name
           </label>
           <input
+            id="sign-up-organisation"
             className="kelpie-input"
             required
             value={organisationName}
@@ -68,10 +76,14 @@ export default function SignUpPage() {
           />
         </div>
         <div>
-          <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+          <label
+            htmlFor="sign-up-email"
+            className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+          >
             Email
           </label>
           <input
+            id="sign-up-email"
             className="kelpie-input"
             type="email"
             required
@@ -81,10 +93,14 @@ export default function SignUpPage() {
           />
         </div>
         <div>
-          <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+          <label
+            htmlFor="sign-up-password"
+            className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+          >
             Password
           </label>
           <input
+            id="sign-up-password"
             className="kelpie-input"
             type="password"
             required
@@ -94,11 +110,16 @@ export default function SignUpPage() {
             autoComplete="new-password"
           />
         </div>
-        {error ? <p className="text-sm text-red-400">{error}</p> : null}
+        {error ? (
+          <p id="sign-up-error" className="text-sm text-red-400" role="alert">
+            {error}
+          </p>
+        ) : null}
         <button
           type="submit"
           className="kelpie-btn kelpie-btn-primary w-full justify-center"
           disabled={pending}
+          aria-describedby={error ? "sign-up-error" : undefined}
         >
           {pending ? "Creating..." : "Create account"}
         </button>

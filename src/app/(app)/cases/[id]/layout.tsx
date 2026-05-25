@@ -67,7 +67,7 @@ export default async function CaseLayout({ children, params }: Props) {
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-2 text-sm">
+        <div className="flex w-full flex-col gap-2 text-sm sm:w-auto sm:flex-row sm:items-center">
           <a
             href={`/api/cases/${id}/report.md`}
             className="kelpie-btn kelpie-btn-secondary"
@@ -83,12 +83,15 @@ export default async function CaseLayout({ children, params }: Props) {
         </div>
       </div>
 
-      <nav className="flex border-b border-[color:var(--color-navy-700)] gap-1 overflow-x-auto">
+      <nav
+        className="kelpie-scroll-x flex gap-1 border-b border-[color:var(--color-navy-700)]"
+        aria-label="Case sections"
+      >
         {tabs.map((t) => (
           <Link
             key={t.key}
             href={`/cases/${id}${t.path}`}
-            className="px-4 py-2 text-sm text-slate-300 hover:text-white hover:bg-[color:var(--color-navy-800)] rounded-t"
+            className="flex min-h-11 shrink-0 items-center rounded-t px-4 py-2 text-sm text-slate-300 hover:bg-[color:var(--color-navy-800)] hover:text-slate-100"
           >
             {t.label}
           </Link>

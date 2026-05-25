@@ -55,6 +55,7 @@ export default function PlaybookStepsEditor({
             <div className="flex items-center gap-2">
               <span className="text-xs text-slate-500 font-mono w-6">{i + 1}</span>
               <input
+                aria-label={`Step ${i + 1} title`}
                 className="kelpie-input"
                 placeholder="Step title"
                 value={s.title}
@@ -69,15 +70,19 @@ export default function PlaybookStepsEditor({
               </button>
             </div>
             <textarea
+              aria-label={`Step ${i + 1} description`}
               className="kelpie-input"
               rows={2}
               placeholder="Description (optional)"
               value={s.description}
               onChange={(e) => update(i, { description: e.target.value })}
             />
-            <div className="flex gap-3 items-center">
-              <label className="text-xs text-slate-400">Due (minutes after start)</label>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+              <label htmlFor={`step-offset-${i}`} className="text-xs text-slate-400">
+                Due (minutes after start)
+              </label>
               <input
+                id={`step-offset-${i}`}
                 type="number"
                 min={0}
                 className="kelpie-input max-w-[8rem]"
@@ -89,6 +94,7 @@ export default function PlaybookStepsEditor({
               <label className="text-xs text-slate-400 inline-flex items-center gap-1">
                 <input
                   type="checkbox"
+                  className="kelpie-checkbox"
                   checked={s.isRequired}
                   onChange={(e) => update(i, { isRequired: e.target.checked })}
                 />

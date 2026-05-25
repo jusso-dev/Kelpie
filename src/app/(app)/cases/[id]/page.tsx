@@ -121,10 +121,13 @@ export default async function CaseOverviewPage({ params }: Props) {
             <input type="hidden" name="caseId" value={c.id} />
             <h2 className="text-sm font-medium text-slate-300">Close this case</h2>
             <div>
-              <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+              <label
+                htmlFor="closure-reason"
+                className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+              >
                 Closure reason
               </label>
-              <select name="reason" className="kelpie-input" required>
+              <select id="closure-reason" name="reason" className="kelpie-input" required>
                 <option value="resolved">Resolved</option>
                 <option value="false_positive">False positive</option>
                 <option value="duplicate">Duplicate</option>
@@ -133,10 +136,14 @@ export default async function CaseOverviewPage({ params }: Props) {
               </select>
             </div>
             <div>
-              <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+              <label
+                htmlFor="closure-summary"
+                className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+              >
                 Summary for the record
               </label>
               <textarea
+                id="closure-summary"
                 name="summary"
                 className="kelpie-input"
                 rows={4}

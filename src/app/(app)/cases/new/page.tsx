@@ -33,10 +33,13 @@ export default async function NewCasePage() {
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
             <div className="md:col-span-2">
-              <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+              <label
+                htmlFor="template-id"
+                className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+              >
                 Template
               </label>
-              <select name="templateId" className="kelpie-input" defaultValue={templates[0].id}>
+              <select id="template-id" name="templateId" className="kelpie-input" defaultValue={templates[0].id}>
                 {templates.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.name} — {t.classification.replace(/_/g, " ")}
@@ -45,10 +48,13 @@ export default async function NewCasePage() {
               </select>
             </div>
             <div>
-              <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+              <label
+                htmlFor="template-title"
+                className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+              >
                 Title override (optional)
               </label>
-              <input name="title" className="kelpie-input" placeholder="(uses template name)" />
+              <input id="template-title" name="title" className="kelpie-input" placeholder="(uses template name)" />
             </div>
           </div>
           <div className="flex justify-end">
@@ -128,13 +134,16 @@ function Field({
 }) {
   return (
     <div>
-      <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+      <label
+        htmlFor={`case-${name}`}
+        className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+      >
         {label}
       </label>
       {as === "textarea" ? (
-        <textarea name={name} className="kelpie-input" rows={rows ?? 3} required={required} />
+        <textarea id={`case-${name}`} name={name} className="kelpie-input" rows={rows ?? 3} required={required} />
       ) : (
-        <input name={name} className="kelpie-input" required={required} />
+        <input id={`case-${name}`} name={name} className="kelpie-input" required={required} />
       )}
       {help ? <p className="text-xs text-slate-500 mt-1">{help}</p> : null}
     </div>
@@ -154,10 +163,13 @@ function Select({
 }) {
   return (
     <div>
-      <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+      <label
+        htmlFor={`case-${name}`}
+        className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+      >
         {label}
       </label>
-      <select name={name} className="kelpie-input" defaultValue={defaultValue}>
+      <select id={`case-${name}`} name={name} className="kelpie-input" defaultValue={defaultValue}>
         {options.map((o) => (
           <option key={o} value={o}>
             {o.replace(/_/g, " ")}

@@ -23,10 +23,13 @@ export default async function NewTemplatePage() {
       </p>
       <form action={createCaseTemplate} className="kelpie-card p-6 space-y-4">
         <div>
-          <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+          <label
+            htmlFor="template-name"
+            className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+          >
             Name
           </label>
-          <input name="name" className="kelpie-input" required />
+          <input id="template-name" name="name" className="kelpie-input" required />
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Select
@@ -56,10 +59,13 @@ export default async function NewTemplatePage() {
             defaultValue="amber"
           />
           <div>
-            <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+            <label
+              htmlFor="template-default-playbook"
+              className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+            >
               Default playbook (optional)
             </label>
-            <select name="defaultPlaybookId" className="kelpie-input" defaultValue="">
+            <select id="template-default-playbook" name="defaultPlaybookId" className="kelpie-input" defaultValue="">
               <option value="">None</option>
               {playbookOptions.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -70,10 +76,14 @@ export default async function NewTemplatePage() {
           </div>
         </div>
         <div>
-          <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+          <label
+            htmlFor="template-summary"
+            className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+          >
             Summary template (markdown)
           </label>
           <textarea
+            id="template-summary"
             name="summaryTemplate"
             className="kelpie-input"
             rows={5}
@@ -102,10 +112,13 @@ function Select({
 }) {
   return (
     <div>
-      <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+      <label
+        htmlFor={`template-${name}`}
+        className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+      >
         {label}
       </label>
-      <select name={name} className="kelpie-input" defaultValue={defaultValue}>
+      <select id={`template-${name}`} name={name} className="kelpie-input" defaultValue={defaultValue}>
         {options.map((o) => (
           <option key={o} value={o}>
             {o.replace(/_/g, " ")}

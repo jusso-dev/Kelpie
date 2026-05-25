@@ -29,8 +29,9 @@ export default function TemplateTasksEditor() {
             key={i}
             className="border border-[color:var(--color-navy-700)] rounded p-2 space-y-1"
           >
-            <div className="flex gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row">
               <input
+                aria-label={`Default task ${i + 1} title`}
                 className="kelpie-input"
                 value={t.title}
                 onChange={(e) => update(i, { title: e.target.value })}
@@ -45,6 +46,7 @@ export default function TemplateTasksEditor() {
               </button>
             </div>
             <textarea
+              aria-label={`Default task ${i + 1} description`}
               className="kelpie-input"
               rows={2}
               value={t.description}

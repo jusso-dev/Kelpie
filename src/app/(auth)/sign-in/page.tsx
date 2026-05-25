@@ -35,10 +35,14 @@ export default function SignInPage() {
       <h2 className="text-lg font-medium mb-4">Sign in</h2>
       <form onSubmit={onSubmit} className="space-y-4">
         <div>
-          <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+          <label
+            htmlFor="sign-in-email"
+            className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+          >
             Email
           </label>
           <input
+            id="sign-in-email"
             className="kelpie-input"
             type="email"
             required
@@ -48,10 +52,14 @@ export default function SignInPage() {
           />
         </div>
         <div>
-          <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+          <label
+            htmlFor="sign-in-password"
+            className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+          >
             Password
           </label>
           <input
+            id="sign-in-password"
             className="kelpie-input"
             type="password"
             required
@@ -61,12 +69,15 @@ export default function SignInPage() {
           />
         </div>
         {error ? (
-          <p className="text-sm text-red-400">{error}</p>
+          <p id="sign-in-error" className="text-sm text-red-400" role="alert">
+            {error}
+          </p>
         ) : null}
         <button
           type="submit"
           className="kelpie-btn kelpie-btn-primary w-full justify-center"
           disabled={pending}
+          aria-describedby={error ? "sign-in-error" : undefined}
         >
           {pending ? "Signing in..." : "Sign in"}
         </button>

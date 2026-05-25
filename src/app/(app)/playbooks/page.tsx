@@ -23,7 +23,7 @@ export default async function PlaybooksPage() {
 
   return (
     <div className="space-y-5">
-      <header className="flex items-end justify-between">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Playbooks & templates</h1>
           <p className="text-sm text-slate-400">
@@ -31,7 +31,7 @@ export default async function PlaybooksPage() {
             prefill a new case in one click.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
           {isAdmin ? (
             <Link
               href="/playbooks/templates/new"
@@ -46,7 +46,7 @@ export default async function PlaybooksPage() {
         </div>
       </header>
 
-      <div className="kelpie-card overflow-hidden">
+      <div className="kelpie-card kelpie-scroll-x" tabIndex={0} aria-label="Playbooks table">
         <table className="kelpie-table">
           <thead>
             <tr>
@@ -111,7 +111,7 @@ export default async function PlaybooksPage() {
         </table>
       </div>
 
-      <div className="kelpie-card overflow-hidden">
+      <div className="kelpie-card kelpie-scroll-x" tabIndex={0} aria-label="Case templates table">
         <div className="px-4 py-3 border-b border-[color:var(--color-navy-700)]">
           <h2 className="text-sm font-medium text-slate-300">Case templates</h2>
         </div>

@@ -51,7 +51,7 @@ export default async function CasesPage({
 
   return (
     <div className="space-y-5">
-      <header className="flex items-end justify-between">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Cases</h1>
           <p className="text-sm text-slate-400">
@@ -65,7 +65,7 @@ export default async function CasesPage({
 
       <FilterBar current={params} />
 
-      <div className="kelpie-card overflow-hidden">
+      <div className="kelpie-card kelpie-scroll-x" tabIndex={0} aria-label="Cases table">
         <table className="kelpie-table">
           <thead>
             <tr>
@@ -140,8 +140,8 @@ function FilterBar({
   const statuses = ["open", "in_progress", "contained", "eradicated", "recovered", "closed"];
   const severities = ["low", "medium", "high", "critical"];
   return (
-    <div className="flex flex-wrap gap-2 text-xs items-center">
-      <span className="text-slate-500 mr-1">Status:</span>
+    <div className="flex flex-wrap gap-2 text-xs items-center" aria-label="Case filters">
+      <span className="mr-1 text-slate-500">Status:</span>
       <Chip label="any" href={`/cases${build({ status: undefined })}`} active={!current.status} />
       {statuses.map((s) => (
         <Chip
@@ -151,7 +151,7 @@ function FilterBar({
           active={current.status === s}
         />
       ))}
-      <span className="text-slate-500 ml-3 mr-1">Severity:</span>
+      <span className="ml-3 mr-1 text-slate-500">Severity:</span>
       <Chip label="any" href={`/cases${build({ severity: undefined })}`} active={!current.severity} />
       {severities.map((s) => (
         <Chip
@@ -170,7 +170,7 @@ function Chip({ label, href, active }: { label: string; href: string; active: bo
     <Link
       href={href}
       className={
-        "px-2.5 py-1 rounded border " +
+        "kelpie-chip " +
         (active
           ? "border-[color:var(--color-tan-500)] text-[color:var(--color-tan-300)] bg-[color:var(--color-navy-800)]"
           : "border-[color:var(--color-navy-700)] text-slate-400 hover:text-slate-200")

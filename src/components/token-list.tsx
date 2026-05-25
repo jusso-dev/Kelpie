@@ -50,6 +50,7 @@ export default function TokenList({
           </code>
         </div>
       ) : null}
+      <div className="kelpie-scroll-x" tabIndex={0} aria-label="API tokens table">
       <table className="kelpie-table">
         <thead>
           <tr>
@@ -141,6 +142,7 @@ export default function TokenList({
           )}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

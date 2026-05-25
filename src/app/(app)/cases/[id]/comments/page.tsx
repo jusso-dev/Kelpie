@@ -2,9 +2,9 @@ import { db } from "@/db";
 import { comments, users } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { format } from "date-fns";
-import { marked } from "marked";
 import { requireUser } from "@/lib/session";
 import { postComment } from "@/actions/comments";
+import { renderSafeMarkdown } from "@/lib/markdown";
 
 type Props = { params: Promise<{ id: string }> };
 
@@ -49,7 +49,7 @@ export default async function CaseCommentsPage({ params }: Props) {
               <div
                 className="prose-markdown text-sm text-slate-100"
                 dangerouslySetInnerHTML={{
-                  __html: marked.parse(c.body, { async: false }) as string,
+                  __html: renderSafeMarkdown(c.body),
                 }}
               />
             </div>
@@ -60,7 +60,14 @@ export default async function CaseCommentsPage({ params }: Props) {
         <form action={postComment} className="kelpie-card p-5 space-y-3">
           <input type="hidden" name="caseId" value={id} />
           <h2 className="text-sm font-medium text-slate-300">Post a comment</h2>
+          <label
+            htmlFor="comment-body"
+            className="block text-xs uppercase tracking-wider text-slate-400"
+          >
+            Comment
+          </label>
           <textarea
+            id="comment-body"
             name="body"
             className="kelpie-input"
             rows={6}

@@ -33,7 +33,7 @@ export default async function CaseAttachmentsPage({ params }: Props) {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-      <div className="md:col-span-2 kelpie-card overflow-hidden">
+      <div className="kelpie-card kelpie-scroll-x md:col-span-2" tabIndex={0} aria-label="Attachments table">
         <table className="kelpie-table">
           <thead>
             <tr>
@@ -82,7 +82,11 @@ export default async function CaseAttachmentsPage({ params }: Props) {
         <form action={uploadAttachment} className="kelpie-card p-5 space-y-3">
           <input type="hidden" name="caseId" value={id} />
           <h2 className="text-sm font-medium text-slate-300">Upload a file</h2>
+          <label htmlFor="attachment-file" className="kelpie-sr-only">
+            File
+          </label>
           <input
+            id="attachment-file"
             name="file"
             type="file"
             required

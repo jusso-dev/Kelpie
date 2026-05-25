@@ -43,8 +43,8 @@ export default function TaskRow({ task }: { task: Task }) {
 
   return (
     <div className="kelpie-card p-4">
-      <div className="flex items-start gap-3">
-        <div className="flex-1">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-medium text-slate-100">{task.title}</span>
             <TaskStatusBadge value={task.status} />
@@ -69,7 +69,7 @@ export default function TaskRow({ task }: { task: Task }) {
               {task.description}
             </p>
           ) : null}
-          <div className="flex gap-4 text-xs text-slate-500 mt-2">
+          <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500 sm:gap-4">
             {task.dueAt ? (
               <span>
                 Due {format(task.dueAt, "PP p")} (
@@ -87,7 +87,8 @@ export default function TaskRow({ task }: { task: Task }) {
           </div>
         </div>
         <select
-          className="kelpie-input max-w-[10rem]"
+          className="kelpie-input w-full sm:max-w-[10rem]"
+          aria-label={`Status for task ${task.title}`}
           value={task.status}
           disabled={pending}
           onChange={(e) => change(e.target.value)}

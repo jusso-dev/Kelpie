@@ -41,6 +41,7 @@ export default function SlaSettings({
 
   return (
     <div className="space-y-3">
+      <div className="kelpie-scroll-x" tabIndex={0} aria-label="SLA policies table">
       <table className="kelpie-table">
         <thead>
           <tr>
@@ -158,6 +159,7 @@ export default function SlaSettings({
           ) : null}
         </tbody>
       </table>
+      </div>
       {isAdmin && availableSeverities.length > 0 ? (
         adding ? (
           <form

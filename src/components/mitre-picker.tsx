@@ -57,7 +57,11 @@ export default function MitrePicker({
 
   return (
     <div className="space-y-2">
+      <label htmlFor="mitre-search" className="kelpie-sr-only">
+        Search MITRE techniques
+      </label>
       <input
+        id="mitre-search"
         className="kelpie-input"
         placeholder="Search by ID, name, or tactic..."
         value={query}
@@ -69,10 +73,11 @@ export default function MitrePicker({
           return (
             <label
               key={t.id}
-              className="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-[color:var(--color-navy-800)] cursor-pointer"
+              className="flex min-h-11 cursor-pointer items-center gap-2 px-3 py-2 text-sm hover:bg-[color:var(--color-navy-800)]"
             >
               <input
                 type="checkbox"
+                className="kelpie-checkbox"
                 checked={checked}
                 onChange={() => toggle(t.id)}
               />

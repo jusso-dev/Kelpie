@@ -2,7 +2,9 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 
-const localDir = process.env.STORAGE_LOCAL_DIR ?? "./uploads";
+const localDir = process.env.STORAGE_LOCAL_DIR
+  ? path.resolve(process.env.STORAGE_LOCAL_DIR)
+  : path.join(process.cwd(), "uploads");
 
 export type StoredFile = {
   key: string;
@@ -22,12 +24,22 @@ export async function putFile(
     sha256.slice(0, 2),
     `${sha256}-${safeName}`,
   );
-  const absDir = path.join(localDir, path.dirname(key));
+  const absPath = resolveStoragePath(key);
+  const absDir = path.dirname(absPath);
   await fs.mkdir(absDir, { recursive: true });
-  await fs.writeFile(path.join(localDir, key), buffer);
+  await fs.writeFile(absPath, buffer);
   return { key, sha256, sizeBytes: buffer.length };
 }
 
 export async function readFile(key: string): Promise<Buffer> {
-  return fs.readFile(path.join(localDir, key));
+  return fs.readFile(resolveStoragePath(key));
+}
+
+function resolveStoragePath(key: string): string {
+  const absPath = path.resolve(localDir, key);
+  const relative = path.relative(localDir, absPath);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("Invalid storage key");
+  }
+  return absPath;
 }
