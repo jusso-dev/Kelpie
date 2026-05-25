@@ -11,10 +11,15 @@ import { and, desc, eq } from "drizzle-orm";
 import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
 import {
   CASE_ENUMS,
+  CaseVersionConflictError,
   patchCaseCore,
   setCaseStatusCore,
 } from "@/lib/cases-core";
 import { fireWebhook } from "@/lib/webhooks";
+import {
+  customFieldsRecord,
+  setCustomFieldsByKey,
+} from "@/lib/custom-fields";
 
 const patchSchema = z.object({
   status: z.enum(CASE_ENUMS.status).optional(),
@@ -27,6 +32,8 @@ const patchSchema = z.object({
   summary: z.string().optional(),
   tags: z.array(z.string()).optional(),
   dataClassificationTags: z.array(z.string()).optional(),
+  version: z.number().int().optional(),
+  custom_fields: z.record(z.string(), z.unknown()).optional(),
 });
 
 export async function GET(
@@ -47,7 +54,7 @@ export async function GET(
     .limit(1);
   if (!c) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const [obs, tasks, timeline] = await Promise.all([
+  const [obs, tasks, timeline, customFields] = await Promise.all([
     db.select().from(observables).where(eq(observables.caseId, id)),
     db.select().from(caseTasks).where(eq(caseTasks.caseId, id)),
     db
@@ -56,6 +63,7 @@ export async function GET(
       .where(eq(timelineEvents.caseId, id))
       .orderBy(desc(timelineEvents.occurredAt))
       .limit(50),
+    customFieldsRecord(auth.token.organisationId, id),
   ]);
 
   return NextResponse.json({
@@ -63,6 +71,7 @@ export async function GET(
     observables: obs,
     tasks,
     recent_timeline: timeline,
+    custom_fields: customFields,
   });
 }
 
@@ -99,9 +108,41 @@ export async function PATCH(
       await fireWebhook(auth.token.organisationId, "case.closed", { case_id: id });
     }
   }
-  const { status, ...patch } = parsed.data;
+  const { status, version, custom_fields, ...patch } = parsed.data;
   if (Object.keys(patch).length > 0) {
-    await patchCaseCore(auth.token.organisationId, null, id, patch);
+    try {
+      await patchCaseCore(
+        auth.token.organisationId,
+        null,
+        id,
+        patch,
+        version,
+      );
+    } catch (e) {
+      if (e instanceof CaseVersionConflictError) {
+        return NextResponse.json(
+          { error: "version_conflict", current: e.current },
+          { status: 409 },
+        );
+      }
+      throw e;
+    }
+  }
+  if (custom_fields && Object.keys(custom_fields).length > 0) {
+    try {
+      await setCustomFieldsByKey(
+        auth.token.organisationId,
+        null,
+        id,
+        custom_fields,
+        { writeTimeline: true },
+      );
+    } catch (e) {
+      return NextResponse.json(
+        { error: "invalid_custom_field", detail: (e as Error).message },
+        { status: 400 },
+      );
+    }
   }
   const [updated] = await db
     .select()
@@ -110,5 +151,6 @@ export async function PATCH(
       and(eq(cases.id, id), eq(cases.organisationId, auth.token.organisationId)),
     )
     .limit(1);
-  return NextResponse.json(updated);
+  const customFields = await customFieldsRecord(auth.token.organisationId, id);
+  return NextResponse.json({ ...updated, custom_fields: customFields });
 }

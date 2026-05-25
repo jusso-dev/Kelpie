@@ -49,6 +49,15 @@ export const CASE_ENUMS = {
   classification: CLASSIFICATION_VALUES,
 };
 
+export class CaseVersionConflictError extends Error {
+  current: Record<string, unknown>;
+  constructor(current: Record<string, unknown>) {
+    super("case_version_conflict");
+    this.name = "CaseVersionConflictError";
+    this.current = current;
+  }
+}
+
 async function loadCaseInOrg(caseId: string, organisationId: string) {
   const [c] = await db
     .select()
@@ -157,9 +166,28 @@ export async function patchCaseCore(
   actorId: string | null,
   caseId: string,
   patch: CasePatchInput,
+  expectedVersion?: number,
 ): Promise<void> {
   const existing = await loadCaseInOrg(caseId, organisationId);
   if (!existing) throw new Error("Case not found");
+
+  // Optimistic locking: if the caller passed the version it last saw and the
+  // case has since moved on, refuse the write and hand back the current value
+  // so the UI can offer keep-mine / keep-theirs / merge.
+  if (expectedVersion !== undefined && expectedVersion !== existing.version) {
+    throw new CaseVersionConflictError({
+      version: existing.version,
+      severity: existing.severity,
+      classification: existing.classification,
+      tlp: existing.tlp,
+      pap: existing.pap,
+      assigneeId: existing.assigneeId,
+      title: existing.title,
+      summary: existing.summary,
+      tags: existing.tags,
+      dataClassificationTags: existing.dataClassificationTags,
+    });
+  }
 
   const set: Partial<typeof cases.$inferInsert> = {};
   const events: Array<{ eventType: "severity_change" | "assignment_change" | "custom"; payload: Record<string, unknown> }> = [];
@@ -238,6 +266,7 @@ export async function patchCaseCore(
     }
   }
   if (Object.keys(set).length === 0) return;
+  set.version = existing.version + 1;
   await db.update(cases).set(set).where(eq(cases.id, caseId));
   for (const e of events) {
     await writeTimelineEvent({

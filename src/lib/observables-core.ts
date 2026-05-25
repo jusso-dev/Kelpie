@@ -3,6 +3,7 @@ import { cases, observables } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { newId } from "./utils";
 import { writeTimelineEvent } from "./timeline";
+import { lookupIndicators } from "./ti/core";
 
 const TYPES = [
   "ip",
@@ -42,6 +43,30 @@ export async function addObservableCore(
     .limit(1);
   if (!c) throw new Error("Case not found");
   const id = newId("obs");
+
+  // Sub-second TI lookup so a known-bad indicator is flagged immediately. The
+  // full enrichment pass (reverse DNS, VirusTotal, etc) runs later on cron;
+  // it keys off the absence of the `enriched_at` marker.
+  let enrichment: Record<string, unknown> = {};
+  try {
+    const matches = await lookupIndicators(organisationId, input.value);
+    if (matches.length > 0) {
+      enrichment = {
+        ti: {
+          ok: true,
+          data: {
+            known_bad: true,
+            match_count: matches.length,
+            matches,
+          },
+          at: new Date().toISOString(),
+        },
+      };
+    }
+  } catch {
+    // TI is best-effort; never block observable creation on it.
+  }
+
   await db.insert(observables).values({
     id,
     caseId,
@@ -51,6 +76,7 @@ export async function addObservableCore(
     isIoc: input.isIoc ?? false,
     description: input.description ?? null,
     tags: input.tags ?? [],
+    enrichment,
     createdBy: actorId,
   });
   await writeTimelineEvent({

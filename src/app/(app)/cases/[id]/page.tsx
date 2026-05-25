@@ -14,7 +14,12 @@ import { MITRE_TECHNIQUES, findTechnique } from "@/data/mitre";
 import MitrePicker from "@/components/mitre-picker";
 import PlaybookStarter from "@/components/playbook-starter";
 import SlaPanel from "@/components/sla-panel";
+import CasePresence from "@/components/case-presence";
+import CustomFieldsPanel from "@/components/custom-fields-panel";
+import CaseActionRunner from "@/components/case-action-runner";
 import { evaluateSla, loadSlaPolicy } from "@/lib/sla";
+import { getCustomFieldsForEntity } from "@/lib/custom-fields";
+import { listAvailableActions } from "@/lib/response-actions/core";
 import { format } from "date-fns";
 
 type Props = { params: Promise<{ id: string }> };
@@ -58,6 +63,11 @@ export default async function CaseOverviewPage({ params }: Props) {
   const techniques = (c.mitreTechniques as string[]) ?? [];
   const slaPolicy = await loadSlaPolicy(user.organisationId, c.severity);
   const slaEvaluation = slaPolicy ? evaluateSla(c, slaPolicy) : null;
+  const [customFields, availableActions] = await Promise.all([
+    getCustomFieldsForEntity(user.organisationId, c.id),
+    listAvailableActions(user.organisationId, c.id),
+  ]);
+  const canEdit = user.role === "admin" || user.role === "analyst";
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -99,6 +109,20 @@ export default async function CaseOverviewPage({ params }: Props) {
             techniques={MITRE_TECHNIQUES}
           />
         </div>
+
+        <CustomFieldsPanel
+          caseId={c.id}
+          canEdit={canEdit}
+          fields={customFields.map((f) => ({
+            id: f.id,
+            key: f.key,
+            label: f.label,
+            type: f.type,
+            options: f.options,
+            required: f.required,
+            value: f.value,
+          }))}
+        />
 
         {c.status === "closed" ? (
           <div className="kelpie-card p-5">
@@ -159,9 +183,11 @@ export default async function CaseOverviewPage({ params }: Props) {
       </div>
 
       <aside className="space-y-4">
+        <CasePresence caseId={c.id} />
         <SlaPanel evaluation={slaEvaluation} />
         <CaseControls
           caseId={c.id}
+          version={c.version}
           status={c.status}
           severity={c.severity}
           tlp={c.tlp}
@@ -175,6 +201,18 @@ export default async function CaseOverviewPage({ params }: Props) {
           }
           assigneeId={c.assigneeId}
           users={orgUsers}
+        />
+
+        <CaseActionRunner
+          caseId={c.id}
+          canRun={canEdit}
+          actions={availableActions.map((a) => ({
+            id: a.id,
+            name: a.name,
+            label: a.label,
+            description: a.description,
+            inputFields: a.inputFields,
+          }))}
         />
 
         <div className="kelpie-card p-5">

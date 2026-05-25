@@ -18,6 +18,7 @@ import { fireWebhook } from "@/lib/webhooks";
 import { writeTimelineEvent } from "@/lib/timeline";
 import { startPlaybookOnCase } from "./playbooks";
 import { parseTagsInput } from "@/lib/tags";
+import { setCustomFieldsByKey } from "@/lib/custom-fields";
 
 function pickEnum<T extends readonly string[]>(
   values: T,
@@ -51,6 +52,21 @@ function parseDefaultTasks(raw: FormDataEntryValue | null): DefaultTask[] {
   }
 }
 
+function parseCustomFieldDefaults(
+  raw: FormDataEntryValue | null,
+): Record<string, unknown> {
+  if (typeof raw !== "string" || !raw.trim()) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+    return {};
+  } catch {
+    return {};
+  }
+}
+
 function renderTemplate(input: string, vars: Record<string, string>): string {
   return input.replace(/\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g, (_, key) => {
     return vars[key] ?? "";
@@ -80,6 +96,9 @@ export async function createCaseTemplate(formData: FormData) {
       String(formData.get("dataClassificationTags") ?? ""),
     ),
     defaultTasks: parseDefaultTasks(formData.get("defaultTasks")),
+    defaultCustomFields: parseCustomFieldDefaults(
+      formData.get("defaultCustomFields"),
+    ),
   });
   revalidatePath("/playbooks");
   revalidatePath("/cases/new");
@@ -167,6 +186,20 @@ export async function applyCaseTemplate(formData: FormData) {
       eventType: "task_created",
       payload: { title: t.title, source: "template" },
     });
+  }
+
+  const defaultCustomFields =
+    tpl.defaultCustomFields && typeof tpl.defaultCustomFields === "object"
+      ? (tpl.defaultCustomFields as Record<string, unknown>)
+      : {};
+  if (Object.keys(defaultCustomFields).length > 0) {
+    await setCustomFieldsByKey(
+      user.organisationId,
+      user.id,
+      created.id,
+      defaultCustomFields,
+      { writeTimeline: false },
+    );
   }
 
   if (tpl.defaultPlaybookId) {
