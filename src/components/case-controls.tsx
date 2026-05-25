@@ -1,8 +1,9 @@
 "use client";
 
-import { useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { updateCaseField, updateCaseStatus } from "@/actions/cases";
+import { updateCaseField, updateCaseStatus, updateCaseTags } from "@/actions/cases";
+import { DATA_CLASSIFICATION_SUGGESTIONS, parseTagsInput } from "@/lib/tags";
 
 type Props = {
   caseId: string;
@@ -11,6 +12,8 @@ type Props = {
   tlp: string;
   pap: string;
   classification: string;
+  tags: string[];
+  dataClassificationTags: string[];
   assigneeId: string | null;
   users: Array<{ id: string; name: string; email: string }>;
 };
@@ -39,7 +42,19 @@ const CLASSIFICATION_OPTIONS = [
 
 export function CaseControls(props: Props) {
   const [pending, start] = useTransition();
+  const [tagsInput, setTagsInput] = useState(props.tags.join(", "));
+  const [dataTagsInput, setDataTagsInput] = useState(
+    props.dataClassificationTags.join(", "),
+  );
   const router = useRouter();
+
+  useEffect(() => {
+    setTagsInput(props.tags.join(", "));
+  }, [props.tags]);
+
+  useEffect(() => {
+    setDataTagsInput(props.dataClassificationTags.join(", "));
+  }, [props.dataClassificationTags]);
 
   function apply(fn: () => Promise<unknown>) {
     start(async () => {
@@ -165,6 +180,68 @@ export function CaseControls(props: Props) {
             </option>
           ))}
         </select>
+      </Row>
+      <Row label="Tags" htmlFor="case-tags">
+        <div className="flex flex-col gap-2">
+          <input
+            id="case-tags"
+            className="kelpie-input"
+            value={tagsInput}
+            disabled={pending}
+            onChange={(e) => setTagsInput(e.target.value)}
+            placeholder="ransomware, vip, watchlist"
+          />
+          <div className="flex justify-end">
+            <button
+              type="button"
+              className="kelpie-btn kelpie-btn-secondary"
+              disabled={pending}
+              onClick={() =>
+                apply(() =>
+                  updateCaseTags(props.caseId, "tags", parseTagsInput(tagsInput)),
+                )
+              }
+            >
+              Save tags
+            </button>
+          </div>
+        </div>
+      </Row>
+      <Row label="Data tags" htmlFor="case-data-tags">
+        <div className="flex flex-col gap-2">
+          <input
+            id="case-data-tags"
+            className="kelpie-input"
+            value={dataTagsInput}
+            disabled={pending}
+            onChange={(e) => setDataTagsInput(e.target.value)}
+            placeholder="pii, confidential, customer-data"
+            list="case-data-tag-suggestions"
+          />
+          <datalist id="case-data-tag-suggestions">
+            {DATA_CLASSIFICATION_SUGGESTIONS.map((tag) => (
+              <option key={tag} value={tag} />
+            ))}
+          </datalist>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              className="kelpie-btn kelpie-btn-secondary"
+              disabled={pending}
+              onClick={() =>
+                apply(() =>
+                  updateCaseTags(
+                    props.caseId,
+                    "dataClassificationTags",
+                    parseTagsInput(dataTagsInput),
+                  ),
+                )
+              }
+            >
+              Save data tags
+            </button>
+          </div>
+        </div>
       </Row>
     </div>
   );

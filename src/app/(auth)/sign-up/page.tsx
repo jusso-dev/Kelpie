@@ -10,6 +10,7 @@ export default function SignUpPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [organisationName, setOrganisationName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -17,6 +18,10 @@ export default function SignUpPage() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (password !== confirmPassword) {
+      setError("Passwords do not match");
+      return;
+    }
     setPending(true);
     const res = await signUp.email({ name, email, password });
     if (res.error) {
@@ -108,6 +113,26 @@ export default function SignUpPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="new-password"
+          />
+        </div>
+        <div>
+          <label
+            htmlFor="sign-up-confirm-password"
+            className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+          >
+            Confirm password
+          </label>
+          <input
+            id="sign-up-confirm-password"
+            className="kelpie-input"
+            type="password"
+            required
+            minLength={8}
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            autoComplete="new-password"
+            aria-invalid={Boolean(error && password !== confirmPassword)}
+            aria-describedby={error ? "sign-up-error" : undefined}
           />
         </div>
         {error ? (

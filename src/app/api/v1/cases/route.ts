@@ -16,6 +16,8 @@ const createSchema = z.object({
   classification: z.enum(CASE_ENUMS.classification).optional(),
   assigneeId: z.string().nullable().optional(),
   sourceAlertId: z.string().nullable().optional(),
+  tags: z.array(z.string()).optional(),
+  dataClassificationTags: z.array(z.string()).optional(),
 });
 
 export async function GET(req: Request) {

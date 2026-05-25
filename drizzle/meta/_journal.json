@@ -15,6 +15,20 @@
       "when": 1779627797911,
       "tag": "0001_phase2",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1779677145023,
+      "tag": "0002_big_risque",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1779677654570,
+      "tag": "0003_slippery_the_enforcers",
+      "breakpoints": true
     }
   ]
 }

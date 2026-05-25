@@ -12,6 +12,7 @@ import { and, eq } from "drizzle-orm";
 import { newId } from "./utils";
 import { nextCaseNumber } from "./case-number";
 import { writeTimelineEvent } from "./timeline";
+import { normalizeTags } from "./tags";
 
 const STATUS_VALUES = [
   "open",
@@ -67,6 +68,8 @@ export type CreateCaseInput = {
   assigneeId?: string | null;
   reporterId?: string | null;
   sourceAlertId?: string | null;
+  tags?: string[];
+  dataClassificationTags?: string[];
 };
 
 export async function createCaseCore(
@@ -90,6 +93,8 @@ export async function createCaseCore(
     assigneeId: input.assigneeId ?? actorId,
     reporterId: input.reporterId ?? actorId,
     sourceAlertId: input.sourceAlertId ?? null,
+    tags: normalizeTags(input.tags ?? []),
+    dataClassificationTags: normalizeTags(input.dataClassificationTags ?? []),
   });
   await writeTimelineEvent({
     caseId: id,
@@ -143,6 +148,8 @@ export type CasePatchInput = Partial<{
   assigneeId: string | null;
   title: string;
   summary: string;
+  tags: string[];
+  dataClassificationTags: string[];
 }>;
 
 export async function patchCaseCore(
@@ -205,6 +212,30 @@ export async function patchCaseCore(
       eventType: "custom",
       payload: { field: "summary" },
     });
+  }
+  if (patch.tags !== undefined) {
+    const next = normalizeTags(patch.tags);
+    const current = Array.isArray(existing.tags) ? (existing.tags as string[]) : [];
+    if (JSON.stringify(next) !== JSON.stringify(current)) {
+      set.tags = next;
+      events.push({
+        eventType: "custom",
+        payload: { field: "tags", from: current, to: next },
+      });
+    }
+  }
+  if (patch.dataClassificationTags !== undefined) {
+    const next = normalizeTags(patch.dataClassificationTags);
+    const current = Array.isArray(existing.dataClassificationTags)
+      ? (existing.dataClassificationTags as string[])
+      : [];
+    if (JSON.stringify(next) !== JSON.stringify(current)) {
+      set.dataClassificationTags = next;
+      events.push({
+        eventType: "custom",
+        payload: { field: "data_classification_tags", from: current, to: next },
+      });
+    }
   }
   if (Object.keys(set).length === 0) return;
   await db.update(cases).set(set).where(eq(cases.id, caseId));

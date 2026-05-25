@@ -19,6 +19,10 @@ export type CurrentUser = {
   organisationName: string;
   organisationSlug: string;
   timezone: string;
+  banned: boolean;
+  passwordResetRequired: boolean;
+  mfaRequired: boolean;
+  twoFactorEnabled: boolean;
 };
 
 export async function requireUser(): Promise<CurrentUser> {
@@ -33,6 +37,9 @@ export async function requireUser(): Promise<CurrentUser> {
     .limit(1);
   if (!u) {
     redirect("/sign-in");
+  }
+  if (u.banned) {
+    redirect("/sign-in?error=account_locked");
   }
   if (!u.organisationId) {
     redirect("/onboarding");
@@ -54,6 +61,10 @@ export async function requireUser(): Promise<CurrentUser> {
     organisationName: org.name,
     organisationSlug: org.slug,
     timezone: u.timezone,
+    banned: u.banned,
+    passwordResetRequired: u.passwordResetRequired,
+    mfaRequired: u.mfaRequired,
+    twoFactorEnabled: u.twoFactorEnabled,
   };
 }
 

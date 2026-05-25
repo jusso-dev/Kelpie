@@ -1,6 +1,6 @@
 /**
- * Seed Kelpie with an organisation, an admin user, a playbook, a couple of
- * alerts, and one promoted case so the UI has something to herd.
+ * Seed Kelpie with an organisation, an administrator user, a playbook, a couple of
+ * alerts, and one promoted case so the UI has realistic sample data.
  *
  * Re-running this script is idempotent: it only inserts when nothing exists
  * for the chosen organisation slug.
@@ -19,11 +19,12 @@ import {
   timelineEvents,
   users,
 } from "../src/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { newId } from "../src/lib/utils";
 import { auth } from "../src/lib/auth";
 import { nextCaseNumber } from "../src/lib/case-number";
 import { seedDefaultSlaPolicies } from "../src/actions/sla";
+import { seedBaselineOrganisationData } from "../src/lib/baseline-data";
 
 const ORG_SLUG = "acme-soc";
 
@@ -45,8 +46,9 @@ async function main() {
     slug: ORG_SLUG,
   });
   await seedDefaultSlaPolicies(orgId);
+  const baseline = await seedBaselineOrganisationData(orgId);
 
-  // Create admin user via BetterAuth so the password is hashed correctly.
+  // Create administrator user via BetterAuth so the password is hashed correctly.
   const signUp = await auth.api.signUpEmail({
     body: {
       email: "admin@acme.local",
@@ -60,7 +62,7 @@ async function main() {
     .set({ organisationId: orgId, role: "admin" })
     .where(eq(users.id, userId));
 
-  // Create an analyst alongside the admin.
+  // Create an analyst alongside the administrator.
   const analystSignUp = await auth.api.signUpEmail({
     body: {
       email: "analyst@acme.local",
@@ -73,46 +75,18 @@ async function main() {
     .set({ organisationId: orgId, role: "analyst" })
     .where(eq(users.id, analystSignUp.user.id));
 
-  // A standard phishing playbook.
-  const pbId = newId("pb");
-  await db.insert(playbooks).values({
-    id: pbId,
-    organisationId: orgId,
-    name: "Phishing first response",
-    description: "Initial containment and notification for reported phishing.",
-    classification: "phishing",
-    isActive: true,
-    steps: [
-      {
-        id: newId("step"),
-        title: "Acknowledge and confirm scope",
-        description: "Identify recipients and confirm the message is malicious.",
-        offsetMinutes: 15,
-        isRequired: true,
-      },
-      {
-        id: newId("step"),
-        title: "Block sender and URLs",
-        description: "Push block rules into mail and web proxy.",
-        offsetMinutes: 60,
-        isRequired: true,
-      },
-      {
-        id: newId("step"),
-        title: "Notify affected users",
-        description: "Email the recipients with guidance.",
-        offsetMinutes: 180,
-        isRequired: true,
-      },
-      {
-        id: newId("step"),
-        title: "Hunt for clicks and credential reuse",
-        description: "Search auth logs for sign-ins from new IPs after delivery.",
-        offsetMinutes: 360,
-        isRequired: false,
-      },
-    ],
-  });
+  const [seededPhishingPlaybook] = await db
+    .select()
+    .from(playbooks)
+    .where(
+      and(
+        eq(playbooks.organisationId, orgId),
+        eq(playbooks.name, "Phishing first response"),
+      ),
+    )
+    .limit(1);
+  if (!seededPhishingPlaybook) throw new Error("Baseline playbook seed failed");
+  const pbId = seededPhishingPlaybook.id;
 
   // Two open alerts and one already promoted.
   const a1 = newId("alert");
@@ -275,9 +249,12 @@ async function main() {
 
   console.log("Seeded:");
   console.log(`  Organisation: ${ORG_SLUG}`);
-  console.log("  Admin login : admin@acme.local / kelpieadmin");
+  console.log("  Administrator login : admin@acme.local / kelpieadmin");
   console.log("  Analyst     : analyst@acme.local / kelpieanalyst");
   console.log(`  Case        : ${caseNumber}`);
+  console.log(
+    `  Baseline   : ${baseline.playbooksCreated} playbooks, ${baseline.templatesCreated} templates`,
+  );
 }
 
 main()

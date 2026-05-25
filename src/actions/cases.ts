@@ -20,6 +20,7 @@ import {
 } from "@/lib/cases-core";
 import { writeTimelineEvent } from "@/lib/timeline";
 import { fireWebhook } from "@/lib/webhooks";
+import { parseTagsInput } from "@/lib/tags";
 
 function pickEnum<T extends readonly string[]>(
   values: T,
@@ -42,6 +43,10 @@ export async function createCase(formData: FormData) {
       CASE_ENUMS.classification,
       formData.get("classification"),
       "other",
+    ),
+    tags: parseTagsInput(String(formData.get("tags") ?? "")),
+    dataClassificationTags: parseTagsInput(
+      String(formData.get("dataClassificationTags") ?? ""),
     ),
   });
   await fireWebhook(user.organisationId, "case.created", {
@@ -99,6 +104,19 @@ export async function updateCaseField(
   }
   await patchCaseCore(user.organisationId, user.id, caseId, patch);
   revalidatePath(`/cases/${caseId}`);
+}
+
+export async function updateCaseTags(
+  caseId: string,
+  field: "tags" | "dataClassificationTags",
+  values: string[],
+) {
+  const user = await requireRole(["admin", "analyst"]);
+  const patch: Parameters<typeof patchCaseCore>[3] = {};
+  patch[field] = values;
+  await patchCaseCore(user.organisationId, user.id, caseId, patch);
+  revalidatePath(`/cases/${caseId}`);
+  revalidatePath("/cases");
 }
 
 export async function closeCase(formData: FormData) {

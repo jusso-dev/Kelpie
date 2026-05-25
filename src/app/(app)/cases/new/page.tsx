@@ -75,6 +75,16 @@ export default async function NewCasePage() {
           rows={4}
           help="What is happening? Stick to facts; the analyst can add detail later."
         />
+        <Field
+          label="Tags"
+          name="tags"
+          help="Comma-separated labels such as ransomware, vip, watchlist."
+        />
+        <Field
+          label="Data classification tags"
+          name="dataClassificationTags"
+          help="Comma-separated labels such as pii, confidential, customer-data."
+        />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Select
             label="Severity"

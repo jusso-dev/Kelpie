@@ -64,7 +64,7 @@ async function main() {
     .from(users)
     .where(eq(users.email, "admin@acme.local"))
     .limit(1);
-  if (!adminUser) throw new Error("Admin user missing.");
+  if (!adminUser) throw new Error("Administrator user missing.");
 
   console.log("== issue a fully-scoped token ==");
   const { plaintext, hash } = generateApiToken();
@@ -241,7 +241,7 @@ async function main() {
 
   console.log("== Markdown export (UI session route) ==");
   // The export endpoints require an authed user session, so we hit them via
-  // the seed admin's existing session is not available here. Instead we
+  // the seed administrator's existing session is not available here. Instead we
   // confirm that an unauthed fetch redirects to sign-in (302/200 to /sign-in)
   // or returns 404, both of which prove the route is mounted.
   const mdProbe = await fetch(`${BASE}/api/cases/${caseId}/report.md`, { redirect: "manual" });

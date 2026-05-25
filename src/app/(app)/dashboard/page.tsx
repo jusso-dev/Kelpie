@@ -5,6 +5,8 @@ import { requireUser } from "@/lib/session";
 import { StatusBadge, SeverityBadge } from "@/components/badges";
 import { evaluateSla } from "@/lib/sla";
 import Link from "next/link";
+import { ArrowUpRight, Bot, Clock3, ListChecks, ShieldAlert, Workflow } from "lucide-react";
+import type { ComponentType } from "react";
 
 function minutesBetween(a: Date, b: Date): number {
   return Math.max(0, Math.round((b.getTime() - a.getTime()) / 60000));
@@ -180,70 +182,102 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <header className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <div>
-          <h1 className="text-2xl font-semibold">Dashboard</h1>
-          <p className="text-sm text-slate-400">
-            What the dog is herding, right now.
+          <div className="mb-2 inline-flex items-center rounded-full border border-[color:var(--color-navy-700)] bg-[color:var(--color-navy-900)] px-3 py-1 text-xs font-medium text-[color:var(--color-tan-300)]">
+            SOC case management
+          </div>
+          <h1 className="max-w-3xl text-3xl font-semibold tracking-tight text-slate-50 sm:text-4xl">
+            Prioritise, automate, and close security cases from one workbench.
+          </h1>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400">
+            Track active incidents, attach response workflows, measure SLA pressure,
+            and keep every investigation artefact connected to the case.
           </p>
         </div>
-        <Link href="/cases/new" className="kelpie-btn kelpie-btn-primary">
-          New case
-        </Link>
+        <div className="kelpie-panel p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs uppercase tracking-wider text-slate-500">
+                Automation impact
+              </div>
+              <div className="mt-1 text-2xl font-semibold text-slate-50">
+                {formatMinutes(mean(resolveTimes))}
+              </div>
+              <div className="text-xs text-slate-500">Mean time to resolution</div>
+            </div>
+            <Workflow className="text-[color:var(--color-tan-400)]" size={30} aria-hidden="true" />
+          </div>
+          <Link href="/cases/new" className="kelpie-btn kelpie-btn-primary mt-4 w-full">
+            New case
+            <ArrowUpRight size={16} aria-hidden="true" />
+          </Link>
+        </div>
       </header>
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        <Stat label="Open cases" value={openCases[0]?.count ?? 0} />
-        <Stat label="New alerts" value={openAlertsRow[0]?.count ?? 0} accent />
-        <Stat label="Opened (30d)" value={recentOpened.length} />
-        <Stat label="Closed (30d)" value={recentlyClosed.length} />
+        <Stat label="Active cases" value={openCases[0]?.count ?? 0} icon={ShieldAlert} />
+        <Stat label="New alerts" value={openAlertsRow[0]?.count ?? 0} accent icon={Bot} />
+        <Stat label="Opened 30d" value={recentOpened.length} icon={ListChecks} />
+        <Stat label="Closed 30d" value={recentlyClosed.length} icon={ListChecks} />
         <Stat
-          label="SLA breaches (30d)"
+          label="SLA breaches"
           value={recentBreaches}
           accent={recentBreaches > 0}
+          icon={Clock3}
         />
       </section>
 
-      <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="kelpie-card p-5">
-          <h2 className="text-sm font-medium text-slate-300 mb-3">
-            Open cases by severity
+      <section className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1.35fr]">
+        <div className="kelpie-panel p-5">
+          <h2 className="mb-1 text-sm font-medium text-slate-200">
+            Threat prioritisation
           </h2>
-          <div className="space-y-2">
+          <p className="mb-4 text-xs text-slate-500">
+            Active cases grouped by severity for triage handoff.
+          </p>
+          <div className="space-y-3">
             {(["critical", "high", "medium", "low"] as const).map((s) => (
-              <div key={s} className="flex items-center justify-between text-sm">
+              <div key={s} className="grid grid-cols-[6.5rem_1fr_2rem] items-center gap-3 text-sm">
                 <SeverityBadge value={s} />
-                <span className="tabular-nums text-slate-200">
-                  {severityCounts[s]}
-                </span>
+                <div className="h-2 overflow-hidden rounded-full bg-[color:var(--color-navy-800)]">
+                  <div
+                    className="h-full rounded-full bg-current text-[color:var(--color-tan-500)]"
+                    style={{
+                      width: `${Math.min(100, severityCounts[s] * 16)}%`,
+                    }}
+                    aria-hidden="true"
+                  />
+                </div>
+                <span className="text-right tabular-nums text-slate-200">{severityCounts[s]}</span>
               </div>
             ))}
           </div>
         </div>
-        <div className="kelpie-card p-5">
-          <h2 className="text-sm font-medium text-slate-300 mb-3">
-            Response timeliness (30 days, closed cases)
+        <div className="kelpie-panel p-5">
+          <h2 className="mb-1 text-sm font-medium text-slate-200">
+            Response metrics
           </h2>
-          <div className="grid grid-cols-1 gap-3 text-center sm:grid-cols-3">
+          <p className="mb-4 text-xs text-slate-500">
+            Closed cases over the last 30 days.
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Metric label="MTTA" value={formatMinutes(mean(ackTimes))} />
             <Metric label="MTTC" value={formatMinutes(mean(containTimes))} />
             <Metric label="MTTR" value={formatMinutes(mean(resolveTimes))} />
           </div>
-          <p className="text-xs text-slate-500 mt-3">
-            Acknowledge, contain, resolve — measured from case open.
-          </p>
         </div>
       </section>
 
-      <section className="kelpie-card p-5">
+      <section className="kelpie-panel p-5">
         <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
-          <h2 className="text-sm font-medium text-slate-300">SLA breaches (live)</h2>
+          <h2 className="text-sm font-medium text-slate-200">Live SLA pressure</h2>
           <span className="text-xs text-slate-500">
-            {breachCount} breached · {warningCount} within {15} min
+            {breachCount} breached, {warningCount} within {15} min
           </span>
         </div>
         {topBreaches.length === 0 ? (
-          <p className="text-sm text-slate-500">No breaches. Stay on top.</p>
+          <p className="text-sm text-slate-500">No active SLA breaches.</p>
         ) : (
           <ul className="divide-y divide-[color:var(--color-navy-800)]">
             {topBreaches.map((b) => (
@@ -264,7 +298,7 @@ export default async function DashboardPage() {
       </section>
 
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="kelpie-card p-5">
+        <div className="kelpie-panel p-5">
           <h2 className="text-sm font-medium text-slate-300 mb-3">
             Top classifications (30 days)
           </h2>
@@ -283,7 +317,7 @@ export default async function DashboardPage() {
             </ul>
           )}
         </div>
-        <div className="kelpie-card p-5">
+        <div className="kelpie-panel p-5">
           <h2 className="text-sm font-medium text-slate-300 mb-3">
             Recently opened
           </h2>
@@ -319,19 +353,28 @@ function Stat({
   label,
   value,
   accent,
+  icon: Icon,
 }: {
   label: string;
   value: number | string;
   accent?: boolean;
+  icon: ComponentType<{ size?: number; className?: string; "aria-hidden"?: boolean }>;
 }) {
   return (
-    <div className="kelpie-card p-5">
-      <div className="text-xs uppercase tracking-wider text-slate-400">
-        {label}
+    <div className="kelpie-panel p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs uppercase tracking-wider text-slate-500">
+          {label}
+        </div>
+        <Icon
+          size={18}
+          className={accent ? "text-[color:var(--color-tan-400)]" : "text-slate-500"}
+          aria-hidden={true}
+        />
       </div>
       <div
         className={
-          "mt-1 text-3xl font-semibold tabular-nums " +
+          "mt-2 text-3xl font-semibold tabular-nums " +
           (accent ? "text-[color:var(--color-tan-400)]" : "text-slate-100")
         }
       >
@@ -343,9 +386,9 @@ function Stat({
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <div className="text-xs text-slate-500">{label}</div>
-      <div className="text-xl font-semibold tabular-nums text-slate-100">
+    <div className="rounded-md border border-[color:var(--color-navy-700)] bg-[color:var(--color-navy-900)] p-4">
+      <div className="text-xs uppercase tracking-wider text-slate-500">{label}</div>
+      <div className="mt-2 text-2xl font-semibold tabular-nums text-slate-100">
         {value}
       </div>
     </div>

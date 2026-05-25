@@ -25,6 +25,8 @@ const patchSchema = z.object({
   assigneeId: z.string().nullable().optional(),
   title: z.string().optional(),
   summary: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  dataClassificationTags: z.array(z.string()).optional(),
 });
 
 export async function GET(

@@ -105,6 +105,20 @@ export const users = pgTable("users", {
   }),
   role: roleEnum("role").notNull().default("analyst"),
   timezone: text("timezone").notNull().default("Australia/Sydney"),
+  banned: boolean("banned").notNull().default(false),
+  banReason: text("ban_reason"),
+  banExpires: timestamp("ban_expires", { withTimezone: true }),
+  passwordResetRequired: boolean("password_reset_required")
+    .notNull()
+    .default(false),
+  mfaRequired: boolean("mfa_required").notNull().default(false),
+  twoFactorEnabled: boolean("two_factor_enabled").notNull().default(false),
+  invitedAt: timestamp("invited_at", { withTimezone: true }),
+  invitedBy: text("invited_by"),
+  lastPasswordResetAt: timestamp("last_password_reset_at", {
+    withTimezone: true,
+  }),
+  lockedAt: timestamp("locked_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -155,6 +169,20 @@ export const accounts = pgTable("accounts", {
     .notNull()
     .defaultNow(),
 });
+
+export const twoFactors = pgTable(
+  "two_factor",
+  {
+    id: text("id").primaryKey(),
+    secret: text("secret").notNull(),
+    backupCodes: text("backup_codes").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    verified: boolean("verified").notNull().default(true),
+  },
+  (t) => [index("two_factor_user_idx").on(t.userId)],
+);
 
 export const verifications = pgTable("verifications", {
   id: text("id").primaryKey(),
@@ -248,6 +276,10 @@ export const cases = pgTable(
     closureReason: text("closure_reason"),
     closureSummary: text("closure_summary"),
     mitreTechniques: jsonb("mitre_techniques")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    tags: jsonb("tags").notNull().default(sql`'[]'::jsonb`),
+    dataClassificationTags: jsonb("data_classification_tags")
       .notNull()
       .default(sql`'[]'::jsonb`),
     acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
@@ -485,6 +517,10 @@ export const caseTemplates = pgTable("case_templates", {
   defaultPlaybookId: text("default_playbook_id").references(() => playbooks.id, {
     onDelete: "set null",
   }),
+  defaultTags: jsonb("default_tags").notNull().default(sql`'[]'::jsonb`),
+  defaultDataClassificationTags: jsonb("default_data_classification_tags")
+    .notNull()
+    .default(sql`'[]'::jsonb`),
   defaultTasks: jsonb("default_tasks").notNull().default(sql`'[]'::jsonb`),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
@@ -593,6 +629,7 @@ export const enrichmentCache = pgTable(
 
 export type Organisation = typeof organisations.$inferSelect;
 export type User = typeof users.$inferSelect;
+export type TwoFactor = typeof twoFactors.$inferSelect;
 export type Alert = typeof alerts.$inferSelect;
 export type Case = typeof cases.$inferSelect;
 export type CaseTask = typeof caseTasks.$inferSelect;

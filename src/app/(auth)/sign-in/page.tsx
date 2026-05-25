@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { signIn } from "@/lib/auth-client";
@@ -12,6 +12,13 @@ export default function SignInPage() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("error") === "account_locked") {
+      setError("This account is locked. Contact your organisation administrator.");
+    }
+  }, []);
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -22,6 +29,10 @@ export default function SignInPage() {
       callbackURL: "/dashboard",
     });
     setPending(false);
+    if ((res.data as { twoFactorRedirect?: boolean } | null)?.twoFactorRedirect) {
+      router.push("/two-factor");
+      return;
+    }
     if (res.error) {
       setError(res.error.message ?? "Sign in failed");
       return;

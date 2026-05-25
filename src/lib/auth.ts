@@ -1,5 +1,6 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { admin, twoFactor } from "better-auth/plugins";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
 
@@ -11,6 +12,7 @@ export const auth = betterAuth({
       session: schema.sessions,
       account: schema.accounts,
       verification: schema.verifications,
+      twoFactor: schema.twoFactors,
     },
   }),
   secret:
@@ -26,6 +28,16 @@ export const auth = betterAuth({
     additionalFields: {
       organisationId: { type: "string", required: false, input: false },
       role: { type: "string", required: false, defaultValue: "analyst" },
+      banned: { type: "boolean", required: false, input: false },
+      banReason: { type: "string", required: false, input: false },
+      banExpires: { type: "date", required: false, input: false },
+      passwordResetRequired: {
+        type: "boolean",
+        required: false,
+        input: false,
+      },
+      mfaRequired: { type: "boolean", required: false, input: false },
+      twoFactorEnabled: { type: "boolean", required: false, input: false },
       timezone: {
         type: "string",
         required: false,
@@ -38,6 +50,18 @@ export const auth = betterAuth({
     updateAge: 60 * 60 * 24,
     cookieCache: { enabled: true, maxAge: 60 * 5 },
   },
+  plugins: [
+    admin({
+      adminRoles: ["admin"],
+      defaultRole: "analyst",
+      bannedUserMessage:
+        "This account is locked. Contact your Kelpie organisation administrator.",
+    }),
+    twoFactor({
+      issuer: "Kelpie",
+      skipVerificationOnEnable: false,
+    }),
+  ],
 });
 
 export type Session = typeof auth.$Infer.Session;

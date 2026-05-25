@@ -167,6 +167,12 @@ export default async function CaseOverviewPage({ params }: Props) {
           tlp={c.tlp}
           pap={c.pap}
           classification={c.classification}
+          tags={Array.isArray(c.tags) ? (c.tags as string[]) : []}
+          dataClassificationTags={
+            Array.isArray(c.dataClassificationTags)
+              ? (c.dataClassificationTags as string[])
+              : []
+          }
           assigneeId={c.assigneeId}
           users={orgUsers}
         />

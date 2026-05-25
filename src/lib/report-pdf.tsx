@@ -137,6 +137,10 @@ function CaseReport({ data }: { data: CaseReportData }) {
   const banner = renderTlpBanner(c.tlp);
   const bannerStyle = c.tlp === "red" ? styles.banner : styles.bannerAmber;
   const techniques = (c.mitreTechniques as string[]) ?? [];
+  const tags = Array.isArray(c.tags) ? (c.tags as string[]) : [];
+  const dataTags = Array.isArray(c.dataClassificationTags)
+    ? (c.dataClassificationTags as string[])
+    : [];
 
   return (
     <Document
@@ -162,6 +166,12 @@ function CaseReport({ data }: { data: CaseReportData }) {
           <Text style={styles.metaChip}>
             {c.classification.replace(/_/g, " ")}
           </Text>
+          {dataTags.map((tag) => (
+            <Text key={`data-${tag}`} style={styles.metaChip}>data:{tag}</Text>
+          ))}
+          {tags.map((tag) => (
+            <Text key={tag} style={styles.metaChip}>{tag}</Text>
+          ))}
         </View>
         <View>
           {data.assignee ? (

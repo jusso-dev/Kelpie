@@ -80,3 +80,24 @@ export function TaskStatusBadge({ value }: { value: string }) {
     </span>
   );
 }
+
+export function TagBadge({
+  value,
+  tone = "neutral",
+}: {
+  value: string;
+  tone?: "neutral" | "classification";
+}) {
+  return (
+    <span
+      className={cn(
+        "kelpie-badge normal-case tracking-normal",
+        tone === "classification"
+          ? "text-[color:var(--color-tan-300)]"
+          : "text-slate-300",
+      )}
+    >
+      {tone === "classification" ? `data:${value}` : value}
+    </span>
+  );
+}

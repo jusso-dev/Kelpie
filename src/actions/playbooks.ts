@@ -91,6 +91,52 @@ export async function createPlaybook(formData: FormData) {
   redirect(`/playbooks/${id}`);
 }
 
+export async function updatePlaybook(playbookId: string, formData: FormData) {
+  const user = await requireRole(["admin", "analyst"]);
+  const name = String(formData.get("name") ?? "").trim();
+  if (!name) throw new Error("Name is required");
+  const description = String(formData.get("description") ?? "").trim() || null;
+  const classificationRaw = String(formData.get("classification") ?? "other");
+  const classification = (CLASSIFICATIONS as readonly string[]).includes(
+    classificationRaw,
+  )
+    ? (classificationRaw as (typeof CLASSIFICATIONS)[number])
+    : "other";
+  const steps = parseSteps(formData.get("steps")).map<PlaybookStep>((s) => ({
+    id: newId("step"),
+    title: s.title,
+    description: s.description,
+    offsetMinutes: s.offsetMinutes,
+    isRequired: s.isRequired,
+  }));
+
+  await db
+    .update(playbooks)
+    .set({ name, description, classification, steps })
+    .where(
+      and(
+        eq(playbooks.id, playbookId),
+        eq(playbooks.organisationId, user.organisationId),
+      ),
+    );
+  revalidatePath("/playbooks");
+  revalidatePath(`/playbooks/${playbookId}`);
+}
+
+export async function deletePlaybook(playbookId: string) {
+  const user = await requireRole(["admin", "analyst"]);
+  await db
+    .delete(playbooks)
+    .where(
+      and(
+        eq(playbooks.id, playbookId),
+        eq(playbooks.organisationId, user.organisationId),
+      ),
+    );
+  revalidatePath("/playbooks");
+  redirect("/playbooks");
+}
+
 export async function togglePlaybookActive(playbookId: string, active: boolean) {
   const user = await requireRole(["admin", "analyst"]);
   await db

@@ -178,6 +178,10 @@ export function renderCaseMarkdown(data: CaseReportData): string {
   const c = data.case;
   const lines: string[] = [];
   const banner = renderTlpBanner(c.tlp);
+  const tags = Array.isArray(c.tags) ? (c.tags as string[]) : [];
+  const dataTags = Array.isArray(c.dataClassificationTags)
+    ? (c.dataClassificationTags as string[])
+    : [];
   if (banner) {
     lines.push(`> **${banner}**`, "");
   }
@@ -189,6 +193,8 @@ export function renderCaseMarkdown(data: CaseReportData): string {
     `- TLP: **${c.tlp.replace("_", "+")}**`,
     `- PAP: **${c.pap}**`,
     `- Classification: ${c.classification.replace(/_/g, " ")}`,
+    `- Data tags: ${dataTags.length > 0 ? dataTags.join(", ") : "none"}`,
+    `- Tags: ${tags.length > 0 ? tags.join(", ") : "none"}`,
     `- Opened: ${c.openedAt.toISOString()}`,
   );
   if (c.acknowledgedAt) lines.push(`- Acknowledged: ${c.acknowledgedAt.toISOString()}`);

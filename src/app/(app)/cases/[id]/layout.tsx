@@ -7,6 +7,7 @@ import { requireUser } from "@/lib/session";
 import {
   SeverityBadge,
   StatusBadge,
+  TagBadge,
   TlpBadge,
 } from "@/components/badges";
 
@@ -37,6 +38,10 @@ export default async function CaseLayout({ children, params }: Props) {
   if (!c) notFound();
 
   const isStrict = c.tlp === "amber_strict" || c.tlp === "red";
+  const tags = Array.isArray(c.tags) ? (c.tags as string[]) : [];
+  const dataTags = Array.isArray(c.dataClassificationTags)
+    ? (c.dataClassificationTags as string[])
+    : [];
 
   return (
     <div className="space-y-4">
@@ -66,6 +71,16 @@ export default async function CaseLayout({ children, params }: Props) {
               {c.classification.replace(/_/g, " ")}
             </span>
           </div>
+          {tags.length > 0 || dataTags.length > 0 ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {dataTags.map((tag) => (
+                <TagBadge key={`data-${tag}`} value={tag} tone="classification" />
+              ))}
+              {tags.map((tag) => (
+                <TagBadge key={tag} value={tag} />
+              ))}
+            </div>
+          ) : null}
         </div>
         <div className="flex w-full flex-col gap-2 text-sm sm:w-auto sm:flex-row sm:items-center">
           <a

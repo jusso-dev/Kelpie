@@ -4,7 +4,12 @@ import { and, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
-import { togglePlaybookActive } from "@/actions/playbooks";
+import {
+  deletePlaybook,
+  togglePlaybookActive,
+  updatePlaybook,
+} from "@/actions/playbooks";
+import PlaybookStepsEditor from "@/components/playbook-steps-editor";
 
 type Props = { params: Promise<{ id: string }> };
 
@@ -35,9 +40,19 @@ export default async function PlaybookDetailPage({ params }: Props) {
     await togglePlaybookActive(id, !pb.isActive);
   }
 
+  async function update(formData: FormData) {
+    "use server";
+    await updatePlaybook(id, formData);
+  }
+
+  async function remove() {
+    "use server";
+    await deletePlaybook(id);
+  }
+
   return (
     <div className="max-w-3xl mx-auto space-y-5">
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <Link href="/playbooks" className="text-xs text-slate-400 hover:text-slate-200">
             ← Back to playbooks
@@ -55,36 +70,84 @@ export default async function PlaybookDetailPage({ params }: Props) {
         </form>
       </div>
 
-      <div className="kelpie-card p-5">
-        <h2 className="text-sm font-medium text-slate-300 mb-3">Steps</h2>
-        {steps.length === 0 ? (
-          <p className="text-sm text-slate-500">No steps defined.</p>
-        ) : (
-          <ol className="space-y-2">
-            {steps.map((s, i) => (
-              <li key={s.id ?? i} className="border-b border-[color:var(--color-navy-800)] pb-2">
-                <div className="flex items-center gap-3">
-                  <span className="text-xs font-mono text-slate-500 w-6">
-                    {i + 1}
-                  </span>
-                  <span className="text-slate-100 font-medium">{s.title}</span>
-                  <span className="text-xs text-slate-500 ml-auto">
-                    due +{s.offsetMinutes}m
-                  </span>
-                  {!s.isRequired ? (
-                    <span className="text-[10px] text-slate-500 uppercase">
-                      optional
-                    </span>
-                  ) : null}
-                </div>
-                {s.description ? (
-                  <p className="text-xs text-slate-400 mt-1 pl-9">{s.description}</p>
-                ) : null}
-              </li>
+      <form action={update} className="kelpie-card p-5 space-y-4">
+        <h2 className="text-sm font-medium text-slate-300">Edit playbook</h2>
+        <div>
+          <label
+            htmlFor="playbook-name"
+            className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+          >
+            Name
+          </label>
+          <input
+            id="playbook-name"
+            name="name"
+            className="kelpie-input"
+            defaultValue={pb.name}
+            required
+          />
+        </div>
+        <div>
+          <label
+            htmlFor="playbook-description"
+            className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+          >
+            Description
+          </label>
+          <textarea
+            id="playbook-description"
+            name="description"
+            className="kelpie-input"
+            rows={3}
+            defaultValue={pb.description ?? ""}
+          />
+        </div>
+        <div>
+          <label
+            htmlFor="playbook-classification"
+            className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+          >
+            Classification
+          </label>
+          <select
+            id="playbook-classification"
+            name="classification"
+            className="kelpie-input"
+            defaultValue={pb.classification}
+          >
+            {[
+              "malware",
+              "phishing",
+              "unauthorised_access",
+              "data_breach",
+              "dos",
+              "policy_violation",
+              "other",
+            ].map((c) => (
+              <option key={c} value={c}>
+                {c.replace(/_/g, " ")}
+              </option>
             ))}
-          </ol>
-        )}
-      </div>
+          </select>
+        </div>
+        <PlaybookStepsEditor
+          initial={steps.map((s) => ({
+            title: s.title,
+            description: s.description ?? "",
+            offsetMinutes: s.offsetMinutes,
+            isRequired: s.isRequired,
+          }))}
+        />
+        <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+          <button className="kelpie-btn kelpie-btn-primary">Save changes</button>
+        </div>
+      </form>
+
+      <form action={remove} className="flex justify-end">
+        <button className="kelpie-btn kelpie-btn-ghost text-red-400">
+          Delete playbook
+        </button>
+      </form>
     </div>
   );
 }

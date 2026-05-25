@@ -90,6 +90,16 @@ export default async function NewTemplatePage() {
             placeholder={"Reported on {{date}} by {{reporter}}. ..."}
           />
         </div>
+        <Field
+          label="Default tags"
+          name="tags"
+          help="Comma-separated labels applied to cases created from this template."
+        />
+        <Field
+          label="Default data classification tags"
+          name="dataClassificationTags"
+          help="Comma-separated labels such as pii, confidential, customer-data."
+        />
         <TemplateTasksEditor />
         <div className="flex justify-end">
           <button className="kelpie-btn kelpie-btn-primary">Create template</button>
@@ -125,6 +135,29 @@ function Select({
           </option>
         ))}
       </select>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  name,
+  help,
+}: {
+  label: string;
+  name: string;
+  help?: string;
+}) {
+  return (
+    <div>
+      <label
+        htmlFor={`template-${name}`}
+        className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+      >
+        {label}
+      </label>
+      <input id={`template-${name}`} name={name} className="kelpie-input" />
+      {help ? <p className="text-xs text-slate-500 mt-1">{help}</p> : null}
     </div>
   );
 }

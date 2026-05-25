@@ -17,6 +17,7 @@ import {
 import { fireWebhook } from "@/lib/webhooks";
 import { writeTimelineEvent } from "@/lib/timeline";
 import { startPlaybookOnCase } from "./playbooks";
+import { parseTagsInput } from "@/lib/tags";
 
 function pickEnum<T extends readonly string[]>(
   values: T,
@@ -74,6 +75,10 @@ export async function createCaseTemplate(formData: FormData) {
     defaultTlp: pickEnum(CASE_ENUMS.tlp, formData.get("tlp"), "amber"),
     summaryTemplate: String(formData.get("summaryTemplate") ?? "") || null,
     defaultPlaybookId: String(formData.get("defaultPlaybookId") ?? "") || null,
+    defaultTags: parseTagsInput(String(formData.get("tags") ?? "")),
+    defaultDataClassificationTags: parseTagsInput(
+      String(formData.get("dataClassificationTags") ?? ""),
+    ),
     defaultTasks: parseDefaultTasks(formData.get("defaultTasks")),
   });
   revalidatePath("/playbooks");
@@ -130,6 +135,10 @@ export async function applyCaseTemplate(formData: FormData) {
     severity: tpl.defaultSeverity as CaseSeverity,
     tlp: tpl.defaultTlp as CaseTlp,
     classification: tpl.classification as CaseClassification,
+    tags: Array.isArray(tpl.defaultTags) ? (tpl.defaultTags as string[]) : [],
+    dataClassificationTags: Array.isArray(tpl.defaultDataClassificationTags)
+      ? (tpl.defaultDataClassificationTags as string[])
+      : [],
   });
   await fireWebhook(user.organisationId, "case.created", {
     case_id: created.id,

@@ -6,6 +6,7 @@ import TokenCreator from "@/components/token-creator";
 import SlaSettings from "@/components/sla-settings";
 import WebhookSettings from "@/components/webhook-settings";
 import TokenList from "@/components/token-list";
+import TeamManagement from "@/components/team-management";
 
 export default async function SettingsPage() {
   const user = await requireUser();
@@ -21,6 +22,13 @@ export default async function SettingsPage() {
         name: users.name,
         email: users.email,
         role: users.role,
+        banned: users.banned,
+        banReason: users.banReason,
+        passwordResetRequired: users.passwordResetRequired,
+        mfaRequired: users.mfaRequired,
+        twoFactorEnabled: users.twoFactorEnabled,
+        invitedAt: users.invitedAt,
+        lastPasswordResetAt: users.lastPasswordResetAt,
       })
       .from(users)
       .where(eq(users.organisationId, user.organisationId)),
@@ -48,26 +56,25 @@ export default async function SettingsPage() {
 
       <section className="kelpie-card p-5">
         <h2 className="text-sm font-medium text-slate-300 mb-3">Team</h2>
-        <div className="kelpie-scroll-x" tabIndex={0} aria-label="Team members table">
-          <table className="kelpie-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Role</th>
-              </tr>
-            </thead>
-            <tbody>
-              {teamMembers.map((u) => (
-                <tr key={u.id}>
-                  <td>{u.name}</td>
-                  <td className="text-slate-400">{u.email}</td>
-                  <td className="text-slate-300">{u.role}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <TeamManagement
+          members={teamMembers.map((u) => ({
+            id: u.id,
+            name: u.name,
+            email: u.email,
+            role: u.role,
+            banned: u.banned,
+            banReason: u.banReason,
+            passwordResetRequired: u.passwordResetRequired,
+            mfaRequired: u.mfaRequired,
+            twoFactorEnabled: u.twoFactorEnabled,
+            invitedAt: u.invitedAt ? u.invitedAt.toISOString() : null,
+            lastPasswordResetAt: u.lastPasswordResetAt
+              ? u.lastPasswordResetAt.toISOString()
+              : null,
+          }))}
+          isAdmin={isAdmin}
+          currentUserId={user.id}
+        />
       </section>
 
       <section className="kelpie-card p-5">
@@ -92,7 +99,7 @@ export default async function SettingsPage() {
       <section className="kelpie-card p-5">
         <h2 className="text-sm font-medium text-slate-300 mb-3">API tokens</h2>
         {!isAdmin ? (
-          <p className="text-xs text-slate-500">Only admins can manage tokens.</p>
+          <p className="text-xs text-slate-500">Only administrators can manage tokens.</p>
         ) : (
           <TokenCreator />
         )}

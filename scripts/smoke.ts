@@ -2,7 +2,7 @@
  * Smoke test for the Phase 1 MVP.
  *
  * Exercises the key paths against a running Kelpie instance with seeded data:
- *   1. Create an API token via the admin sign-in.
+ *   1. Create an API token via the administrator sign-in.
  *   2. Push an alert through POST /api/v1/alerts.
  *   3. Read it back through GET /api/v1/alerts.
  *

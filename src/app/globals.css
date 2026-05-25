@@ -1,33 +1,36 @@
 @import "tailwindcss";
 
 @theme {
-  --color-navy-950: #0a0f1d;
-  --color-navy-900: #0f172a;
-  --color-navy-800: #1a2236;
-  --color-navy-700: #243049;
-  --color-navy-600: #2f3d5c;
-  --color-tan-500: #d4a86a;
-  --color-tan-400: #e2bd84;
-  --color-tan-300: #efd1a3;
-  --color-amber-soc: #f5a524;
-  --color-status-open: #60a5fa;
-  --color-status-progress: #facc15;
-  --color-status-contained: #fb923c;
-  --color-status-eradicated: #c084fc;
-  --color-status-recovered: #4ade80;
-  --color-status-closed: #94a3b8;
-  --color-sev-low: #4ade80;
-  --color-sev-medium: #facc15;
-  --color-sev-high: #fb923c;
-  --color-sev-critical: #f87171;
+  --color-navy-950: oklch(15% 0.035 260);
+  --color-navy-900: oklch(20% 0.035 260);
+  --color-navy-800: oklch(25% 0.035 260);
+  --color-navy-700: oklch(33% 0.032 260);
+  --color-navy-600: oklch(43% 0.03 260);
+  --color-tan-500: oklch(63% 0.19 255);
+  --color-tan-400: oklch(70% 0.17 255);
+  --color-tan-300: oklch(79% 0.12 255);
+  --color-amber-soc: oklch(75% 0.16 80);
+  --color-status-open: oklch(70% 0.15 255);
+  --color-status-progress: oklch(78% 0.15 88);
+  --color-status-contained: oklch(72% 0.16 50);
+  --color-status-eradicated: oklch(70% 0.15 305);
+  --color-status-recovered: oklch(74% 0.15 155);
+  --color-status-closed: oklch(70% 0.025 260);
+  --color-sev-low: oklch(74% 0.15 155);
+  --color-sev-medium: oklch(78% 0.15 88);
+  --color-sev-high: oklch(72% 0.16 50);
+  --color-sev-critical: oklch(68% 0.19 25);
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
 }
 
 html,
 body {
-  background: var(--color-navy-950);
-  color: #e2e8f0;
+  background:
+    radial-gradient(circle at 20% 8%, oklch(25% 0.065 255 / 0.55), transparent 30rem),
+    radial-gradient(circle at 86% 18%, oklch(28% 0.05 260 / 0.38), transparent 26rem),
+    linear-gradient(135deg, var(--color-navy-950), oklch(17% 0.036 260));
+  color: oklch(94% 0.012 255);
   font-family: var(--font-sans);
   min-height: 100%;
 }
@@ -57,6 +60,20 @@ a {
   background: var(--color-navy-900);
   border: 1px solid var(--color-navy-700);
   border-radius: 0.5rem;
+  box-shadow: 0 18px 60px oklch(13% 0.03 260 / 0.2);
+}
+
+.kelpie-panel {
+  background: linear-gradient(180deg, oklch(23% 0.033 260), oklch(19% 0.035 260));
+  border: 1px solid oklch(36% 0.032 260);
+  border-radius: 0.5rem;
+}
+
+.kelpie-soft-panel {
+  background: oklch(24% 0.033 260 / 0.92);
+  border: 1px solid oklch(36% 0.032 260);
+  border-radius: 0.5rem;
+  color: oklch(94% 0.012 255);
 }
 
 .kelpie-input {
@@ -85,7 +102,7 @@ a {
   font-size: 0.875rem;
   border: 1px solid transparent;
   cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease;
+  transition: background-color 160ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms cubic-bezier(0.22, 1, 0.36, 1), transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .kelpie-btn:focus-visible,
 a:focus-visible,
@@ -99,10 +116,12 @@ summary:focus-visible {
 }
 .kelpie-btn-primary {
   background: var(--color-tan-500);
-  color: var(--color-navy-950);
+  color: oklch(99% 0.006 255);
+  box-shadow: 0 10px 24px oklch(55% 0.18 255 / 0.26);
 }
 .kelpie-btn-primary:hover {
   background: var(--color-tan-400);
+  transform: translateY(-1px);
 }
 .kelpie-btn-secondary {
   background: var(--color-navy-800);
@@ -137,7 +156,7 @@ summary:focus-visible {
 .kelpie-table th {
   padding: 0.625rem 0.875rem;
   font-weight: 600;
-  color: #94a3b8;
+  color: oklch(71% 0.032 260);
   border-bottom: 1px solid var(--color-navy-700);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -148,7 +167,7 @@ summary:focus-visible {
   border-bottom: 1px solid var(--color-navy-800);
 }
 .kelpie-table tr:hover td {
-  background: rgba(255, 255, 255, 0.02);
+  background: oklch(30% 0.034 260 / 0.38);
 }
 
 .kelpie-badge {
@@ -161,6 +180,8 @@ summary:focus-visible {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   border: 1px solid currentColor;
+  background: currentColor;
+  background: color-mix(in oklch, currentColor 10%, transparent);
 }
 
 .kelpie-chip {

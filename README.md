@@ -4,11 +4,11 @@ Incident response and case management for small SOC teams. Open source, self-hos
 
 > Herd the incident from alert to closed.
 
-Kelpie is a SOC case management tool inspired by TheHive and CyDarm but built as a single Next.js application backed by Postgres. No Java, no Elasticsearch, no Cassandra. Run it on one modest VM.
+Kelpie is a SOC case management tool built as a single Next.js application backed by Postgres. It is designed to run cleanly on one modest VM.
 
 ## Features in this MVP
 
-- Multi-tenant organisations, BetterAuth email-and-password sign in, admin / analyst / read_only roles.
+- Multi-tenant organisations, BetterAuth email-and-password sign-in, administrator / analyst / read_only roles.
 - Inbound alert API (`POST /api/v1/alerts`), triage queue, dismiss or promote to a case.
 - Cases with the full incident lifecycle (`open → in_progress → contained → eradicated → recovered → closed`), severity, TLP, PAP, classification, MITRE ATT&CK tagging, per-org case numbers (`KP-YYYY-NNNN`).
 - Tasks with cadence: define playbooks with timed steps, applying a playbook spawns tasks with due times.
