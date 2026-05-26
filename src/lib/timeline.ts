@@ -15,6 +15,8 @@ export type TimelineEventType =
   | "file_uploaded"
   | "playbook_started"
   | "sla_breach"
+  | "response_action"
+  | "custom_field_changed"
   | "custom";
 
 export async function writeTimelineEvent(opts: {

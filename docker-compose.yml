@@ -54,7 +54,7 @@ services:
         apk add --no-cache curl >/dev/null
         echo "Kelpie cron sidecar ready"
         while true; do
-          for path in sla webhooks enrichment; do
+          for path in sla webhooks enrichment connectors ti; do
             curl -sS -X POST -H "Authorization: Bearer $$CRON_SECRET" \
               "http://app:3000/api/cron/$$path" >/dev/null || true
           done

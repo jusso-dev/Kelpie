@@ -286,6 +286,7 @@ export const cases = pgTable(
     containedAt: timestamp("contained_at", { withTimezone: true }),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     slaState: jsonb("sla_state").notNull().default(sql`'{}'::jsonb`),
+    version: integer("version").notNull().default(0),
   },
   (t) => [
     uniqueIndex("cases_org_number_idx").on(t.organisationId, t.caseNumber),
@@ -522,6 +523,9 @@ export const caseTemplates = pgTable("case_templates", {
     .notNull()
     .default(sql`'[]'::jsonb`),
   defaultTasks: jsonb("default_tasks").notNull().default(sql`'[]'::jsonb`),
+  defaultCustomFields: jsonb("default_custom_fields")
+    .notNull()
+    .default(sql`'{}'::jsonb`),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -627,6 +631,257 @@ export const enrichmentCache = pgTable(
   ],
 );
 
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Phase 3: SOAR response actions                                             */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+export const responseActions = pgTable(
+  "response_actions",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    kind: text("kind").notNull(),
+    config: jsonb("config").notNull().default(sql`'{}'::jsonb`),
+    isActive: boolean("is_active").notNull().default(true),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("response_actions_org_idx").on(t.organisationId)],
+);
+
+export const responseActionRuns = pgTable(
+  "response_action_runs",
+  {
+    id: text("id").primaryKey(),
+    actionId: text("action_id")
+      .notNull()
+      .references(() => responseActions.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    requestedBy: text("requested_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    status: text("status").notNull().default("pending"),
+    target: text("target"),
+    request: jsonb("request").notNull().default(sql`'{}'::jsonb`),
+    response: jsonb("response").notNull().default(sql`'{}'::jsonb`),
+    startedAt: timestamp("started_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("response_action_runs_case_idx").on(t.caseId),
+    index("response_action_runs_action_idx").on(t.actionId),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Phase 3: SIEM connectors                                                   */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+export const siemConnectors = pgTable(
+  "siem_connectors",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    name: text("name").notNull(),
+    config: jsonb("config").notNull().default(sql`'{}'::jsonb`),
+    mapping: jsonb("mapping").notNull().default(sql`'{}'::jsonb`),
+    isActive: boolean("is_active").notNull().default(true),
+    lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    alertsProduced: integer("alerts_produced").notNull().default(0),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("siem_connectors_org_idx").on(t.organisationId)],
+);
+
+export const siemCursors = pgTable("siem_cursors", {
+  connectorId: text("connector_id")
+    .primaryKey()
+    .references(() => siemConnectors.id, { onDelete: "cascade" }),
+  cursor: text("cursor"),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Phase 3: Threat intelligence                                               */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+export const tiFeeds = pgTable(
+  "ti_feeds",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    kind: text("kind").notNull(),
+    url: text("url"),
+    config: jsonb("config").notNull().default(sql`'{}'::jsonb`),
+    pollIntervalMinutes: integer("poll_interval_minutes").notNull().default(60),
+    isActive: boolean("is_active").notNull().default(true),
+    lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    indicatorCount: integer("indicator_count").notNull().default(0),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("ti_feeds_org_idx").on(t.organisationId)],
+);
+
+export const tiIndicators = pgTable(
+  "ti_indicators",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    feedId: text("feed_id")
+      .notNull()
+      .references(() => tiFeeds.id, { onDelete: "cascade" }),
+    value: text("value").notNull(),
+    type: text("type").notNull(),
+    confidence: integer("confidence").notNull().default(50),
+    firstSeen: timestamp("first_seen", { withTimezone: true }),
+    lastSeen: timestamp("last_seen", { withTimezone: true }),
+    tags: jsonb("tags").notNull().default(sql`'[]'::jsonb`),
+    attributes: jsonb("attributes").notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("ti_indicators_feed_value_type_idx").on(
+      t.feedId,
+      t.value,
+      t.type,
+    ),
+    index("ti_indicators_org_value_idx").on(t.organisationId, t.value),
+    index("ti_indicators_org_type_idx").on(t.organisationId, t.type),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Phase 3: Custom field builder                                              */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+export const customFieldDefinitions = pgTable(
+  "custom_field_definitions",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    entity: text("entity").notNull().default("case"),
+    key: text("key").notNull(),
+    label: text("label").notNull(),
+    type: text("type").notNull(),
+    options: jsonb("options").notNull().default(sql`'[]'::jsonb`),
+    required: boolean("required").notNull().default(false),
+    orderIndex: integer("order_index").notNull().default(0),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("custom_field_defs_org_entity_key_idx").on(
+      t.organisationId,
+      t.entity,
+      t.key,
+    ),
+  ],
+);
+
+export const customFieldValues = pgTable(
+  "custom_field_values",
+  {
+    id: text("id").primaryKey(),
+    entity: text("entity").notNull(),
+    entityId: text("entity_id").notNull(),
+    fieldId: text("field_id")
+      .notNull()
+      .references(() => customFieldDefinitions.id, { onDelete: "cascade" }),
+    value: jsonb("value"),
+  },
+  (t) => [
+    uniqueIndex("custom_field_values_entity_field_idx").on(
+      t.entityId,
+      t.fieldId,
+    ),
+    index("custom_field_values_field_idx").on(t.fieldId),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Phase 3: Real-time presence                                                */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+export const casePresence = pgTable(
+  "case_presence",
+  {
+    id: text("id").primaryKey(),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    userName: text("user_name").notNull(),
+    editingField: text("editing_field"),
+    typing: boolean("typing").notNull().default(false),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("case_presence_case_user_idx").on(t.caseId, t.userId),
+    index("case_presence_case_idx").on(t.caseId),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Phase 3: SSO transient login state                                         */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+export const ssoLoginStates = pgTable("sso_login_states", {
+  id: text("id").primaryKey(),
+  organisationId: text("organisation_id")
+    .notNull()
+    .references(() => organisations.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  nonce: text("nonce"),
+  codeVerifier: text("code_verifier"),
+  redirectTo: text("redirect_to"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export type Organisation = typeof organisations.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type TwoFactor = typeof twoFactors.$inferSelect;
@@ -645,6 +900,16 @@ export type ApiToken = typeof apiTokens.$inferSelect;
 export type Webhook = typeof webhooks.$inferSelect;
 export type WebhookDelivery = typeof webhookDeliveries.$inferSelect;
 export type EnrichmentCacheRow = typeof enrichmentCache.$inferSelect;
+export type ResponseAction = typeof responseActions.$inferSelect;
+export type ResponseActionRun = typeof responseActionRuns.$inferSelect;
+export type SiemConnector = typeof siemConnectors.$inferSelect;
+export type SiemCursor = typeof siemCursors.$inferSelect;
+export type TiFeed = typeof tiFeeds.$inferSelect;
+export type TiIndicator = typeof tiIndicators.$inferSelect;
+export type CustomFieldDefinition = typeof customFieldDefinitions.$inferSelect;
+export type CustomFieldValue = typeof customFieldValues.$inferSelect;
+export type CasePresence = typeof casePresence.$inferSelect;
+export type SsoLoginState = typeof ssoLoginStates.$inferSelect;
 
 export type PlaybookStep = {
   id: string;

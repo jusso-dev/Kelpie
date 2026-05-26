@@ -1,5 +1,6 @@
 import { db } from "@/db";
 import { apiTokens, slaPolicies, users, webhooks } from "@/db/schema";
+import Link from "next/link";
 import { eq, desc, asc } from "drizzle-orm";
 import { requireUser } from "@/lib/session";
 import TokenCreator from "@/components/token-creator";
@@ -53,6 +54,32 @@ export default async function SettingsPage() {
           Organisation: {user.organisationName}
         </p>
       </header>
+
+      <section className="kelpie-card p-5">
+        <h2 className="text-sm font-medium text-slate-300 mb-3">
+          More configuration
+        </h2>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <Link
+            href="/settings/integrations"
+            className="kelpie-btn kelpie-btn-secondary justify-center"
+          >
+            Integrations
+          </Link>
+          <Link
+            href="/settings/fields"
+            className="kelpie-btn kelpie-btn-secondary justify-center"
+          >
+            Custom fields
+          </Link>
+          <Link
+            href="/settings/sso"
+            className="kelpie-btn kelpie-btn-secondary justify-center"
+          >
+            Single sign-on
+          </Link>
+        </div>
+      </section>
 
       <section className="kelpie-card p-5">
         <h2 className="text-sm font-medium text-slate-300 mb-3">Team</h2>

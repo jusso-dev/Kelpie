@@ -6,11 +6,13 @@ import { readCache, writeCache } from "./cache";
 import { reverseDnsProvider } from "./providers/reverse-dns";
 import { urlParseProvider } from "./providers/url-parse";
 import { virusTotalProvider } from "./providers/virustotal";
+import { tiProvider } from "./providers/ti";
 
 const allProviders: EnrichmentProvider[] = [
   reverseDnsProvider,
   urlParseProvider,
   virusTotalProvider,
+  tiProvider,
 ];
 
 export function listProviders() {
@@ -132,7 +134,7 @@ export async function enrichOrganisationPending(
     .where(
       and(
         eq(cases.organisationId, organisationId),
-        sql`${observables.enrichment} = '{}'::jsonb`,
+        sql`${observables.enrichment}->>'enriched_at' is null`,
       ),
     )
     .limit(limit);

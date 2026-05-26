@@ -8,6 +8,7 @@ import { and, eq } from "drizzle-orm";
 import { requireRole } from "@/lib/session";
 import {
   CASE_ENUMS,
+  CaseVersionConflictError,
   closeCaseCore,
   createCaseCore,
   patchCaseCore,
@@ -18,6 +19,10 @@ import {
   type CaseStatus,
   type CaseTlp,
 } from "@/lib/cases-core";
+
+export type CaseFieldResult =
+  | { ok: true }
+  | { ok: false; conflict: Record<string, unknown> };
 import { writeTimelineEvent } from "@/lib/timeline";
 import { fireWebhook } from "@/lib/webhooks";
 import { parseTagsInput } from "@/lib/tags";
@@ -76,7 +81,8 @@ export async function updateCaseField(
   caseId: string,
   field: "severity" | "assigneeId" | "tlp" | "pap" | "classification",
   value: string | null,
-) {
+  expectedVersion?: number,
+): Promise<CaseFieldResult> {
   const user = await requireRole(["admin", "analyst"]);
   const patch: Parameters<typeof patchCaseCore>[3] = {};
   if (field === "severity") {
@@ -102,21 +108,38 @@ export async function updateCaseField(
   } else if (field === "assigneeId") {
     patch.assigneeId = value;
   }
-  await patchCaseCore(user.organisationId, user.id, caseId, patch);
+  try {
+    await patchCaseCore(user.organisationId, user.id, caseId, patch, expectedVersion);
+  } catch (e) {
+    if (e instanceof CaseVersionConflictError) {
+      return { ok: false, conflict: e.current };
+    }
+    throw e;
+  }
   revalidatePath(`/cases/${caseId}`);
+  return { ok: true };
 }
 
 export async function updateCaseTags(
   caseId: string,
   field: "tags" | "dataClassificationTags",
   values: string[],
-) {
+  expectedVersion?: number,
+): Promise<CaseFieldResult> {
   const user = await requireRole(["admin", "analyst"]);
   const patch: Parameters<typeof patchCaseCore>[3] = {};
   patch[field] = values;
-  await patchCaseCore(user.organisationId, user.id, caseId, patch);
+  try {
+    await patchCaseCore(user.organisationId, user.id, caseId, patch, expectedVersion);
+  } catch (e) {
+    if (e instanceof CaseVersionConflictError) {
+      return { ok: false, conflict: e.current };
+    }
+    throw e;
+  }
   revalidatePath(`/cases/${caseId}`);
   revalidatePath("/cases");
+  return { ok: true };
 }
 
 export async function closeCase(formData: FormData) {

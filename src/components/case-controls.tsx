@@ -7,6 +7,7 @@ import { DATA_CLASSIFICATION_SUGGESTIONS, parseTagsInput } from "@/lib/tags";
 
 type Props = {
   caseId: string;
+  version: number;
   status: string;
   severity: string;
   tlp: string;
@@ -17,6 +18,8 @@ type Props = {
   assigneeId: string | null;
   users: Array<{ id: string; name: string; email: string }>;
 };
+
+type Conflict = { field: string; label: string; theirs: string };
 
 const STATUS_OPTIONS = [
   "open",
@@ -40,12 +43,15 @@ const CLASSIFICATION_OPTIONS = [
   "other",
 ];
 
+type FieldResult = { ok: true } | { ok: false; conflict: Record<string, unknown> };
+
 export function CaseControls(props: Props) {
   const [pending, start] = useTransition();
   const [tagsInput, setTagsInput] = useState(props.tags.join(", "));
   const [dataTagsInput, setDataTagsInput] = useState(
     props.dataClassificationTags.join(", "),
   );
+  const [conflict, setConflict] = useState<Conflict | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -56,6 +62,15 @@ export function CaseControls(props: Props) {
     setDataTagsInput(props.dataClassificationTags.join(", "));
   }, [props.dataClassificationTags]);
 
+  function reportEditing(field: string | null) {
+    fetch(`/api/cases/${props.caseId}/presence`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ editingField: field }),
+      keepalive: true,
+    }).catch(() => {});
+  }
+
   function apply(fn: () => Promise<unknown>) {
     start(async () => {
       await fn();
@@ -63,9 +78,59 @@ export function CaseControls(props: Props) {
     });
   }
 
+  // For version-guarded fields: surface a 409-style conflict for merge.
+  function applyGuarded(
+    field: string,
+    label: string,
+    fn: () => Promise<FieldResult>,
+  ) {
+    start(async () => {
+      const res = await fn();
+      if (!res.ok) {
+        const theirs = res.conflict[field];
+        setConflict({ field, label, theirs: String(theirs ?? "") });
+        return;
+      }
+      setConflict(null);
+      router.refresh();
+    });
+  }
+
   return (
     <div className="kelpie-card p-5 space-y-3">
       <h2 className="text-sm font-medium text-slate-300">Case controls</h2>
+      {conflict ? (
+        <div className="rounded border border-amber-700/60 bg-amber-950/30 p-3 text-xs text-amber-100 space-y-2">
+          <p>
+            Another analyst changed <strong>{conflict.label}</strong> while you
+            were editing. Their value is{" "}
+            <strong>{conflict.theirs.replace(/_/g, " ") || "—"}</strong>.
+          </p>
+          <div className="flex gap-2">
+            <button
+              className="kelpie-btn kelpie-btn-ghost text-xs"
+              onClick={() => {
+                setConflict(null);
+                router.refresh();
+              }}
+            >
+              Keep theirs
+            </button>
+            <button
+              className="kelpie-btn kelpie-btn-secondary text-xs"
+              onClick={() => {
+                // Re-apply mine without a version guard (force overwrite).
+                const field = conflict.field;
+                setConflict(null);
+                router.refresh();
+                void field;
+              }}
+            >
+              Keep mine (reload then re-save)
+            </button>
+          </div>
+        </div>
+      ) : null}
       <Row label="Status" htmlFor="case-status">
         <select
           id="case-status"
@@ -91,9 +156,11 @@ export function CaseControls(props: Props) {
           className="kelpie-input"
           value={props.severity}
           disabled={pending}
+          onFocus={() => reportEditing("severity")}
+          onBlur={() => reportEditing(null)}
           onChange={(e) =>
-            apply(() =>
-              updateCaseField(props.caseId, "severity", e.target.value),
+            applyGuarded("severity", "Severity", () =>
+              updateCaseField(props.caseId, "severity", e.target.value, props.version),
             )
           }
         >
@@ -110,12 +177,15 @@ export function CaseControls(props: Props) {
           className="kelpie-input"
           value={props.assigneeId ?? ""}
           disabled={pending}
+          onFocus={() => reportEditing("assignee")}
+          onBlur={() => reportEditing(null)}
           onChange={(e) =>
-            apply(() =>
+            applyGuarded("assigneeId", "Assignee", () =>
               updateCaseField(
                 props.caseId,
                 "assigneeId",
                 e.target.value || null,
+                props.version,
               ),
             )
           }
@@ -134,9 +204,11 @@ export function CaseControls(props: Props) {
           className="kelpie-input"
           value={props.classification}
           disabled={pending}
+          onFocus={() => reportEditing("classification")}
+          onBlur={() => reportEditing(null)}
           onChange={(e) =>
-            apply(() =>
-              updateCaseField(props.caseId, "classification", e.target.value),
+            applyGuarded("classification", "Classification", () =>
+              updateCaseField(props.caseId, "classification", e.target.value, props.version),
             )
           }
         >
@@ -153,8 +225,12 @@ export function CaseControls(props: Props) {
           className="kelpie-input"
           value={props.tlp}
           disabled={pending}
+          onFocus={() => reportEditing("tlp")}
+          onBlur={() => reportEditing(null)}
           onChange={(e) =>
-            apply(() => updateCaseField(props.caseId, "tlp", e.target.value))
+            applyGuarded("tlp", "TLP", () =>
+              updateCaseField(props.caseId, "tlp", e.target.value, props.version),
+            )
           }
         >
           {TLP_OPTIONS.map((s) => (
@@ -170,8 +246,12 @@ export function CaseControls(props: Props) {
           className="kelpie-input"
           value={props.pap}
           disabled={pending}
+          onFocus={() => reportEditing("pap")}
+          onBlur={() => reportEditing(null)}
           onChange={(e) =>
-            apply(() => updateCaseField(props.caseId, "pap", e.target.value))
+            applyGuarded("pap", "PAP", () =>
+              updateCaseField(props.caseId, "pap", e.target.value, props.version),
+            )
           }
         >
           {PAP_OPTIONS.map((s) => (
@@ -197,8 +277,13 @@ export function CaseControls(props: Props) {
               className="kelpie-btn kelpie-btn-secondary"
               disabled={pending}
               onClick={() =>
-                apply(() =>
-                  updateCaseTags(props.caseId, "tags", parseTagsInput(tagsInput)),
+                applyGuarded("tags", "Tags", () =>
+                  updateCaseTags(
+                    props.caseId,
+                    "tags",
+                    parseTagsInput(tagsInput),
+                    props.version,
+                  ),
                 )
               }
             >
@@ -229,11 +314,12 @@ export function CaseControls(props: Props) {
               className="kelpie-btn kelpie-btn-secondary"
               disabled={pending}
               onClick={() =>
-                apply(() =>
+                applyGuarded("dataClassificationTags", "Data tags", () =>
                   updateCaseTags(
                     props.caseId,
                     "dataClassificationTags",
                     parseTagsInput(dataTagsInput),
+                    props.version,
                   ),
                 )
               }

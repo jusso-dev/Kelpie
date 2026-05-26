@@ -7,6 +7,7 @@ import {
   CircleUserRound,
   Database,
   LayoutDashboard,
+  Radar,
   Settings,
   ShieldCheck,
 } from "lucide-react";
@@ -17,6 +18,7 @@ const links = [
   { href: "/alerts", label: "Alerts", icon: Bell },
   { href: "/cases", label: "Cases", icon: BriefcaseBusiness },
   { href: "/observables", label: "Observables", icon: Database },
+  { href: "/ti", label: "Threat intel", icon: Radar },
   { href: "/playbooks", label: "Playbooks", icon: BookOpen },
   { href: "/settings", label: "Settings", icon: Settings },
   { href: "/account/security", label: "Security", icon: ShieldCheck },
