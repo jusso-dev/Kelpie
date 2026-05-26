@@ -83,6 +83,22 @@ export async function updateConnector(id: string, formData: FormData) {
   revalidatePath("/settings/integrations");
 }
 
+export async function updateConnectorMapping(id: string, rawMapping: string) {
+  const user = await requireRole(["admin"]);
+  const mapping = parseMapping(rawMapping);
+  if (!mapping) throw new Error("Mapping JSON is required");
+  await db
+    .update(siemConnectors)
+    .set({ mapping })
+    .where(
+      and(
+        eq(siemConnectors.id, id),
+        eq(siemConnectors.organisationId, user.organisationId),
+      ),
+    );
+  revalidatePath("/settings/integrations");
+}
+
 export async function setConnectorActive(id: string, active: boolean) {
   const user = await requireRole(["admin"]);
   await db

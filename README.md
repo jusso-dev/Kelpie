@@ -21,7 +21,7 @@ Kelpie is a SOC case management tool built as a single Next.js application backe
 - Dashboard with open cases by severity, MTTA / MTTC / MTTR, top classifications.
 - Docker Compose deployment with Postgres.
 
-The roadmap is tracked as GitHub issues under the **roadmap** label and the **Phase 2** and **Phase 3** milestones. Phase 2 (SLA jobs, PDF export, enrichment, webhooks, the REST API) and Phase 3 (integrations and scale) are now built; see [Phase 3 features](#phase-3-integrations-and-scale) below.
+The original roadmap is tracked as GitHub issues under the **roadmap** label. Phase 2 is shipped, and the Phase 3 integration, SSO, threat-intel, response-action, customisation, and presence work is now built; see [Shipped Phase 3 features](#shipped-phase-3-features) below. The mobile companion app and broader collaborative field-editing polish remain follow-up work.
 
 ## Product screenshots
 
@@ -108,9 +108,9 @@ Screenshots below were captured from a seeded local demo workspace with fake use
 - Tailwind v4 with bespoke components (no shadcn install needed at MVP scope).
 - Background work runs through internal `/api/cron/*` endpoints driven by an external scheduler (a Docker Compose sidecar in the bundled stack). No extra queue or worker process is required.
 
-## Phase 3: integrations and scale
+## Shipped Phase 3 features
 
-Phase 3 turns Kelpie from a standalone case manager into something that plugs into a SOC's existing tooling. Everything below is multi-tenant: configuration lives per organisation.
+These shipped features turn Kelpie from a standalone case manager into something that plugs into a SOC's existing tooling. Everything below is multi-tenant: configuration lives per organisation.
 
 ### SIEM connectors (Splunk, Elastic, Sentinel)
 
@@ -166,10 +166,10 @@ Per-organisation SSO sits alongside email/password, configured under **Settings 
 
 SSO sessions are BetterAuth-compatible: the callback creates a session row and sets the standard signed BetterAuth session cookie, so the rest of the app treats SSO and password sessions identically.
 
-### Real-time presence and collaborative editing
+### Real-time presence and version-guarded edits
 
 - **Presence**: opening a case shows the avatars of other analysts viewing it, plus a "typing a comment" indicator. Transport is a Postgres-backed roster streamed over server-sent events at `/api/cases/{id}/presence`, so it works across app replicas without Redis. Rows expire after 30s of inactivity and are pruned on the cron tick.
-- **Per-field locking and conflict handling**: editing a guarded case field (severity, classification, TLP, PAP, assignee, tags) shows an "X is editing this" indicator from presence. Saves carry an optimistic version stamp; a conflicting save is rejected with a 409 carrying the current value, and the UI offers keep-mine / keep-theirs. The same version guard is enforced on `PATCH /api/v1/cases/{id}` (send `version`; a stale value returns `409 version_conflict`).
+- **Version-guarded field saves**: guarded case fields (severity, classification, TLP, PAP, assignee, tags) carry an optimistic version stamp. A conflicting save is rejected with the current value so the analyst can reload and choose what to keep. The same version guard is enforced on `PATCH /api/v1/cases/{id}` (send `version`; a stale value returns `409 version_conflict`).
 
 The mobile companion app (issue #32) is intentionally out of scope for this build.
 

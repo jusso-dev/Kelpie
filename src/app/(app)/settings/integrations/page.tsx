@@ -53,6 +53,7 @@ export default async function IntegrationsSettingsPage() {
             lastPolledAt: c.lastPolledAt ? c.lastPolledAt.toISOString() : null,
             lastError: c.lastError,
             alertsProduced: c.alertsProduced,
+            mapping: c.mapping,
           }))}
           kinds={kinds}
           isAdmin={isAdmin}

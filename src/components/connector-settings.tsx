@@ -8,6 +8,7 @@ import {
   deleteConnector,
   pollConnectorNow,
   setConnectorActive,
+  updateConnectorMapping,
 } from "@/actions/connectors";
 
 type ConfigField = {
@@ -35,6 +36,7 @@ type ConnectorRow = {
   lastPolledAt: string | null;
   lastError: string | null;
   alertsProduced: number;
+  mapping: unknown;
 };
 
 export default function ConnectorSettings({
@@ -51,6 +53,8 @@ export default function ConnectorSettings({
   const [kind, setKind] = useState(kinds[0]?.kind ?? "");
   const [pending, setPending] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [editingMapping, setEditingMapping] = useState<string | null>(null);
+  const [mappingJson, setMappingJson] = useState("");
   const selected = kinds.find((k) => k.kind === kind);
 
   async function onCreate(e: React.FormEvent<HTMLFormElement>) {
@@ -154,6 +158,15 @@ export default function ConnectorSettings({
                         ) : null}
                         <button
                           className="kelpie-btn kelpie-btn-ghost text-xs"
+                          onClick={() => {
+                            setEditingMapping(c.id);
+                            setMappingJson(JSON.stringify(c.mapping, null, 2));
+                          }}
+                        >
+                          Edit mapping
+                        </button>
+                        <button
+                          className="kelpie-btn kelpie-btn-ghost text-xs"
                           onClick={async () => {
                             await setConnectorActive(c.id, !c.isActive);
                             router.refresh();
@@ -180,6 +193,58 @@ export default function ConnectorSettings({
           </tbody>
         </table>
       </div>
+
+      {editingMapping ? (
+        <form
+          className="kelpie-card p-4 space-y-3"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setPending(true);
+            try {
+              await updateConnectorMapping(editingMapping, mappingJson);
+              setEditingMapping(null);
+              setMappingJson("");
+              router.refresh();
+            } catch (err) {
+              alert((err as Error).message);
+            } finally {
+              setPending(false);
+            }
+          }}
+        >
+          <div>
+            <h3 className="text-sm font-medium text-slate-300">
+              Edit field mapping
+            </h3>
+            <p className="text-xs text-slate-500">
+              JSON paths map vendor records to Kelpie alert fields. At minimum,
+              provide title and externalRef.
+            </p>
+          </div>
+          <textarea
+            className="kelpie-input font-mono text-xs"
+            rows={12}
+            value={mappingJson}
+            onChange={(e) => setMappingJson(e.target.value)}
+            spellCheck={false}
+          />
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="kelpie-btn kelpie-btn-ghost"
+              onClick={() => {
+                setEditingMapping(null);
+                setMappingJson("");
+              }}
+            >
+              Cancel
+            </button>
+            <button className="kelpie-btn kelpie-btn-primary" disabled={pending}>
+              {pending ? "Saving..." : "Save mapping"}
+            </button>
+          </div>
+        </form>
+      ) : null}
 
       {isAdmin ? (
         adding ? (
