@@ -23,6 +23,82 @@ Kelpie is a SOC case management tool built as a single Next.js application backe
 
 The roadmap is tracked as GitHub issues under the **roadmap** label and the **Phase 2** and **Phase 3** milestones. Phase 2 (SLA jobs, PDF export, enrichment, webhooks, the REST API) and Phase 3 (integrations and scale) are now built; see [Phase 3 features](#phase-3-integrations-and-scale) below.
 
+## Product screenshots
+
+Screenshots below were captured from a seeded local demo workspace with fake users, cases, alerts, threat intelligence, integrations, SSO, and custom-field data.
+
+<details>
+<summary>Operations workspace</summary>
+
+### Dashboard
+
+![Kelpie dashboard](public/screenshots/kelpie-dashboard.png)
+
+### Alert triage queue
+
+![Kelpie alert triage queue](public/screenshots/kelpie-alerts.png)
+
+### Case list
+
+![Kelpie case list](public/screenshots/kelpie-cases.png)
+
+</details>
+
+<details>
+<summary>Case investigation</summary>
+
+### Case detail
+
+![Kelpie case detail](public/screenshots/kelpie-case-detail.png)
+
+### Case observables
+
+![Kelpie case observables](public/screenshots/kelpie-case-observables.png)
+
+### Case comments
+
+![Kelpie case comments](public/screenshots/kelpie-case-comments.png)
+
+</details>
+
+<details>
+<summary>Threat data and response content</summary>
+
+### Observable search
+
+![Kelpie observable search](public/screenshots/kelpie-observables.png)
+
+### Threat intelligence
+
+![Kelpie threat intelligence](public/screenshots/kelpie-threat-intel.png)
+
+### Playbooks
+
+![Kelpie playbooks](public/screenshots/kelpie-playbooks.png)
+
+</details>
+
+<details>
+<summary>Administration</summary>
+
+### Settings
+
+![Kelpie settings](public/screenshots/kelpie-settings.png)
+
+### Integrations
+
+![Kelpie integrations](public/screenshots/kelpie-integrations.png)
+
+### Custom fields
+
+![Kelpie custom fields](public/screenshots/kelpie-custom-fields.png)
+
+### Single sign-on
+
+![Kelpie SSO settings](public/screenshots/kelpie-sso.png)
+
+</details>
+
 ## Stack
 
 - Next.js 16, React 19, server components and server actions.
