@@ -6,6 +6,8 @@ Incident response and case management for small SOC teams. Open source, self-hos
 
 > Incidents. Managed. Closed.
 
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template?template=https%3A%2F%2Fgithub.com%2Fjusso-dev%2FKelpie&plugins=postgresql&envs=DATABASE_URL%2CBETTER_AUTH_SECRET%2CBETTER_AUTH_URL%2CAPP_URL%2CCRON_SECRET%2CEMAIL_FROM%2CSTORAGE_DRIVER%2CSTORAGE_LOCAL_DIR&DATABASE_URLDesc=Railway+Postgres+connection+string&DATABASE_URLDefault=%24%7B%7BPostgres.DATABASE_URL%7D%7D&BETTER_AUTH_SECRETDesc=Secret+used+to+sign+authentication+sessions&BETTER_AUTH_SECRETDefault=%24%7B%7Bsecret%2864%29%7D%7D&BETTER_AUTH_URLDesc=Public+origin+used+by+BetterAuth&BETTER_AUTH_URLDefault=https%3A%2F%2F%24%7B%7BRAILWAY_PUBLIC_DOMAIN%7D%7D&APP_URLDesc=Public+origin+used+for+links+and+SSO+callbacks&APP_URLDefault=https%3A%2F%2F%24%7B%7BRAILWAY_PUBLIC_DOMAIN%7D%7D&CRON_SECRETDesc=Secret+protecting+the+background+job+endpoints&CRON_SECRETDefault=%24%7B%7Bsecret%2864%29%7D%7D&EMAIL_FROMDesc=From+address+for+notification+emails&EMAIL_FROMDefault=kelpie%40example.com&STORAGE_DRIVERDesc=Attachment+storage+driver&STORAGE_DRIVERDefault=local&STORAGE_LOCAL_DIRDesc=Local+attachment+directory&STORAGE_LOCAL_DIRDefault=%2Fdata%2Fuploads)
+
 Kelpie is a SOC case management tool built as a single Next.js application backed by Postgres. It is designed to run cleanly on one modest VM.
 
 ## Features in this MVP
@@ -172,6 +174,18 @@ SSO sessions are BetterAuth-compatible: the callback creates a session row and s
 - **Version-guarded field saves**: guarded case fields (severity, classification, TLP, PAP, assignee, tags) carry an optimistic version stamp. A conflicting save is rejected with the current value so the analyst can reload and choose what to keep. The same version guard is enforced on `PATCH /api/v1/cases/{id}` (send `version`; a stale value returns `409 version_conflict`).
 
 The mobile companion app (issue #32) is intentionally out of scope for this build.
+
+## Deploy on Railway
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template?template=https%3A%2F%2Fgithub.com%2Fjusso-dev%2FKelpie&plugins=postgresql&envs=DATABASE_URL%2CBETTER_AUTH_SECRET%2CBETTER_AUTH_URL%2CAPP_URL%2CCRON_SECRET%2CEMAIL_FROM%2CSTORAGE_DRIVER%2CSTORAGE_LOCAL_DIR&DATABASE_URLDesc=Railway+Postgres+connection+string&DATABASE_URLDefault=%24%7B%7BPostgres.DATABASE_URL%7D%7D&BETTER_AUTH_SECRETDesc=Secret+used+to+sign+authentication+sessions&BETTER_AUTH_SECRETDefault=%24%7B%7Bsecret%2864%29%7D%7D&BETTER_AUTH_URLDesc=Public+origin+used+by+BetterAuth&BETTER_AUTH_URLDefault=https%3A%2F%2F%24%7B%7BRAILWAY_PUBLIC_DOMAIN%7D%7D&APP_URLDesc=Public+origin+used+for+links+and+SSO+callbacks&APP_URLDefault=https%3A%2F%2F%24%7B%7BRAILWAY_PUBLIC_DOMAIN%7D%7D&CRON_SECRETDesc=Secret+protecting+the+background+job+endpoints&CRON_SECRETDefault=%24%7B%7Bsecret%2864%29%7D%7D&EMAIL_FROMDesc=From+address+for+notification+emails&EMAIL_FROMDefault=kelpie%40example.com&STORAGE_DRIVERDesc=Attachment+storage+driver&STORAGE_DRIVERDefault=local&STORAGE_LOCAL_DIRDesc=Local+attachment+directory&STORAGE_LOCAL_DIRDefault=%2Fdata%2Fuploads)
+
+The button provisions Kelpie and Postgres, generates the authentication and cron secrets, applies database migrations before each release, and waits for the database-backed health check before routing traffic.
+
+After the first deploy:
+
+1. Open the generated Railway domain and create the first organisation and administrator account.
+2. For durable local attachments, attach a Railway volume to the Kelpie service at `/data`. Without a volume, attachments are lost on redeploy. Alternatively, configure the S3 variables from `.env.example`.
+3. Schedule the five authenticated `/api/cron/*` endpoints described in [Background jobs](#background-jobs-cron). Railway cron services, or any external scheduler, can call them with `Authorization: Bearer $CRON_SECRET`.
 
 ## Getting started (local dev)
 
