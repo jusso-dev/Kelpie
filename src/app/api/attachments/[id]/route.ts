@@ -23,7 +23,7 @@ export async function GET(
     .where(and(eq(attachments.id, id), eq(cases.organisationId, user.organisationId)))
     .limit(1);
   if (!row) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ error: "Attachment not found" }, { status: 404 });
   }
   const data = await readFile(row.storageKey);
   return new NextResponse(new Uint8Array(data), {
