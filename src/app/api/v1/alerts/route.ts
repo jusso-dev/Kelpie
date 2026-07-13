@@ -2,9 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
 import { alerts } from "@/db/schema";
-import { newId } from "@/lib/utils";
 import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
-import { fireWebhook } from "@/lib/webhooks";
+import { ingestAlert } from "@/lib/alerts-core";
 
 const observableSchema = z.object({
   type: z.string(),
@@ -34,25 +33,15 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
-  const id = newId("alert");
-  await db.insert(alerts).values({
-    id,
-    organisationId: auth.token.organisationId,
-    source: parsed.data.source,
-    externalRef: parsed.data.externalRef ?? null,
-    title: parsed.data.title,
-    description: parsed.data.description ?? null,
-    severity: parsed.data.severity,
-    rawPayload: parsed.data.rawPayload ?? {},
-    observables: parsed.data.observables ?? [],
-  });
-  await fireWebhook(auth.token.organisationId, "alert.created", {
-    alert_id: id,
-    title: parsed.data.title,
-    severity: parsed.data.severity,
-    source: parsed.data.source,
-  });
-  return NextResponse.json({ id, status: "new" }, { status: 201 });
+  const result = await ingestAlert(auth.token.organisationId, parsed.data);
+  return NextResponse.json(
+    {
+      id: result.alert.id,
+      status: result.alert.status,
+      deduplicated: !result.created,
+    },
+    { status: result.created ? 201 : 200 },
+  );
 }
 
 export async function GET(req: Request) {

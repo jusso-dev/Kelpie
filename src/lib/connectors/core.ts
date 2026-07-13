@@ -1,28 +1,10 @@
 import { db } from "@/db";
-import { alerts, siemConnectors, siemCursors } from "@/db/schema";
+import { siemConnectors, siemCursors } from "@/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
-import { newId } from "@/lib/utils";
-import { fireWebhook } from "@/lib/webhooks";
+import { ingestAlert } from "@/lib/alerts-core";
 import { getConnector } from "./registry";
 import { applyMapping } from "./mapping";
 import type { FieldMapping } from "./types";
-
-async function alertExists(
-  organisationId: string,
-  externalRef: string,
-): Promise<boolean> {
-  const [row] = await db
-    .select({ id: alerts.id })
-    .from(alerts)
-    .where(
-      and(
-        eq(alerts.organisationId, organisationId),
-        eq(alerts.externalRef, externalRef),
-      ),
-    )
-    .limit(1);
-  return Boolean(row);
-}
 
 export async function pollConnector(connectorId: string): Promise<{
   produced: number;
@@ -67,29 +49,11 @@ export async function pollConnector(connectorId: string): Promise<{
 
     for (const record of records) {
       const normalised = applyMapping(record, mapping);
-      if (normalised.externalRef) {
-        const dup = await alertExists(conn.organisationId, normalised.externalRef);
-        if (dup) continue;
-      }
-      const id = newId("alert");
-      await db.insert(alerts).values({
-        id,
-        organisationId: conn.organisationId,
-        source: `${conn.kind}:${conn.name}`,
-        externalRef: normalised.externalRef,
-        title: normalised.title,
-        description: normalised.description,
-        severity: normalised.severity,
-        rawPayload: normalised.rawPayload,
-        observables: normalised.observables,
-      });
-      produced++;
-      await fireWebhook(conn.organisationId, "alert.created", {
-        alert_id: id,
-        title: normalised.title,
-        severity: normalised.severity,
+      const result = await ingestAlert(conn.organisationId, {
+        ...normalised,
         source: `${conn.kind}:${conn.name}`,
       });
+      if (result.created) produced++;
     }
 
     if (nextCursor && nextCursor !== cursor) {

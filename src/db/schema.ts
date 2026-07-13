@@ -228,6 +228,9 @@ export const alerts = pgTable(
   (t) => [
     index("alerts_org_status_idx").on(t.organisationId, t.status),
     index("alerts_org_created_idx").on(t.organisationId, t.createdAt),
+    uniqueIndex("alerts_org_source_external_ref_idx")
+      .on(t.organisationId, t.source, t.externalRef)
+      .where(sql`${t.externalRef} is not null`),
   ],
 );
 
