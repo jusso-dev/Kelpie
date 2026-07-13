@@ -18,7 +18,8 @@
     "smoke:phase3": "tsx scripts/smoke-phase3.ts",
     "test:alert-ingestion": "tsx scripts/test-alert-ingestion.ts",
     "test:outbound-request": "tsx scripts/test-outbound-request.ts",
-    "test:auth": "tsx scripts/test-auth.ts"
+    "test:auth": "tsx scripts/test-auth.ts",
+    "test:case-queue": "tsx scripts/test-case-queue.ts"
   },
   "dependencies": {
     "@node-saml/node-saml": "^5.1.0",
