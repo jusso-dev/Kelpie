@@ -78,7 +78,7 @@ export async function patchTaskCore(
     title?: string;
     description?: string | null;
   },
-): Promise<void> {
+): Promise<{ caseId: string }> {
   const existing = await loadTaskInOrg(taskId, organisationId);
   if (!existing) throw new Error("Task not found");
 
@@ -99,7 +99,7 @@ export async function patchTaskCore(
   if (patch.dueAt !== undefined) set.dueAt = patch.dueAt;
   if (patch.title !== undefined && patch.title.trim()) set.title = patch.title.trim();
   if (patch.description !== undefined) set.description = patch.description;
-  if (Object.keys(set).length === 0) return;
+  if (Object.keys(set).length === 0) return { caseId: existing.caseId };
 
   await db.update(caseTasks).set(set).where(eq(caseTasks.id, taskId));
   await writeTimelineEvent({
@@ -113,4 +113,5 @@ export async function patchTaskCore(
       title: set.title ?? existing.title,
     },
   });
+  return { caseId: existing.caseId };
 }

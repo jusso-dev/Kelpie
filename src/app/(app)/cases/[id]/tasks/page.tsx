@@ -9,7 +9,8 @@ type Props = { params: Promise<{ id: string }> };
 
 export default async function CaseTasksPage({ params }: Props) {
   const { id } = await params;
-  await requireUser();
+  const user = await requireUser();
+  const canEdit = user.role === "admin" || user.role === "analyst";
   const tasks = await db
     .select({
       id: caseTasks.id,
@@ -37,10 +38,10 @@ export default async function CaseTasksPage({ params }: Props) {
             No tasks on this case. Add one, or start a playbook.
           </div>
         ) : (
-          tasks.map((t) => <TaskRow key={t.id} task={t} />)
+          tasks.map((t) => <TaskRow key={t.id} task={t} canEdit={canEdit} />)
         )}
       </div>
-      <div>
+      {canEdit ? <div>
         <form action={createTask} className="kelpie-card p-5 space-y-3">
           <input type="hidden" name="caseId" value={id} />
           <h2 className="text-sm font-medium text-slate-300">Add a task</h2>
@@ -75,7 +76,7 @@ export default async function CaseTasksPage({ params }: Props) {
             <button className="kelpie-btn kelpie-btn-primary">Add task</button>
           </div>
         </form>
-      </div>
+      </div> : null}
     </div>
   );
 }

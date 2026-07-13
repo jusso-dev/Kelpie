@@ -366,7 +366,11 @@ export const caseTasks = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (t) => [index("case_tasks_case_idx").on(t.caseId)],
+  (t) => [
+    index("case_tasks_case_idx").on(t.caseId),
+    index("case_tasks_status_due_idx").on(t.status, t.dueAt),
+    index("case_tasks_assignee_status_idx").on(t.assigneeId, t.status),
+  ],
 );
 
 /* ────────────────────────────────────────────────────────────────────────── */

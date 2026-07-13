@@ -22,7 +22,13 @@ type Task = {
 
 const STATUSES = ["todo", "in_progress", "done", "blocked"];
 
-export default function TaskRow({ task }: { task: Task }) {
+export default function TaskRow({
+  task,
+  canEdit = true,
+}: {
+  task: Task;
+  canEdit?: boolean;
+}) {
   const [pending, start] = useTransition();
   const router = useRouter();
 
@@ -90,7 +96,8 @@ export default function TaskRow({ task }: { task: Task }) {
           className="kelpie-input w-full sm:max-w-[10rem]"
           aria-label={`Status for task ${task.title}`}
           value={task.status}
-          disabled={pending}
+          disabled={pending || !canEdit}
+          title={canEdit ? undefined : "Your role cannot update tasks"}
           onChange={(e) => change(e.target.value)}
         >
           {STATUSES.map((s) => (

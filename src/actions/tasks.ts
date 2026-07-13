@@ -7,9 +7,6 @@ import {
   patchTaskCore,
   TASK_STATUS_VALUES,
 } from "@/lib/tasks-core";
-import { db } from "@/db";
-import { caseTasks } from "@/db/schema";
-import { eq } from "drizzle-orm";
 
 export async function createTask(formData: FormData) {
   const user = await requireRole(["admin", "analyst"]);
@@ -30,16 +27,10 @@ export async function setTaskStatus(taskId: string, next: string) {
   if (!(TASK_STATUS_VALUES as readonly string[]).includes(next)) {
     throw new Error("Invalid status");
   }
-  await patchTaskCore(user.organisationId, user.id, taskId, {
+  const task = await patchTaskCore(user.organisationId, user.id, taskId, {
     status: next as (typeof TASK_STATUS_VALUES)[number],
   });
-  const [t] = await db
-    .select({ caseId: caseTasks.caseId })
-    .from(caseTasks)
-    .where(eq(caseTasks.id, taskId))
-    .limit(1);
-  if (t) {
-    revalidatePath(`/cases/${t.caseId}/tasks`);
-    revalidatePath(`/cases/${t.caseId}`);
-  }
+  revalidatePath("/tasks");
+  revalidatePath(`/cases/${task.caseId}/tasks`);
+  revalidatePath(`/cases/${task.caseId}`);
 }

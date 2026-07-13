@@ -43,6 +43,13 @@
       "when": 1783944152013,
       "tag": "0005_pale_warstar",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783945602811,
+      "tag": "0006_awesome_psynapse",
+      "breakpoints": true
     }
   ]
 }

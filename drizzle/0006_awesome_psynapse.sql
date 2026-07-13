@@ -1,0 +1,2 @@
+CREATE INDEX "case_tasks_status_due_idx" ON "case_tasks" USING btree ("status","due_at");--> statement-breakpoint
+CREATE INDEX "case_tasks_assignee_status_idx" ON "case_tasks" USING btree ("assignee_id","status");
