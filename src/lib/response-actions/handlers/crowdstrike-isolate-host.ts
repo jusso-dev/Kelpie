@@ -1,4 +1,5 @@
 import type { ActionHandler, CaseObservable } from "../types";
+import { safeFetch } from "@/lib/outbound-request";
 
 function targetOptions(observables: CaseObservable[]) {
   return observables
@@ -11,7 +12,7 @@ async function getFalconToken(
   clientId: string,
   clientSecret: string,
 ): Promise<string> {
-  const res = await fetch(`${base}/oauth2/token`, {
+  const res = await safeFetch(`${base}/oauth2/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -90,7 +91,7 @@ export const crowdstrikeIsolateHost: ActionHandler = {
     }
 
     const filter = encodeURIComponent(`hostname:'${hostname}'`);
-    const lookupRes = await fetch(
+    const lookupRes = await safeFetch(
       `${base}/devices/queries/devices/v1?filter=${filter}`,
       {
         headers: { Authorization: `Bearer ${token}` },
@@ -110,7 +111,7 @@ export const crowdstrikeIsolateHost: ActionHandler = {
       };
     }
 
-    const containRes = await fetch(
+    const containRes = await safeFetch(
       `${base}/devices/entities/devices-actions/v2?action_name=contain`,
       {
         method: "POST",

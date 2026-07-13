@@ -8,6 +8,8 @@
 
 import http from "node:http";
 import crypto from "node:crypto";
+
+process.env.KELPIE_ALLOW_PRIVATE_NETWORKS ??= "true";
 import { db } from "../src/db";
 import {
   organisations,

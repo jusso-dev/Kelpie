@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type { OidcConfig } from "./config";
+import { safeFetch } from "@/lib/outbound-request";
 
 type Discovery = {
   authorization_endpoint: string;
@@ -14,7 +15,7 @@ export async function discover(issuer: string): Promise<Discovery> {
   const base = issuer.replace(/\/$/, "");
   const cached = discoveryCache.get(base);
   if (cached && Date.now() - cached.at < DISCOVERY_TTL_MS) return cached.doc;
-  const res = await fetch(`${base}/.well-known/openid-configuration`, {
+  const res = await safeFetch(`${base}/.well-known/openid-configuration`, {
     signal: AbortSignal.timeout(15000),
   });
   if (!res.ok) throw new Error(`OIDC discovery failed: HTTP ${res.status}`);
@@ -85,7 +86,7 @@ export async function exchangeCode(opts: {
     client_secret: opts.config.clientSecret,
     code_verifier: opts.verifier,
   });
-  const res = await fetch(opts.discovery.token_endpoint, {
+  const res = await safeFetch(opts.discovery.token_endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
@@ -104,7 +105,7 @@ export async function exchangeCode(opts: {
 
   // Merge userinfo for providers that keep email/role out of the id_token.
   if (opts.discovery.userinfo_endpoint && json.access_token) {
-    const ui = await fetch(opts.discovery.userinfo_endpoint, {
+    const ui = await safeFetch(opts.discovery.userinfo_endpoint, {
       headers: { Authorization: `Bearer ${json.access_token}` },
       signal: AbortSignal.timeout(15000),
     }).catch(() => null);

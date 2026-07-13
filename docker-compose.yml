@@ -30,6 +30,7 @@ services:
       VIRUSTOTAL_API_KEY: ${VIRUSTOTAL_API_KEY:-}
       STORAGE_DRIVER: local
       STORAGE_LOCAL_DIR: /data/uploads
+      KELPIE_ALLOW_PRIVATE_NETWORKS: ${KELPIE_ALLOW_PRIVATE_NETWORKS:-false}
       NODE_ENV: production
     depends_on:
       db:

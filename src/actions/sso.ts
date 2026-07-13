@@ -8,6 +8,7 @@ import {
   type SamlConfig,
   type SsoRole,
 } from "@/lib/sso/config";
+import { assertSafeOutboundUrl } from "@/lib/outbound-request";
 
 function parseRoleMap(raw: FormDataEntryValue | null): Record<string, SsoRole> {
   if (typeof raw !== "string" || !raw.trim()) return {};
@@ -29,6 +30,7 @@ export async function saveOidcConfig(formData: FormData) {
   if (!issuer || !clientId || !clientSecret) {
     throw new Error("Issuer, client id and client secret are required");
   }
+  await assertSafeOutboundUrl(issuer);
   const config: OidcConfig = {
     issuer,
     clientId,

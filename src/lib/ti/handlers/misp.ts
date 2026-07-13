@@ -1,5 +1,6 @@
 import type { TiFeedHandler } from "../types";
 import { normaliseType } from "../normalise";
+import { safeFetch } from "@/lib/outbound-request";
 
 /** MISP attribute search via the REST API. */
 export const mispFeed: TiFeedHandler = {
@@ -22,7 +23,7 @@ export const mispFeed: TiFeedHandler = {
     const apiKey = String(config.api_key ?? "");
     if (!apiKey) throw new Error("MISP feed needs an API key");
     const last = String(config.last ?? "7d");
-    const res = await fetch(`${url.replace(/\/$/, "")}/attributes/restSearch`, {
+    const res = await safeFetch(`${url.replace(/\/$/, "")}/attributes/restSearch`, {
       method: "POST",
       headers: {
         Authorization: apiKey,

@@ -9,6 +9,7 @@ import { newId } from "@/lib/utils";
 import { getConnector, listConnectors } from "@/lib/connectors/registry";
 import { pollConnector } from "@/lib/connectors/core";
 import type { FieldMapping } from "@/lib/connectors/types";
+import { assertSafeOutboundUrl } from "@/lib/outbound-request";
 
 function collectConfig(kind: string, formData: FormData): Record<string, string> {
   const handler = getConnector(kind);
@@ -36,6 +37,12 @@ function parseMapping(raw: FormDataEntryValue | null): FieldMapping | null {
   }
 }
 
+async function validateConnectorUrls(config: Record<string, string>) {
+  for (const key of ["base_url", "cloud_url"]) {
+    if (config[key]) await assertSafeOutboundUrl(config[key]);
+  }
+}
+
 export async function createConnector(formData: FormData) {
   const user = await requireRole(["admin"]);
   const name = String(formData.get("name") ?? "").trim();
@@ -44,6 +51,7 @@ export async function createConnector(formData: FormData) {
   const handler = getConnector(kind);
   if (!handler) throw new Error("Unknown connector kind");
   const config = collectConfig(kind, formData);
+  await validateConnectorUrls(config);
   const mapping = parseMapping(formData.get("mapping")) ?? handler.defaultMapping;
   await db.insert(siemConnectors).values({
     id: newId("siem"),
@@ -73,6 +81,7 @@ export async function updateConnector(id: string, formData: FormData) {
   if (!existing) throw new Error("Connector not found");
   const name = String(formData.get("name") ?? existing.name).trim();
   const config = collectConfig(existing.kind, formData);
+  await validateConnectorUrls(config);
   const mapping =
     parseMapping(formData.get("mapping")) ??
     (existing.mapping as FieldMapping);

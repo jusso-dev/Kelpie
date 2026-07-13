@@ -1,5 +1,6 @@
 import type { TiFeedHandler } from "../types";
 import { normaliseType } from "../normalise";
+import { safeFetch } from "@/lib/outbound-request";
 
 /**
  * Generic CSV / TXT feed: one indicator per line. Lines may be a bare value or
@@ -21,7 +22,7 @@ export const csvFeed: TiFeedHandler = {
   async fetchIndicators({ url, config }) {
     if (!url) throw new Error("CSV feed needs a URL");
     const defaultType = String(config.default_type ?? "").trim();
-    const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
+    const res = await safeFetch(url, { signal: AbortSignal.timeout(30000) });
     if (!res.ok) throw new Error(`Feed HTTP ${res.status}`);
     const text = await res.text();
     const out = [];

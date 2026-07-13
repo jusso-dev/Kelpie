@@ -8,6 +8,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { requireRole } from "@/lib/session";
 import { newId } from "@/lib/utils";
 import { WEBHOOK_EVENTS, type WebhookEvent } from "@/lib/webhook-events";
+import { assertSafeOutboundUrl } from "@/lib/outbound-request";
 
 function parseEvents(raw: FormDataEntryValue | null): WebhookEvent[] {
   if (typeof raw !== "string") return [];
@@ -30,11 +31,7 @@ export async function createWebhook(formData: FormData): Promise<{ secret: strin
   const events = parseEvents(formData.get("events"));
   if (!name) throw new Error("Name required");
   if (!url) throw new Error("URL required");
-  try {
-    new URL(url);
-  } catch {
-    throw new Error("URL must be valid");
-  }
+  await assertSafeOutboundUrl(url);
   if (events.length === 0) throw new Error("Pick at least one event");
   const secret = "whk_" + crypto.randomBytes(24).toString("base64url");
   await db.insert(webhooks).values({

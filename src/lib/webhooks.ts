@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { webhooks, webhookDeliveries } from "@/db/schema";
 import { and, eq, lte, sql } from "drizzle-orm";
 import { newId } from "./utils";
+import { safeFetch } from "./outbound-request";
 import type { WebhookEvent } from "./webhook-events";
 
 export { WEBHOOK_EVENTS, type WebhookEvent } from "./webhook-events";
@@ -95,7 +96,7 @@ export async function processPendingDeliveries(limit = 25): Promise<{
     let responseBody = "";
     let error: string | null = null;
     try {
-      const res = await fetch(sub.url, {
+      const res = await safeFetch(sub.url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -187,6 +187,8 @@ After the first deploy:
 2. For durable local attachments, attach a Railway volume to the Kelpie service at `/data`. Without a volume, attachments are lost on redeploy. Alternatively, configure the S3 variables from `.env.example`.
 3. Schedule the five authenticated `/api/cron/*` endpoints described in [Background jobs](#background-jobs-cron). Railway cron services, or any external scheduler, can call them with `Authorization: Bearer $CRON_SECRET`.
 
+Kelpie rejects webhook, feed, connector, response-action, and OIDC destinations that resolve to private or local network addresses. If your self-hosted deployment intentionally connects to services on its private network, set `KELPIE_ALLOW_PRIVATE_NETWORKS=true`. Leave it disabled for public integrations.
+
 ## Getting started (local dev)
 
 ```bash

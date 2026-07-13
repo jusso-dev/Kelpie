@@ -9,6 +9,7 @@ import { ilike, sql } from "drizzle-orm";
 import { requireRole, requireUser } from "@/lib/session";
 import { newId } from "@/lib/utils";
 import { getFeedHandler, listFeedHandlers } from "@/lib/ti/registry";
+import { assertSafeOutboundUrl } from "@/lib/outbound-request";
 import {
   casesForValue,
   countCaseAppearances,
@@ -37,6 +38,7 @@ export async function createFeed(formData: FormData) {
   const interval = Number(formData.get("pollIntervalMinutes") ?? 60);
   if (!name) throw new Error("Name is required");
   if (!getFeedHandler(kind)) throw new Error("Unknown feed kind");
+  if (url) await assertSafeOutboundUrl(url);
   const config = collectConfig(kind, formData);
   await db.insert(tiFeeds).values({
     id: newId("tif"),

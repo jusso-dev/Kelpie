@@ -1,4 +1,5 @@
 import type { Connector } from "../types";
+import { safeFetch } from "@/lib/outbound-request";
 
 /**
  * Polls Elastic Security detection signals via the signals search API. Cursor
@@ -54,7 +55,7 @@ export const elasticConnector: Connector = {
         },
       },
     };
-    const res = await fetch(`${base}/${encodeURIComponent(index)}/_search`, {
+    const res = await safeFetch(`${base}/${encodeURIComponent(index)}/_search`, {
       method: "POST",
       headers: {
         Authorization: `ApiKey ${apiKey}`,

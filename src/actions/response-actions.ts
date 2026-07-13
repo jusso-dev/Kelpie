@@ -8,6 +8,7 @@ import { requireRole } from "@/lib/session";
 import { newId } from "@/lib/utils";
 import { getActionHandler, listActionHandlers } from "@/lib/response-actions/registry";
 import { runResponseAction } from "@/lib/response-actions/core";
+import { assertSafeOutboundUrl } from "@/lib/outbound-request";
 
 function collectConfig(kind: string, formData: FormData): Record<string, string> {
   const handler = getActionHandler(kind);
@@ -24,6 +25,10 @@ function collectConfig(kind: string, formData: FormData): Record<string, string>
   return config;
 }
 
+async function validateActionUrls(config: Record<string, string>) {
+  if (config.base_url) await assertSafeOutboundUrl(config.base_url);
+}
+
 export async function createResponseAction(formData: FormData) {
   const user = await requireRole(["admin"]);
   const name = String(formData.get("name") ?? "").trim();
@@ -31,6 +36,7 @@ export async function createResponseAction(formData: FormData) {
   if (!name) throw new Error("Name is required");
   if (!getActionHandler(kind)) throw new Error("Unknown action kind");
   const config = collectConfig(kind, formData);
+  await validateActionUrls(config);
   await db.insert(responseActions).values({
     id: newId("ra"),
     organisationId: user.organisationId,
@@ -58,6 +64,7 @@ export async function updateResponseActionConfig(id: string, formData: FormData)
   if (!existing) throw new Error("Action not found");
   const name = String(formData.get("name") ?? existing.name).trim();
   const config = collectConfig(existing.kind, formData);
+  await validateActionUrls(config);
   await db
     .update(responseActions)
     .set({ name, config })

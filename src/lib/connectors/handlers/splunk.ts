@@ -1,4 +1,5 @@
 import type { Connector } from "../types";
+import { safeFetch } from "@/lib/outbound-request";
 
 /**
  * Polls one or more Splunk saved searches via the REST search jobs API and
@@ -59,7 +60,7 @@ export const splunkConnector: Connector = {
         exec_mode: "oneshot",
         count: "200",
       });
-      const res = await fetch(`${base}/services/search/jobs/export`, {
+      const res = await safeFetch(`${base}/services/search/jobs/export`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
