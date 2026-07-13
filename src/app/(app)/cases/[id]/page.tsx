@@ -21,6 +21,7 @@ import { evaluateSla, loadSlaPolicy } from "@/lib/sla";
 import { getCustomFieldsForEntity } from "@/lib/custom-fields";
 import { listAvailableActions } from "@/lib/response-actions/core";
 import { format } from "date-fns";
+import CaseSummaryEditor from "@/components/case-summary-editor";
 
 type Props = { params: Promise<{ id: string }> };
 
@@ -72,14 +73,12 @@ export default async function CaseOverviewPage({ params }: Props) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
       <div className="md:col-span-2 space-y-4">
-        <div className="kelpie-card p-5">
-          <h2 className="text-sm font-medium text-slate-300 mb-2">Summary</h2>
-          <p className="text-sm text-slate-200 whitespace-pre-wrap">
-            {c.summary || (
-              <span className="text-slate-500">No summary yet.</span>
-            )}
-          </p>
-        </div>
+        <CaseSummaryEditor
+          caseId={c.id}
+          summary={c.summary}
+          version={c.version}
+          canEdit={canEdit}
+        />
 
         <div className="kelpie-card p-5">
           <h2 className="text-sm font-medium text-slate-300 mb-3">
@@ -105,6 +104,8 @@ export default async function CaseOverviewPage({ params }: Props) {
           )}
           <MitrePicker
             caseId={c.id}
+            version={c.version}
+            canEdit={canEdit}
             selected={techniques}
             techniques={MITRE_TECHNIQUES}
           />
@@ -183,7 +184,7 @@ export default async function CaseOverviewPage({ params }: Props) {
       </div>
 
       <aside className="space-y-4">
-        <CasePresence caseId={c.id} />
+        <CasePresence />
         <SlaPanel evaluation={slaEvaluation} />
         <CaseControls
           caseId={c.id}

@@ -93,41 +93,46 @@ export async function PATCH(
     );
   }
 
-  if (parsed.data.status) {
-    await setCaseStatusCore(
-      auth.token.organisationId,
-      null,
-      id,
-      parsed.data.status,
-    );
-    await fireWebhook(auth.token.organisationId, "case.status_changed", {
-      case_id: id,
-      to: parsed.data.status,
-    });
-    if (parsed.data.status === "closed") {
-      await fireWebhook(auth.token.organisationId, "case.closed", { case_id: id });
+  let workingVersion = parsed.data.version;
+  try {
+    if (parsed.data.status) {
+      const updated = await setCaseStatusCore(
+        auth.token.organisationId,
+        null,
+        id,
+        parsed.data.status,
+        workingVersion,
+      );
+      workingVersion = updated.version;
+      await fireWebhook(auth.token.organisationId, "case.status_changed", {
+        case_id: id,
+        to: parsed.data.status,
+      });
+      if (parsed.data.status === "closed") {
+        await fireWebhook(auth.token.organisationId, "case.closed", { case_id: id });
+      }
     }
-  }
-  const { status, version, custom_fields, ...patch } = parsed.data;
-  if (Object.keys(patch).length > 0) {
-    try {
+
+    const { status, version, custom_fields, ...patch } = parsed.data;
+    if (Object.keys(patch).length > 0) {
       await patchCaseCore(
         auth.token.organisationId,
         null,
         id,
         patch,
-        version,
+        workingVersion,
       );
-    } catch (e) {
-      if (e instanceof CaseVersionConflictError) {
-        return NextResponse.json(
-          { error: "version_conflict", current: e.current },
-          { status: 409 },
-        );
-      }
-      throw e;
     }
+  } catch (e) {
+    if (e instanceof CaseVersionConflictError) {
+      return NextResponse.json(
+        { error: "version_conflict", current: e.current },
+        { status: 409 },
+      );
+    }
+    throw e;
   }
+  const { custom_fields } = parsed.data;
   if (custom_fields && Object.keys(custom_fields).length > 0) {
     try {
       await setCustomFieldsByKey(

@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { updateCaseField, updateCaseStatus, updateCaseTags } from "@/actions/cases";
 import { DATA_CLASSIFICATION_SUGGESTIONS, parseTagsInput } from "@/lib/tags";
+import { FieldLock, useCaseCollaboration } from "@/components/case-collaboration";
 
 type Props = {
   caseId: string;
@@ -19,7 +20,15 @@ type Props = {
   users: Array<{ id: string; name: string; email: string }>;
 };
 
-type Conflict = { field: string; label: string; theirs: string };
+type Conflict = {
+  field: string;
+  label: string;
+  mine: string;
+  theirs: string;
+  version: number;
+  options?: Array<{ value: string; label: string }>;
+  submit: (value: string, version: number) => Promise<FieldResult>;
+};
 
 const STATUS_OPTIONS = [
   "open",
@@ -52,7 +61,10 @@ export function CaseControls(props: Props) {
     props.dataClassificationTags.join(", "),
   );
   const [conflict, setConflict] = useState<Conflict | null>(null);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeValue, setMergeValue] = useState("");
   const router = useRouter();
+  const { beginEditing, endEditing, lockedBy } = useCaseCollaboration();
 
   useEffect(() => {
     setTagsInput(props.tags.join(", "));
@@ -62,55 +74,74 @@ export function CaseControls(props: Props) {
     setDataTagsInput(props.dataClassificationTags.join(", "));
   }, [props.dataClassificationTags]);
 
-  function reportEditing(field: string | null) {
-    fetch(`/api/cases/${props.caseId}/presence`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ editingField: field }),
-      keepalive: true,
-    }).catch(() => {});
-  }
-
-  function apply(fn: () => Promise<unknown>) {
-    start(async () => {
-      await fn();
-      router.refresh();
-    });
-  }
-
-  // For version-guarded fields: surface a 409-style conflict for merge.
   function applyGuarded(
     field: string,
     label: string,
-    fn: () => Promise<FieldResult>,
+    mine: string,
+    submit: (value: string, version: number) => Promise<FieldResult>,
+    options?: Array<{ value: string; label: string }>,
+    version = props.version,
   ) {
     start(async () => {
-      const res = await fn();
+      const res = await submit(mine, version);
       if (!res.ok) {
         const theirs = res.conflict[field];
-        setConflict({ field, label, theirs: String(theirs ?? "") });
+        const nextConflict = {
+          field,
+          label,
+          mine,
+          theirs: Array.isArray(theirs) ? theirs.join(", ") : String(theirs ?? ""),
+          version: Number(res.conflict.version),
+          options,
+          submit,
+        };
+        setConflict(nextConflict);
+        setMergeValue(mine);
+        setMergeOpen(false);
         return;
       }
       setConflict(null);
+      setMergeOpen(false);
       router.refresh();
     });
   }
+
+  function resolveConflict(value: string) {
+    if (!conflict) return;
+    applyGuarded(
+      conflict.field,
+      conflict.label,
+      value,
+      conflict.submit,
+      conflict.options,
+      conflict.version,
+    );
+  }
+
+  const optionList = (values: readonly string[]) =>
+    values.map((value) => ({ value, label: value.replace(/_/g, " ") }));
 
   return (
     <div className="kelpie-card p-5 space-y-3">
       <h2 className="text-sm font-medium text-slate-300">Case controls</h2>
       {conflict ? (
         <div className="rounded border border-amber-700/60 bg-amber-950/30 p-3 text-xs text-amber-100 space-y-2">
-          <p>
+          <p role="alert">
             Another analyst changed <strong>{conflict.label}</strong> while you
-            were editing. Their value is{" "}
-            <strong>{conflict.theirs.replace(/_/g, " ") || "—"}</strong>.
+            were editing.
           </p>
-          <div className="flex gap-2">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-amber-50">
+            <dt className="text-amber-300">Theirs</dt>
+            <dd className="break-words">{conflict.theirs.replace(/_/g, " ") || "Empty"}</dd>
+            <dt className="text-amber-300">Yours</dt>
+            <dd className="break-words">{conflict.mine.replace(/_/g, " ") || "Empty"}</dd>
+          </dl>
+          <div className="flex flex-wrap gap-2">
             <button
               className="kelpie-btn kelpie-btn-ghost text-xs"
               onClick={() => {
                 setConflict(null);
+                setMergeOpen(false);
                 router.refresh();
               }}
             >
@@ -118,17 +149,53 @@ export function CaseControls(props: Props) {
             </button>
             <button
               className="kelpie-btn kelpie-btn-secondary text-xs"
-              onClick={() => {
-                // Re-apply mine without a version guard (force overwrite).
-                const field = conflict.field;
-                setConflict(null);
-                router.refresh();
-                void field;
-              }}
+              onClick={() => resolveConflict(conflict.mine)}
+              disabled={pending}
             >
-              Keep mine (reload then re-save)
+              Keep mine
+            </button>
+            <button
+              className="kelpie-btn kelpie-btn-secondary text-xs"
+              onClick={() => setMergeOpen(true)}
+              disabled={pending}
+            >
+              Merge
             </button>
           </div>
+          {mergeOpen ? (
+            <div className="space-y-2 border-t border-amber-800/60 pt-2">
+              <label htmlFor="case-conflict-merge" className="block text-amber-200">
+                Merged value
+              </label>
+              {conflict.options ? (
+                <select
+                  id="case-conflict-merge"
+                  className="kelpie-input"
+                  value={mergeValue}
+                  onChange={(event) => setMergeValue(event.target.value)}
+                >
+                  {conflict.options.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              ) : (
+                <textarea
+                  id="case-conflict-merge"
+                  className="kelpie-input"
+                  rows={3}
+                  value={mergeValue}
+                  onChange={(event) => setMergeValue(event.target.value)}
+                />
+              )}
+              <button
+                className="kelpie-btn kelpie-btn-primary text-xs"
+                onClick={() => resolveConflict(mergeValue)}
+                disabled={pending}
+              >
+                Save merged value
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
       <Row label="Status" htmlFor="case-status">
@@ -136,10 +203,17 @@ export function CaseControls(props: Props) {
           id="case-status"
           className="kelpie-input"
           value={props.status}
-          disabled={pending || props.status === "closed"}
+          disabled={pending || props.status === "closed" || Boolean(lockedBy("status"))}
+          onFocus={() => beginEditing("status")}
+          onBlur={() => endEditing("status")}
           onChange={(e) =>
-            apply(() =>
-              updateCaseStatus(props.caseId, e.target.value as CaseStatusOpt),
+            applyGuarded(
+              "status",
+              "Status",
+              e.target.value,
+              (value, version) =>
+                updateCaseStatus(props.caseId, value as CaseStatusOpt, version),
+              optionList(STATUS_OPTIONS),
             )
           }
         >
@@ -149,18 +223,23 @@ export function CaseControls(props: Props) {
             </option>
           ))}
         </select>
+        <FieldLock field="status" />
       </Row>
       <Row label="Severity" htmlFor="case-severity">
         <select
           id="case-severity"
           className="kelpie-input"
           value={props.severity}
-          disabled={pending}
-          onFocus={() => reportEditing("severity")}
-          onBlur={() => reportEditing(null)}
+          disabled={pending || Boolean(lockedBy("severity"))}
+          onFocus={() => beginEditing("severity")}
+          onBlur={() => endEditing("severity")}
           onChange={(e) =>
-            applyGuarded("severity", "Severity", () =>
-              updateCaseField(props.caseId, "severity", e.target.value, props.version),
+            applyGuarded(
+              "severity",
+              "Severity",
+              e.target.value,
+              (value, version) => updateCaseField(props.caseId, "severity", value, version),
+              optionList(SEVERITY_OPTIONS),
             )
           }
         >
@@ -170,23 +249,27 @@ export function CaseControls(props: Props) {
             </option>
           ))}
         </select>
+        <FieldLock field="severity" />
       </Row>
       <Row label="Assignee" htmlFor="case-assignee">
         <select
           id="case-assignee"
           className="kelpie-input"
           value={props.assigneeId ?? ""}
-          disabled={pending}
-          onFocus={() => reportEditing("assignee")}
-          onBlur={() => reportEditing(null)}
+          disabled={pending || Boolean(lockedBy("assigneeId"))}
+          onFocus={() => beginEditing("assigneeId")}
+          onBlur={() => endEditing("assigneeId")}
           onChange={(e) =>
-            applyGuarded("assigneeId", "Assignee", () =>
-              updateCaseField(
-                props.caseId,
-                "assigneeId",
-                e.target.value || null,
-                props.version,
-              ),
+            applyGuarded(
+              "assigneeId",
+              "Assignee",
+              e.target.value,
+              (value, version) =>
+                updateCaseField(props.caseId, "assigneeId", value || null, version),
+              [
+                { value: "", label: "Unassigned" },
+                ...props.users.map((user) => ({ value: user.id, label: user.name })),
+              ],
             )
           }
         >
@@ -197,18 +280,23 @@ export function CaseControls(props: Props) {
             </option>
           ))}
         </select>
+        <FieldLock field="assigneeId" />
       </Row>
       <Row label="Classification" htmlFor="case-classification">
         <select
           id="case-classification"
           className="kelpie-input"
           value={props.classification}
-          disabled={pending}
-          onFocus={() => reportEditing("classification")}
-          onBlur={() => reportEditing(null)}
+          disabled={pending || Boolean(lockedBy("classification"))}
+          onFocus={() => beginEditing("classification")}
+          onBlur={() => endEditing("classification")}
           onChange={(e) =>
-            applyGuarded("classification", "Classification", () =>
-              updateCaseField(props.caseId, "classification", e.target.value, props.version),
+            applyGuarded(
+              "classification",
+              "Classification",
+              e.target.value,
+              (value, version) => updateCaseField(props.caseId, "classification", value, version),
+              optionList(CLASSIFICATION_OPTIONS),
             )
           }
         >
@@ -218,18 +306,23 @@ export function CaseControls(props: Props) {
             </option>
           ))}
         </select>
+        <FieldLock field="classification" />
       </Row>
       <Row label="TLP" htmlFor="case-tlp">
         <select
           id="case-tlp"
           className="kelpie-input"
           value={props.tlp}
-          disabled={pending}
-          onFocus={() => reportEditing("tlp")}
-          onBlur={() => reportEditing(null)}
+          disabled={pending || Boolean(lockedBy("tlp"))}
+          onFocus={() => beginEditing("tlp")}
+          onBlur={() => endEditing("tlp")}
           onChange={(e) =>
-            applyGuarded("tlp", "TLP", () =>
-              updateCaseField(props.caseId, "tlp", e.target.value, props.version),
+            applyGuarded(
+              "tlp",
+              "TLP",
+              e.target.value,
+              (value, version) => updateCaseField(props.caseId, "tlp", value, version),
+              optionList(TLP_OPTIONS),
             )
           }
         >
@@ -239,18 +332,23 @@ export function CaseControls(props: Props) {
             </option>
           ))}
         </select>
+        <FieldLock field="tlp" />
       </Row>
       <Row label="PAP" htmlFor="case-pap">
         <select
           id="case-pap"
           className="kelpie-input"
           value={props.pap}
-          disabled={pending}
-          onFocus={() => reportEditing("pap")}
-          onBlur={() => reportEditing(null)}
+          disabled={pending || Boolean(lockedBy("pap"))}
+          onFocus={() => beginEditing("pap")}
+          onBlur={() => endEditing("pap")}
           onChange={(e) =>
-            applyGuarded("pap", "PAP", () =>
-              updateCaseField(props.caseId, "pap", e.target.value, props.version),
+            applyGuarded(
+              "pap",
+              "PAP",
+              e.target.value,
+              (value, version) => updateCaseField(props.caseId, "pap", value, version),
+              optionList(PAP_OPTIONS),
             )
           }
         >
@@ -260,6 +358,7 @@ export function CaseControls(props: Props) {
             </option>
           ))}
         </select>
+        <FieldLock field="pap" />
       </Row>
       <Row label="Tags" htmlFor="case-tags">
         <div className="flex flex-col gap-2">
@@ -267,7 +366,9 @@ export function CaseControls(props: Props) {
             id="case-tags"
             className="kelpie-input"
             value={tagsInput}
-            disabled={pending}
+            disabled={pending || Boolean(lockedBy("tags"))}
+            onFocus={() => beginEditing("tags")}
+            onBlur={() => endEditing("tags")}
             onChange={(e) => setTagsInput(e.target.value)}
             placeholder="ransomware, vip, watchlist"
           />
@@ -275,21 +376,21 @@ export function CaseControls(props: Props) {
             <button
               type="button"
               className="kelpie-btn kelpie-btn-secondary"
-              disabled={pending}
+              disabled={pending || Boolean(lockedBy("tags"))}
               onClick={() =>
-                applyGuarded("tags", "Tags", () =>
-                  updateCaseTags(
-                    props.caseId,
-                    "tags",
-                    parseTagsInput(tagsInput),
-                    props.version,
-                  ),
+                applyGuarded(
+                  "tags",
+                  "Tags",
+                  tagsInput,
+                  (value, version) =>
+                    updateCaseTags(props.caseId, "tags", parseTagsInput(value), version),
                 )
               }
             >
               Save tags
             </button>
           </div>
+          <FieldLock field="tags" />
         </div>
       </Row>
       <Row label="Data tags" htmlFor="case-data-tags">
@@ -298,7 +399,9 @@ export function CaseControls(props: Props) {
             id="case-data-tags"
             className="kelpie-input"
             value={dataTagsInput}
-            disabled={pending}
+            disabled={pending || Boolean(lockedBy("dataClassificationTags"))}
+            onFocus={() => beginEditing("dataClassificationTags")}
+            onBlur={() => endEditing("dataClassificationTags")}
             onChange={(e) => setDataTagsInput(e.target.value)}
             placeholder="pii, confidential, customer-data"
             list="case-data-tag-suggestions"
@@ -312,21 +415,26 @@ export function CaseControls(props: Props) {
             <button
               type="button"
               className="kelpie-btn kelpie-btn-secondary"
-              disabled={pending}
+              disabled={pending || Boolean(lockedBy("dataClassificationTags"))}
               onClick={() =>
-                applyGuarded("dataClassificationTags", "Data tags", () =>
-                  updateCaseTags(
-                    props.caseId,
-                    "dataClassificationTags",
-                    parseTagsInput(dataTagsInput),
-                    props.version,
-                  ),
+                applyGuarded(
+                  "dataClassificationTags",
+                  "Data tags",
+                  dataTagsInput,
+                  (value, version) =>
+                    updateCaseTags(
+                      props.caseId,
+                      "dataClassificationTags",
+                      parseTagsInput(value),
+                      version,
+                    ),
                 )
               }
             >
               Save data tags
             </button>
           </div>
+          <FieldLock field="dataClassificationTags" />
         </div>
       </Row>
     </div>

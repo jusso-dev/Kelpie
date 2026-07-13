@@ -1,14 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
-type Entry = {
-  userId: string;
-  userName: string;
-  editingField: string | null;
-  typing: boolean;
-  lastSeenAt: string;
-};
+import { useCaseCollaboration } from "@/components/case-collaboration";
 
 function initials(name: string): string {
   return name
@@ -29,55 +21,8 @@ const COLOURS = [
   "bg-cyan-700",
 ];
 
-export default function CasePresence({ caseId }: { caseId: string }) {
-  const [roster, setRoster] = useState<Entry[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const beat = (editingField: string | null = null) =>
-      fetch(`/api/cases/${caseId}/presence`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ editingField }),
-        keepalive: true,
-      }).catch(() => {});
-
-    beat();
-    const heartbeat = setInterval(() => beat(), 8000);
-
-    const es = new EventSource(`/api/cases/${caseId}/presence`);
-    es.onmessage = (e) => {
-      if (cancelled) return;
-      try {
-        const data = JSON.parse(e.data) as { roster: Entry[] };
-        setRoster(data.roster ?? []);
-      } catch {
-        // ignore malformed frame
-      }
-    };
-    es.onerror = () => {
-      // EventSource auto-reconnects; nothing to do.
-    };
-
-    const leave = () => {
-      navigator.sendBeacon?.(
-        `/api/cases/${caseId}/presence`,
-        new Blob([JSON.stringify({ leave: true })], { type: "application/json" }),
-      );
-    };
-    window.addEventListener("beforeunload", leave);
-
-    return () => {
-      cancelled = true;
-      clearInterval(heartbeat);
-      es.close();
-      window.removeEventListener("beforeunload", leave);
-      fetch(`/api/cases/${caseId}/presence`, { method: "DELETE", keepalive: true }).catch(
-        () => {},
-      );
-    };
-  }, [caseId]);
+export default function CasePresence() {
+  const { roster } = useCaseCollaboration();
 
   if (roster.length === 0) return null;
 

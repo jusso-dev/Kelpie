@@ -1,16 +1,21 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { updateMitreTechniques } from "@/actions/cases";
 import type { MitreTechnique } from "@/data/mitre";
+import { FieldLock, useCaseCollaboration } from "@/components/case-collaboration";
 
 export default function MitrePicker({
   caseId,
+  version,
+  canEdit,
   selected,
   techniques,
 }: {
   caseId: string;
+  version: number;
+  canEdit: boolean;
   selected: string[];
   techniques: MitreTechnique[];
 }) {
@@ -18,7 +23,15 @@ export default function MitrePicker({
   const [query, setQuery] = useState("");
   const [current, setCurrent] = useState<string[]>(selected);
   const [pending, start] = useTransition();
+  const [conflict, setConflict] = useState<{
+    mine: string[];
+    theirs: string[];
+    version: number;
+  } | null>(null);
   const router = useRouter();
+  const { beginEditing, endEditing, lockedBy } = useCaseCollaboration();
+  const locked = lockedBy("mitreTechniques");
+  useEffect(() => () => endEditing("mitreTechniques"), [endEditing]);
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase();
@@ -36,27 +49,80 @@ export default function MitrePicker({
     );
   }
 
-  function save() {
+  function save(value = current, expectedVersion = version) {
     start(async () => {
-      await updateMitreTechniques(caseId, current);
+      const result = await updateMitreTechniques(caseId, value, expectedVersion);
+      if (!result.ok) {
+        setConflict({
+          mine: value,
+          theirs: Array.isArray(result.conflict.mitreTechniques)
+            ? (result.conflict.mitreTechniques as string[])
+            : [],
+          version: Number(result.conflict.version),
+        });
+        return;
+      }
+      setConflict(null);
       setOpen(false);
+      endEditing("mitreTechniques");
       router.refresh();
     });
   }
 
   if (!open) {
     return (
-      <button
-        className="kelpie-btn kelpie-btn-secondary"
-        onClick={() => setOpen(true)}
-      >
-        Edit techniques
-      </button>
+      <div>
+        <button
+          className="kelpie-btn kelpie-btn-secondary"
+          disabled={!canEdit || Boolean(locked)}
+          title={!canEdit ? "Your role cannot edit techniques" : undefined}
+          onClick={() => {
+            setOpen(true);
+            beginEditing("mitreTechniques");
+          }}
+        >
+          Edit techniques
+        </button>
+        <FieldLock field="mitreTechniques" />
+      </div>
     );
   }
 
   return (
     <div className="space-y-2">
+      {conflict ? (
+        <div className="space-y-2 rounded border border-amber-700/60 bg-amber-950/30 p-3 text-xs text-amber-100">
+          <p role="alert">Another analyst changed the MITRE techniques while you were editing.</p>
+          <p><span className="text-amber-300">Theirs:</span> {conflict.theirs.join(", ") || "None"}</p>
+          <p><span className="text-amber-300">Yours:</span> {conflict.mine.join(", ") || "None"}</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="kelpie-btn kelpie-btn-ghost text-xs"
+              onClick={() => {
+                setCurrent(conflict.theirs);
+                setConflict(null);
+                setOpen(false);
+                endEditing("mitreTechniques");
+                router.refresh();
+              }}
+            >
+              Keep theirs
+            </button>
+            <button type="button" className="kelpie-btn kelpie-btn-secondary text-xs" disabled={pending} onClick={() => save(conflict.mine, conflict.version)}>
+              Keep mine
+            </button>
+            <button
+              type="button"
+              className="kelpie-btn kelpie-btn-primary text-xs"
+              disabled={pending}
+              onClick={() => save([...new Set([...conflict.theirs, ...conflict.mine])], conflict.version)}
+            >
+              Merge both
+            </button>
+          </div>
+        </div>
+      ) : null}
       <label htmlFor="mitre-search" className="kelpie-sr-only">
         Search MITRE techniques
       </label>
@@ -96,6 +162,8 @@ export default function MitrePicker({
           onClick={() => {
             setCurrent(selected);
             setOpen(false);
+            setConflict(null);
+            endEditing("mitreTechniques");
           }}
           disabled={pending}
         >
@@ -103,7 +171,7 @@ export default function MitrePicker({
         </button>
         <button
           className="kelpie-btn kelpie-btn-primary"
-          onClick={save}
+          onClick={() => save()}
           disabled={pending}
         >
           {pending ? "Saving..." : "Save"}

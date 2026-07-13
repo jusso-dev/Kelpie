@@ -2,9 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { db } from "@/db";
-import { cases } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
 import { requireRole } from "@/lib/session";
 import {
   CASE_ENUMS,
@@ -21,9 +18,8 @@ import {
 } from "@/lib/cases-core";
 
 export type CaseFieldResult =
-  | { ok: true }
+  | { ok: true; version: number }
   | { ok: false; conflict: Record<string, unknown> };
-import { writeTimelineEvent } from "@/lib/timeline";
 import { fireWebhook } from "@/lib/webhooks";
 import { parseTagsInput } from "@/lib/tags";
 
@@ -63,9 +59,27 @@ export async function createCase(formData: FormData) {
   redirect(`/cases/${result.id}`);
 }
 
-export async function updateCaseStatus(caseId: string, nextStatus: CaseStatus) {
+export async function updateCaseStatus(
+  caseId: string,
+  nextStatus: CaseStatus,
+  expectedVersion?: number,
+): Promise<CaseFieldResult> {
   const user = await requireRole(["admin", "analyst"]);
-  await setCaseStatusCore(user.organisationId, user.id, caseId, nextStatus);
+  let updated: { version: number };
+  try {
+    updated = await setCaseStatusCore(
+      user.organisationId,
+      user.id,
+      caseId,
+      nextStatus,
+      expectedVersion,
+    );
+  } catch (e) {
+    if (e instanceof CaseVersionConflictError) {
+      return { ok: false, conflict: e.current };
+    }
+    throw e;
+  }
   await fireWebhook(user.organisationId, "case.status_changed", {
     case_id: caseId,
     to: nextStatus,
@@ -75,6 +89,7 @@ export async function updateCaseStatus(caseId: string, nextStatus: CaseStatus) {
   }
   revalidatePath(`/cases/${caseId}`);
   revalidatePath("/cases");
+  return { ok: true, version: updated.version };
 }
 
 export async function updateCaseField(
@@ -109,15 +124,21 @@ export async function updateCaseField(
     patch.assigneeId = value;
   }
   try {
-    await patchCaseCore(user.organisationId, user.id, caseId, patch, expectedVersion);
+    const updated = await patchCaseCore(
+      user.organisationId,
+      user.id,
+      caseId,
+      patch,
+      expectedVersion,
+    );
+    revalidatePath(`/cases/${caseId}`);
+    return { ok: true, version: updated.version };
   } catch (e) {
     if (e instanceof CaseVersionConflictError) {
       return { ok: false, conflict: e.current };
     }
     throw e;
   }
-  revalidatePath(`/cases/${caseId}`);
-  return { ok: true };
 }
 
 export async function updateCaseTags(
@@ -130,16 +151,46 @@ export async function updateCaseTags(
   const patch: Parameters<typeof patchCaseCore>[3] = {};
   patch[field] = values;
   try {
-    await patchCaseCore(user.organisationId, user.id, caseId, patch, expectedVersion);
+    const updated = await patchCaseCore(
+      user.organisationId,
+      user.id,
+      caseId,
+      patch,
+      expectedVersion,
+    );
+    revalidatePath(`/cases/${caseId}`);
+    revalidatePath("/cases");
+    return { ok: true, version: updated.version };
   } catch (e) {
     if (e instanceof CaseVersionConflictError) {
       return { ok: false, conflict: e.current };
     }
     throw e;
   }
-  revalidatePath(`/cases/${caseId}`);
-  revalidatePath("/cases");
-  return { ok: true };
+}
+
+export async function updateCaseSummary(
+  caseId: string,
+  summary: string,
+  expectedVersion?: number,
+): Promise<CaseFieldResult> {
+  const user = await requireRole(["admin", "analyst"]);
+  try {
+    const updated = await patchCaseCore(
+      user.organisationId,
+      user.id,
+      caseId,
+      { summary },
+      expectedVersion,
+    );
+    revalidatePath(`/cases/${caseId}`);
+    return { ok: true, version: updated.version };
+  } catch (e) {
+    if (e instanceof CaseVersionConflictError) {
+      return { ok: false, conflict: e.current };
+    }
+    throw e;
+  }
 }
 
 export async function closeCase(formData: FormData) {
@@ -165,23 +216,23 @@ export async function closeCase(formData: FormData) {
 export async function updateMitreTechniques(
   caseId: string,
   techniqueIds: string[],
-) {
+  expectedVersion?: number,
+): Promise<CaseFieldResult> {
   const user = await requireRole(["admin", "analyst"]);
-  const [existing] = await db
-    .select()
-    .from(cases)
-    .where(and(eq(cases.id, caseId), eq(cases.organisationId, user.organisationId)))
-    .limit(1);
-  if (!existing) throw new Error("Case not found");
-  await db
-    .update(cases)
-    .set({ mitreTechniques: techniqueIds })
-    .where(eq(cases.id, caseId));
-  await writeTimelineEvent({
-    caseId,
-    actorId: user.id,
-    eventType: "custom",
-    payload: { field: "mitre_techniques", value: techniqueIds },
-  });
-  revalidatePath(`/cases/${caseId}`);
+  try {
+    const updated = await patchCaseCore(
+      user.organisationId,
+      user.id,
+      caseId,
+      { mitreTechniques: techniqueIds },
+      expectedVersion,
+    );
+    revalidatePath(`/cases/${caseId}`);
+    return { ok: true, version: updated.version };
+  } catch (e) {
+    if (e instanceof CaseVersionConflictError) {
+      return { ok: false, conflict: e.current };
+    }
+    throw e;
+  }
 }

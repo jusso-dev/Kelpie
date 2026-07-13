@@ -10,6 +10,7 @@ import {
   TagBadge,
   TlpBadge,
 } from "@/components/badges";
+import { CaseCollaborationProvider } from "@/components/case-collaboration";
 
 const tabs = [
   { key: "overview", label: "Overview", path: "" },
@@ -44,7 +45,8 @@ export default async function CaseLayout({ children, params }: Props) {
     : [];
 
   return (
-    <div className="space-y-4">
+    <CaseCollaborationProvider caseId={id}>
+      <div className="space-y-4">
       {isStrict ? (
         <div className="rounded-md border border-red-700 bg-red-950/40 text-red-200 px-4 py-2 text-sm">
           <strong className="font-semibold">TLP:{c.tlp.toUpperCase().replace("_", "+")}</strong>
@@ -113,7 +115,8 @@ export default async function CaseLayout({ children, params }: Props) {
         ))}
       </nav>
 
-      {children}
-    </div>
+        {children}
+      </div>
+    </CaseCollaborationProvider>
   );
 }

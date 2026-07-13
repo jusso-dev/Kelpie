@@ -8,7 +8,7 @@
 
 import { db } from "@/db";
 import { cases } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql, type SQL } from "drizzle-orm";
 import { newId } from "./utils";
 import { nextCaseNumber } from "./case-number";
 import { writeTimelineEvent } from "./timeline";
@@ -57,6 +57,10 @@ export class CaseVersionConflictError extends Error {
     this.current = current;
   }
 }
+
+type CaseUpdateSet = Omit<Partial<typeof cases.$inferInsert>, "version"> & {
+  version?: number | SQL;
+};
 
 async function loadCaseInOrg(caseId: string, organisationId: string) {
   const [c] = await db
@@ -119,12 +123,22 @@ export async function setCaseStatusCore(
   actorId: string | null,
   caseId: string,
   nextStatus: CaseStatus,
-): Promise<void> {
+  expectedVersion?: number,
+): Promise<{ version: number }> {
   const existing = await loadCaseInOrg(caseId, organisationId);
   if (!existing) throw new Error("Case not found");
-  if (existing.status === nextStatus) return;
+  if (expectedVersion !== undefined && expectedVersion !== existing.version) {
+    throw new CaseVersionConflictError(caseSnapshot(existing));
+  }
+  if (existing.status === nextStatus) return { version: existing.version };
 
-  const patch: Partial<typeof cases.$inferInsert> = { status: nextStatus };
+  const patch: CaseUpdateSet = {
+    status: nextStatus,
+    version:
+      expectedVersion === undefined
+        ? sql`${cases.version} + 1`
+        : existing.version + 1,
+  };
   if (nextStatus === "in_progress" && !existing.acknowledgedAt) {
     patch.acknowledgedAt = new Date();
   }
@@ -140,13 +154,24 @@ export async function setCaseStatusCore(
   if (nextStatus === "closed" && !existing.closedAt) {
     patch.closedAt = new Date();
   }
-  await db.update(cases).set(patch).where(eq(cases.id, caseId));
+  const updated = await updateCaseAtomically(
+    caseId,
+    organisationId,
+    patch,
+    expectedVersion,
+  );
+  if (!updated) {
+    const current = await loadCaseInOrg(caseId, organisationId);
+    if (!current) throw new Error("Case not found");
+    throw new CaseVersionConflictError(caseSnapshot(current));
+  }
   await writeTimelineEvent({
     caseId,
     actorId,
     eventType: "status_change",
     payload: { from: existing.status, to: nextStatus },
   });
+  return updated;
 }
 
 export type CasePatchInput = Partial<{
@@ -159,7 +184,43 @@ export type CasePatchInput = Partial<{
   summary: string;
   tags: string[];
   dataClassificationTags: string[];
+  mitreTechniques: string[];
 }>;
+
+function caseSnapshot(existing: typeof cases.$inferSelect): Record<string, unknown> {
+  return {
+    version: existing.version,
+    status: existing.status,
+    severity: existing.severity,
+    classification: existing.classification,
+    tlp: existing.tlp,
+    pap: existing.pap,
+    assigneeId: existing.assigneeId,
+    title: existing.title,
+    summary: existing.summary,
+    tags: existing.tags,
+    dataClassificationTags: existing.dataClassificationTags,
+    mitreTechniques: existing.mitreTechniques,
+  };
+}
+
+async function updateCaseAtomically(
+  caseId: string,
+  organisationId: string,
+  set: CaseUpdateSet,
+  expectedVersion?: number,
+): Promise<{ version: number } | null> {
+  const conditions = [eq(cases.id, caseId), eq(cases.organisationId, organisationId)];
+  if (expectedVersion !== undefined) {
+    conditions.push(eq(cases.version, expectedVersion));
+  }
+  const [updated] = await db
+    .update(cases)
+    .set(set)
+    .where(and(...conditions))
+    .returning({ version: cases.version });
+  return updated ?? null;
+}
 
 export async function patchCaseCore(
   organisationId: string,
@@ -167,7 +228,7 @@ export async function patchCaseCore(
   caseId: string,
   patch: CasePatchInput,
   expectedVersion?: number,
-): Promise<void> {
+): Promise<{ version: number }> {
   const existing = await loadCaseInOrg(caseId, organisationId);
   if (!existing) throw new Error("Case not found");
 
@@ -175,21 +236,10 @@ export async function patchCaseCore(
   // case has since moved on, refuse the write and hand back the current value
   // so the UI can offer keep-mine / keep-theirs / merge.
   if (expectedVersion !== undefined && expectedVersion !== existing.version) {
-    throw new CaseVersionConflictError({
-      version: existing.version,
-      severity: existing.severity,
-      classification: existing.classification,
-      tlp: existing.tlp,
-      pap: existing.pap,
-      assigneeId: existing.assigneeId,
-      title: existing.title,
-      summary: existing.summary,
-      tags: existing.tags,
-      dataClassificationTags: existing.dataClassificationTags,
-    });
+    throw new CaseVersionConflictError(caseSnapshot(existing));
   }
 
-  const set: Partial<typeof cases.$inferInsert> = {};
+  const set: CaseUpdateSet = {};
   const events: Array<{ eventType: "severity_change" | "assignment_change" | "custom"; payload: Record<string, unknown> }> = [];
 
   if (patch.severity && patch.severity !== existing.severity) {
@@ -265,9 +315,35 @@ export async function patchCaseCore(
       });
     }
   }
-  if (Object.keys(set).length === 0) return;
-  set.version = existing.version + 1;
-  await db.update(cases).set(set).where(eq(cases.id, caseId));
+  if (patch.mitreTechniques !== undefined) {
+    const next = [...new Set(patch.mitreTechniques)].sort();
+    const current = Array.isArray(existing.mitreTechniques)
+      ? (existing.mitreTechniques as string[])
+      : [];
+    if (JSON.stringify(next) !== JSON.stringify([...current].sort())) {
+      set.mitreTechniques = next;
+      events.push({
+        eventType: "custom",
+        payload: { field: "mitre_techniques", from: current, to: next },
+      });
+    }
+  }
+  if (Object.keys(set).length === 0) return { version: existing.version };
+  set.version =
+    expectedVersion === undefined
+      ? sql`${cases.version} + 1`
+      : existing.version + 1;
+  const updated = await updateCaseAtomically(
+    caseId,
+    organisationId,
+    set,
+    expectedVersion,
+  );
+  if (!updated) {
+    const current = await loadCaseInOrg(caseId, organisationId);
+    if (!current) throw new Error("Case not found");
+    throw new CaseVersionConflictError(caseSnapshot(current));
+  }
   for (const e of events) {
     await writeTimelineEvent({
       caseId,
@@ -276,6 +352,7 @@ export async function patchCaseCore(
       payload: e.payload,
     });
   }
+  return updated;
 }
 
 export async function closeCaseCore(
@@ -297,6 +374,7 @@ export async function closeCaseCore(
       resolvedAt: existing.resolvedAt ?? new Date(),
       closureReason: reason.trim(),
       closureSummary: summary.trim(),
+      version: sql`${cases.version} + 1`,
     })
     .where(eq(cases.id, caseId));
   await writeTimelineEvent({

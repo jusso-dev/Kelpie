@@ -2,8 +2,8 @@ import { db } from "@/db";
 import { caseTasks, users } from "@/db/schema";
 import { asc, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/session";
-import { createTask } from "@/actions/tasks";
 import TaskRow from "@/components/task-row";
+import NewTaskForm from "@/components/new-task-form";
 
 type Props = { params: Promise<{ id: string }> };
 
@@ -41,42 +41,7 @@ export default async function CaseTasksPage({ params }: Props) {
           tasks.map((t) => <TaskRow key={t.id} task={t} canEdit={canEdit} />)
         )}
       </div>
-      {canEdit ? <div>
-        <form action={createTask} className="kelpie-card p-5 space-y-3">
-          <input type="hidden" name="caseId" value={id} />
-          <h2 className="text-sm font-medium text-slate-300">Add a task</h2>
-          <div>
-            <label
-              htmlFor="task-title"
-              className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
-            >
-              Title
-            </label>
-            <input id="task-title" name="title" className="kelpie-input" required />
-          </div>
-          <div>
-            <label
-              htmlFor="task-description"
-              className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
-            >
-              Description
-            </label>
-            <textarea id="task-description" name="description" className="kelpie-input" rows={3} />
-          </div>
-          <div>
-            <label
-              htmlFor="task-due-at"
-              className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
-            >
-              Due (optional)
-            </label>
-            <input id="task-due-at" name="dueAt" className="kelpie-input" type="datetime-local" />
-          </div>
-          <div className="flex justify-end">
-            <button className="kelpie-btn kelpie-btn-primary">Add task</button>
-          </div>
-        </form>
-      </div> : null}
+      {canEdit ? <div><NewTaskForm caseId={id} /></div> : null}
     </div>
   );
 }
