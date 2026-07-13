@@ -1,0 +1,185 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		A10000000000000000000001 /* Kelpie */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (A10000000000000000000003);
+			explicitFileTypes = {};
+			explicitFolders = ();
+			path = Kelpie;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000002 /* KelpieTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = ();
+			explicitFileTypes = {};
+			explicitFolders = ();
+			path = KelpieTests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		A10000000000000000000003 = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (Info.plist);
+			target = A50000000000000000000001 /* Kelpie */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A20000000000000000000001 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A20000000000000000000002 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A30000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000001 /* Kelpie */,
+				A10000000000000000000002 /* KelpieTests */,
+				A30000000000000000000002 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A30000000000000000000002 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000001 /* Kelpie.app */,
+				A40000000000000000000002 /* KelpieTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A50000000000000000000001 /* Kelpie */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A60000000000000000000001;
+			buildPhases = (A70000000000000000000001, A20000000000000000000001, A80000000000000000000001);
+			buildRules = ();
+			dependencies = ();
+			fileSystemSynchronizedGroups = (A10000000000000000000001);
+			name = Kelpie;
+			packageProductDependencies = ();
+			productName = Kelpie;
+			productReference = A40000000000000000000001;
+			productType = "com.apple.product-type.application";
+		};
+		A50000000000000000000002 /* KelpieTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A60000000000000000000002;
+			buildPhases = (A70000000000000000000002, A20000000000000000000002, A80000000000000000000002);
+			buildRules = ();
+			dependencies = (A90000000000000000000001);
+			fileSystemSynchronizedGroups = (A10000000000000000000002);
+			name = KelpieTests;
+			packageProductDependencies = ();
+			productName = KelpieTests;
+			productReference = A40000000000000000000002;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		AA0000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2660;
+				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					A50000000000000000000001 = { CreatedOnToolsVersion = 26.6; };
+					A50000000000000000000002 = { CreatedOnToolsVersion = 26.6; TestTargetID = A50000000000000000000001; };
+				};
+			};
+			buildConfigurationList = A60000000000000000000003;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base);
+			mainGroup = A30000000000000000000001;
+			productRefGroup = A30000000000000000000002;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (A50000000000000000000001, A50000000000000000000002);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A80000000000000000000001 = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A80000000000000000000002 = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A70000000000000000000001 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A70000000000000000000002 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A90000000000000000000001 = { isa = PBXTargetDependency; target = A50000000000000000000001; targetProxy = A90000000000000000000002; };
+/* End PBXTargetDependency section */
+
+/* Begin PBXContainerItemProxy section */
+		A90000000000000000000002 = { isa = PBXContainerItemProxy; containerPortal = AA0000000000000000000001; proxyType = 1; remoteGlobalIDString = A50000000000000000000001; remoteInfo = Kelpie; };
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXBuildFile section */
+		A40000000000000000000001 = { isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Kelpie.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A40000000000000000000002 = { isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = KelpieTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXBuildFile section */
+
+/* Begin XCBuildConfiguration section */
+		AB0000000000000000000001 = { isa = XCBuildConfiguration; buildSettings = { CLANG_ENABLE_MODULES = YES; ENABLE_STRICT_OBJC_MSGSEND = YES; SWIFT_VERSION = 6.0; }; name = Debug; };
+		AB0000000000000000000002 = { isa = XCBuildConfiguration; buildSettings = { CLANG_ENABLE_MODULES = YES; ENABLE_STRICT_OBJC_MSGSEND = YES; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_VERSION = 6.0; }; name = Release; };
+		AB0000000000000000000011 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APS_ENVIRONMENT = development;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CODE_SIGN_ENTITLEMENTS = Kelpie/Kelpie.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Kelpie/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Kelpie;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.kelpie.mobile;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		AB0000000000000000000012 = { isa = XCBuildConfiguration; buildSettings = { APS_ENVIRONMENT = production; CODE_SIGN_ENTITLEMENTS = Kelpie/Kelpie.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Kelpie/Info.plist; INFOPLIST_KEY_CFBundleDisplayName = Kelpie; INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business"; INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait; IPHONEOS_DEPLOYMENT_TARGET = 26.0; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = dev.kelpie.mobile; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_APPROACHABLE_CONCURRENCY = YES; SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated; SWIFT_EMIT_LOC_STRINGS = YES; TARGETED_DEVICE_FAMILY = 1; }; name = Release; };
+		AB0000000000000000000021 = { isa = XCBuildConfiguration; buildSettings = { BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 26.0; PRODUCT_BUNDLE_IDENTIFIER = dev.kelpie.mobile.tests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Kelpie.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Kelpie"; }; name = Debug; };
+		AB0000000000000000000022 = { isa = XCBuildConfiguration; buildSettings = { BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 26.0; PRODUCT_BUNDLE_IDENTIFIER = dev.kelpie.mobile.tests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Kelpie.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Kelpie"; }; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A60000000000000000000001 = { isa = XCConfigurationList; buildConfigurations = (AB0000000000000000000011, AB0000000000000000000012); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A60000000000000000000002 = { isa = XCConfigurationList; buildConfigurations = (AB0000000000000000000021, AB0000000000000000000022); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A60000000000000000000003 = { isa = XCConfigurationList; buildConfigurations = (AB0000000000000000000001, AB0000000000000000000002); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+	};
+	rootObject = AA0000000000000000000001 /* Project object */;
+}

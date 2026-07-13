@@ -22,7 +22,8 @@
     "test:case-queue": "tsx scripts/test-case-queue.ts",
     "test:task-inbox": "tsx scripts/test-task-inbox.ts",
     "test:recovery-states": "tsx scripts/test-recovery-states.ts",
-    "test:collaboration": "tsx scripts/test-collaboration.ts"
+    "test:collaboration": "tsx scripts/test-collaboration.ts",
+    "test:mobile": "tsx scripts/test-mobile.ts"
   },
   "dependencies": {
     "@node-saml/node-saml": "^5.1.0",

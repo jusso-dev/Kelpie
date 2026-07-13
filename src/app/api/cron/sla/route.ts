@@ -10,6 +10,7 @@ import {
 import { writeTimelineEvent } from "@/lib/timeline";
 import { sendEmail } from "@/lib/email";
 import { isAuthorisedCron } from "@/lib/cron";
+import { queueMobilePushForUsers } from "@/lib/mobile-push";
 
 const GATE_LABELS: Record<SlaGate, string> = {
   acknowledge: "acknowledge",
@@ -89,6 +90,14 @@ async function runOnce(): Promise<{ scanned: number; breaches: number; warnings:
               `Deadline: ${target.deadline.toISOString()}\n` +
               `Minutes over: ${target.minutesOver}\n` +
               `${process.env.APP_URL ?? "http://localhost:3000"}/cases/${c.id}\n`,
+          });
+          await queueMobilePushForUsers(c.organisationId, [assignee.id], {
+            event: "sla_breach",
+            sourceId: `${c.id}:${target.gate}:${target.deadline.toISOString()}`,
+            title: "Kelpie SLA breach",
+            body: `${c.caseNumber} breached its ${GATE_LABELS[target.gate]} target.`,
+            destinationType: "case",
+            destinationId: c.id,
           });
         }
       } else if (

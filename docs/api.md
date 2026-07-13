@@ -38,12 +38,21 @@ Errors return `{ "error": "..." }` with an appropriate HTTP status (`400` invali
 Returns `201 { "id": "alert_...", "status": "new" }`.
 
 ### `GET /api/v1/alerts`
-Returns the 100 most recent alerts for the organisation.
+Returns the 100 most recent alerts for the organisation. Optional query: `status` (`open` means `new` or `triaged`), `severity`, `limit`.
+
+### `GET /api/v1/alerts/{id}`
+Returns one alert.
+
+### `PATCH /api/v1/alerts/{id}`
+```json
+{ "action": "acknowledge" }
+```
+`action` is `acknowledge`, `dismiss`, or `promote`. Promotion returns `caseId`. Requires `alerts:write`.
 
 ## Cases
 
 ### `GET /api/v1/cases`
-Optional query: `status`, `severity`, `classification`, `tlp`, `assignee`, `openedSince`, `limit`.
+Optional query: `status`, `severity`, `classification`, `tlp`, `assignee`, `openedSince`, `limit`. `status=active` returns every status except `closed`.
 
 ### `POST /api/v1/cases`
 ```json
@@ -64,6 +73,9 @@ Full case with embedded `observables`, `tasks`, and a `recent_timeline` slice (5
 Any subset of `status, severity, classification, tlp, pap, assigneeId, title, summary`. Status transitions stamp the lifecycle milestones and fire the `case.status_changed` webhook.
 
 ## Tasks
+
+### `GET /api/v1/tasks`
+Cross-case task inbox. Optional query: `status` (`open`, a task status, or `all`), `mine=true`, `limit`. Tasks include case number, title, and severity.
 
 ### `GET /api/v1/cases/{caseId}/tasks`
 ### `POST /api/v1/cases/{caseId}/tasks`
@@ -126,7 +138,38 @@ The breach checker, webhook delivery, and enrichment runners are simple HTTP end
 POST /api/cron/sla
 POST /api/cron/webhooks
 POST /api/cron/enrichment
+POST /api/cron/mobile-push
 Authorization: Bearer ${CRON_SECRET}
 ```
 
 A separate scheduler (Docker Compose sidecar, cron, k8s CronJob) hits each once per minute.
+
+## Native mobile session
+
+The iOS companion signs in against the same BetterAuth account and receives a 30-day, role-scoped bearer token. Tokens for `read_only` users contain read scopes only.
+
+### `POST /api/mobile/auth/sign-in`
+```json
+{ "email": "analyst@example.com", "password": "..." }
+```
+Returns `token`, `expiresAt`, `scopes`, and the user/organisation summary. Accounts requiring SSO, MFA, onboarding, or a password reset return a specific `403` error so the app can direct the user to the web console.
+
+### `GET /api/mobile/auth/me`
+Validates the current mobile bearer token and returns its user and scopes.
+
+### `POST /api/mobile/auth/sign-out`
+Revokes the current mobile bearer token.
+
+### `POST /api/mobile/devices`
+```json
+{ "token": "<APNs token as hex>", "environment": "sandbox" }
+```
+Uploads the current APNs token. The app sends this on every APNs registration callback because device tokens can change.
+
+### `DELETE /api/mobile/devices`
+```json
+{ "token": "<APNs token as hex>" }
+```
+Disassociates the device during sign out.
+
+The push outbox routes `critical_alert`, `sla_breach`, and `comment_mention` events. Configure `APNS_TEAM_ID`, `APNS_KEY_ID`, `APNS_PRIVATE_KEY`, and the server-controlled `APNS_BUNDLE_ID`; the authenticated `/api/cron/mobile-push` worker delivers pending messages over APNs HTTP/2 and deactivates tokens rejected with HTTP 410.

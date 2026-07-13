@@ -22,6 +22,7 @@ export type AuthenticatedToken = {
   id: string;
   organisationId: string;
   scopes: string[];
+  createdBy: string | null;
 };
 
 export type AuthFailure =
@@ -69,7 +70,12 @@ export async function authenticateApiTokenWithScope(
     .where(eq(apiTokens.id, row.id));
   return {
     ok: true,
-    token: { id: row.id, organisationId: row.organisationId, scopes },
+    token: {
+      id: row.id,
+      organisationId: row.organisationId,
+      scopes,
+      createdBy: row.createdBy,
+    },
   };
 }
 
@@ -97,5 +103,6 @@ export async function authenticateApiToken(
     id: row.id,
     organisationId: row.organisationId,
     scopes: (row.scopes as string[]) ?? [],
+    createdBy: row.createdBy,
   };
 }

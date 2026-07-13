@@ -31,6 +31,10 @@ services:
       STORAGE_DRIVER: local
       STORAGE_LOCAL_DIR: /data/uploads
       KELPIE_ALLOW_PRIVATE_NETWORKS: ${KELPIE_ALLOW_PRIVATE_NETWORKS:-false}
+      APNS_TEAM_ID: ${APNS_TEAM_ID:-}
+      APNS_KEY_ID: ${APNS_KEY_ID:-}
+      APNS_PRIVATE_KEY: ${APNS_PRIVATE_KEY:-}
+      APNS_BUNDLE_ID: ${APNS_BUNDLE_ID:-dev.kelpie.mobile}
       NODE_ENV: production
     depends_on:
       db:
@@ -55,7 +59,7 @@ services:
         apk add --no-cache curl >/dev/null
         echo "Kelpie cron sidecar ready"
         while true; do
-          for path in sla webhooks enrichment connectors ti; do
+          for path in sla webhooks enrichment connectors ti mobile-push; do
             curl -sS -X POST -H "Authorization: Bearer $$CRON_SECRET" \
               "http://app:3000/api/cron/$$path" >/dev/null || true
           done

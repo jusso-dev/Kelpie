@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { alerts } from "@/db/schema";
 import { newId } from "@/lib/utils";
 import { fireWebhook } from "@/lib/webhooks";
+import { queueCriticalAlertPush } from "@/lib/mobile-push";
 
 type AlertSeverity = "low" | "medium" | "high" | "critical";
 
@@ -54,6 +55,9 @@ export async function ingestAlert(
       severity: created.severity,
       source: created.source,
     });
+    if (created.severity === "critical") {
+      await queueCriticalAlertPush({ organisationId, alertId: created.id });
+    }
     return { alert: created, created: true };
   }
 

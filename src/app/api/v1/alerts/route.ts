@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
 import { alerts } from "@/db/schema";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
 import { ingestAlert } from "@/lib/alerts-core";
 
@@ -49,10 +50,22 @@ export async function GET(req: Request) {
   if (!auth.ok) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
-  const rows = await db.query.alerts.findMany({
-    where: (a, { eq }) => eq(a.organisationId, auth.token.organisationId),
-    orderBy: (a, { desc }) => desc(a.createdAt),
-    limit: 100,
-  });
+  const url = new URL(req.url);
+  const status = url.searchParams.get("status");
+  const severity = url.searchParams.get("severity");
+  const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 100), 1), 200);
+  const filters = [eq(alerts.organisationId, auth.token.organisationId)];
+  if (status === "open") {
+    filters.push(sql`${alerts.status} in ('new', 'triaged')`);
+  } else if (status) {
+    filters.push(sql`${alerts.status} = ${status}`);
+  }
+  if (severity) filters.push(sql`${alerts.severity} = ${severity}`);
+  const rows = await db
+    .select()
+    .from(alerts)
+    .where(and(...filters))
+    .orderBy(desc(alerts.createdAt))
+    .limit(limit);
   return NextResponse.json({ alerts: rows });
 }

@@ -34,7 +34,11 @@ export async function GET(req: Request) {
   const assignee = url.searchParams.get("assignee");
   const openedSince = url.searchParams.get("openedSince");
   const limit = Math.min(Number(url.searchParams.get("limit") ?? 50), 200);
-  if (status) filters.push(sql`${cases.status} = ${status}`);
+  if (status === "active") {
+    filters.push(sql`${cases.status} <> 'closed'`);
+  } else if (status) {
+    filters.push(sql`${cases.status} = ${status}`);
+  }
   if (severity) filters.push(sql`${cases.severity} = ${severity}`);
   if (classification)
     filters.push(sql`${cases.classification} = ${classification}`);

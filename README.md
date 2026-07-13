@@ -23,7 +23,7 @@ Kelpie is a SOC case management tool built as a single Next.js application backe
 - Dashboard with open cases by severity, MTTA / MTTC / MTTR, top classifications.
 - Docker Compose deployment with Postgres.
 
-The original roadmap is tracked as GitHub issues under the **roadmap** label. Phase 2 is shipped, and the Phase 3 integration, SSO, threat-intel, response-action, customisation, and presence work is now built; see [Shipped Phase 3 features](#shipped-phase-3-features) below. The mobile companion app and broader collaborative field-editing polish remain follow-up work.
+The original roadmap is tracked as GitHub issues under the **roadmap** label. Phase 2 and Phase 3 are shipped, including the native iOS companion and collaborative field editing; see [Shipped Phase 3 features](#shipped-phase-3-features) below.
 
 ## Product screenshots
 
@@ -173,7 +173,11 @@ SSO sessions are BetterAuth-compatible: the callback creates a session row and s
 - **Presence**: opening a case shows the avatars of other analysts viewing it, plus a "typing a comment" indicator. Transport is a Postgres-backed roster streamed over server-sent events at `/api/cases/{id}/presence`, so it works across app replicas without Redis. Rows expire after 30s of inactivity and are pruned on the cron tick.
 - **Version-guarded field saves**: guarded case fields (severity, classification, TLP, PAP, assignee, tags) carry an optimistic version stamp. A conflicting save is rejected with the current value so the analyst can reload and choose what to keep. The same version guard is enforced on `PATCH /api/v1/cases/{id}` (send `version`; a stale value returns `409 version_conflict`).
 
-The mobile companion app (issue #32) is intentionally out of scope for this build.
+### Native iOS companion
+
+The SwiftUI companion under `apps/ios` is deliberately triage-first: open cases, readable case detail, comments, assigned and team task queues, task completion, and alert acknowledge/dismiss/promote. It uses the same BetterAuth identities through dedicated least-privilege mobile bearer sessions stored in the iOS Keychain.
+
+APNs notifications route new critical alerts to analysts, SLA breaches to the assigned analyst, and comment mentions to the mentioned user. Tapping a critical notification opens the alert detail directly, where **Acknowledge** is the first primary action. See `apps/ios/README.md` for Xcode and simulator instructions.
 
 ## Deploy on Railway
 
@@ -185,7 +189,7 @@ After the first deploy:
 
 1. Open the generated Railway domain and create the first organisation and administrator account.
 2. For durable local attachments, attach a Railway volume to the Kelpie service at `/data`. Without a volume, attachments are lost on redeploy. Alternatively, configure the S3 variables from `.env.example`.
-3. Schedule the five authenticated `/api/cron/*` endpoints described in [Background jobs](#background-jobs-cron). Railway cron services, or any external scheduler, can call them with `Authorization: Bearer $CRON_SECRET`.
+3. Schedule the six authenticated `/api/cron/*` endpoints described in [Background jobs](#background-jobs-cron). Railway cron services, or any external scheduler, can call them with `Authorization: Bearer $CRON_SECRET`.
 
 Kelpie rejects webhook, feed, connector, response-action, and OIDC destinations that resolve to private or local network addresses. If your self-hosted deployment intentionally connects to services on its private network, set `KELPIE_ALLOW_PRIVATE_NETWORKS=true`. Leave it disabled for public integrations.
 
@@ -236,6 +240,7 @@ Background work runs through authenticated internal endpoints, hit once a minute
 | `POST /api/cron/enrichment` | Observable enrichment passes + cache purge |
 | `POST /api/cron/connectors` | Poll active SIEM connectors |
 | `POST /api/cron/ti` | Poll due TI feeds + prune stale presence rows |
+| `POST /api/cron/mobile-push` | Deliver the APNs notification outbox |
 
 Each requires `Authorization: Bearer $CRON_SECRET`. Point any scheduler (cron, a k8s CronJob, a GitHub Actions schedule) at them if you are not using the bundled sidecar.
 
@@ -247,6 +252,7 @@ After seeding, with the dev server running:
 npm run smoke         # Phase 1: alert round trip
 npm run smoke:phase2  # Phase 2: cases/tasks/observables API, webhooks, reports, cron
 npm run smoke:phase3  # Phase 3: connectors, response actions, TI, custom fields, presence, SSO
+npm run test:mobile   # iOS sessions, alert triage, and the three push routes
 ```
 
 `smoke:phase3` exercises the Phase 3 backend directly against the database (TI ingestion + lookup, custom field validation, a response-action run with audit trail, a connector credential-failure halt, the presence roster, and SSO session-cookie signing).

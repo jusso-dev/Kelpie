@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
-import { cases, comments } from "@/db/schema";
+import { cases, comments, users } from "@/db/schema";
 import { and, asc, eq } from "drizzle-orm";
 import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
 import { postCommentCore } from "@/lib/comments-core";
@@ -57,11 +57,23 @@ export async function POST(
       { status: 400 },
     );
   }
+  const [actor] = auth.token.createdBy
+    ? await db
+        .select({ id: users.id, name: users.name })
+        .from(users)
+        .where(eq(users.id, auth.token.createdBy))
+        .limit(1)
+    : [];
   const created = await postCommentCore(
     auth.token.organisationId,
-    null,
+    actor ?? null,
     id,
     parsed.data.body,
   );
-  return NextResponse.json(created, { status: 201 });
+  const [comment] = await db
+    .select()
+    .from(comments)
+    .where(eq(comments.id, created.id))
+    .limit(1);
+  return NextResponse.json(comment, { status: 201 });
 }

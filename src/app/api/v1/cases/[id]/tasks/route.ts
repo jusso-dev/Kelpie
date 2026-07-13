@@ -62,7 +62,7 @@ export async function POST(
       { status: 400 },
     );
   }
-  const created = await createTaskCore(auth.token.organisationId, null, id, {
+  const created = await createTaskCore(auth.token.organisationId, auth.token.createdBy, id, {
     title: parsed.data.title,
     description: parsed.data.description ?? null,
     assigneeId: parsed.data.assigneeId ?? null,

@@ -563,6 +563,77 @@ export const apiTokens = pgTable("api_tokens", {
 });
 
 /* ────────────────────────────────────────────────────────────────────────── */
+/* Mobile devices + push delivery outbox                                      */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+export const mobileDevices = pgTable(
+  "mobile_devices",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    token: text("token").notNull(),
+    environment: text("environment").notNull().default("sandbox"),
+    bundleId: text("bundle_id").notNull().default("dev.kelpie.mobile"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("mobile_devices_token_environment_idx").on(
+      t.token,
+      t.environment,
+    ),
+    index("mobile_devices_user_active_idx").on(t.userId, t.isActive),
+  ],
+);
+
+export const mobileNotificationDeliveries = pgTable(
+  "mobile_notification_deliveries",
+  {
+    id: text("id").primaryKey(),
+    deviceId: text("device_id")
+      .notNull()
+      .references(() => mobileDevices.id, { onDelete: "cascade" }),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    event: text("event").notNull(),
+    dedupeKey: text("dedupe_key").notNull().unique(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    destinationType: text("destination_type").notNull(),
+    destinationId: text("destination_id").notNull(),
+    status: text("status").notNull().default("pending"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    lastError: text("last_error"),
+    apnsId: text("apns_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("mobile_notification_pending_idx").on(t.status, t.nextAttemptAt),
+    index("mobile_notification_user_created_idx").on(t.userId, t.createdAt),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
 /* Webhooks                                                                   */
 /* ────────────────────────────────────────────────────────────────────────── */
 
@@ -904,6 +975,9 @@ export type PlaybookRun = typeof playbookRuns.$inferSelect;
 export type SlaPolicy = typeof slaPolicies.$inferSelect;
 export type CaseTemplate = typeof caseTemplates.$inferSelect;
 export type ApiToken = typeof apiTokens.$inferSelect;
+export type MobileDevice = typeof mobileDevices.$inferSelect;
+export type MobileNotificationDelivery =
+  typeof mobileNotificationDeliveries.$inferSelect;
 export type Webhook = typeof webhooks.$inferSelect;
 export type WebhookDelivery = typeof webhookDeliveries.$inferSelect;
 export type EnrichmentCacheRow = typeof enrichmentCache.$inferSelect;

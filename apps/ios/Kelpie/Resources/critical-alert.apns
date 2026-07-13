@@ -1,0 +1,14 @@
+{
+  "Simulator Target Bundle": "dev.kelpie.mobile",
+  "aps": {
+    "alert": {
+      "title": "Critical alert in Kelpie",
+      "body": "A new critical alert needs triage."
+    },
+    "sound": "default",
+    "category": "KELPIE_CRITICAL_ALERT"
+  },
+  "event": "critical_alert",
+  "destination_type": "alert",
+  "destination_id": "alert_replace_with_seeded_id"
+}

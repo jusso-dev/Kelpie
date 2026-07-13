@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { newId } from "./utils";
 import { writeTimelineEvent } from "./timeline";
 import { sendEmail } from "./email";
+import { queueMobilePushForUsers } from "./mobile-push";
 
 export function extractMentions(body: string): string[] {
   const matches = body.match(/@[A-Za-z0-9_.+-]+/g) ?? [];
@@ -70,6 +71,18 @@ export async function postCommentCore(
         text: `${who} mentioned you on case ${c.caseNumber} — ${c.title}\n\n${body}\n\n${url}`,
       });
     }
+    await queueMobilePushForUsers(
+      organisationId,
+      mentionedUserIds.filter((userId) => userId !== actor?.id),
+      {
+        event: "comment_mention",
+        sourceId: id,
+        title: "You were mentioned in Kelpie",
+        body: `${c.caseNumber} has a new mention for you.`,
+        destinationType: "case",
+        destinationId: caseId,
+      },
+    );
   }
   return { id, mentionedUserIds };
 }

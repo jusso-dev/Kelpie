@@ -42,7 +42,7 @@ export async function PATCH(
       { status: 400 },
     );
   }
-  await patchTaskCore(auth.token.organisationId, null, id, {
+  await patchTaskCore(auth.token.organisationId, auth.token.createdBy, id, {
     status: parsed.data.status,
     assigneeId: parsed.data.assigneeId,
     dueAt: parsed.data.dueAt ? new Date(parsed.data.dueAt) : parsed.data.dueAt === null ? null : undefined,
