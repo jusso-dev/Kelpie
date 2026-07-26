@@ -95,8 +95,13 @@ Services Email connection string and a verified sender address. Leave
 `EMAIL_PROVIDER=console` when delivery is not configured.
 
 Slack and Microsoft Teams need no environment secrets. An administrator adds
-their incoming webhook URLs under **Settings → Notification channels** and
-chooses the events to send. Generic channels retain Kelpie's HMAC signature.
+their incoming webhook URLs under **Settings → Integrations → Notification
+channels** and chooses the events to send. Generic channels retain Kelpie's
+HMAC signature.
+
+VirusTotal can be configured per organisation under **Settings → Integrations
+→ Observable enrichment**. `VIRUSTOTAL_API_KEY` remains available as a
+container-level fallback for single-tenant deployments.
 
 ## Upgrade
 

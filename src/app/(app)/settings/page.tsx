@@ -1,17 +1,16 @@
 import { db } from "@/db";
-import { apiTokens, slaPolicies, users, webhooks } from "@/db/schema";
+import { apiTokens, slaPolicies, users } from "@/db/schema";
 import Link from "next/link";
 import { eq, desc, asc } from "drizzle-orm";
 import { requireUser } from "@/lib/session";
 import TokenCreator from "@/components/token-creator";
 import SlaSettings from "@/components/sla-settings";
-import WebhookSettings from "@/components/webhook-settings";
 import TokenList from "@/components/token-list";
 import TeamManagement from "@/components/team-management";
 
 export default async function SettingsPage() {
   const user = await requireUser();
-  const [tokens, teamMembers, slaRows, webhookRows] = await Promise.all([
+  const [tokens, teamMembers, slaRows] = await Promise.all([
     db
       .select()
       .from(apiTokens)
@@ -38,11 +37,6 @@ export default async function SettingsPage() {
       .from(slaPolicies)
       .where(eq(slaPolicies.organisationId, user.organisationId))
       .orderBy(asc(slaPolicies.severity)),
-    db
-      .select()
-      .from(webhooks)
-      .where(eq(webhooks.organisationId, user.organisationId))
-      .orderBy(desc(webhooks.createdAt)),
   ]);
   const isAdmin = user.role === "admin";
 
@@ -149,28 +143,6 @@ export default async function SettingsPage() {
             lastUsedIp: t.lastUsedIp,
             expiresAt: t.expiresAt ? t.expiresAt.toISOString() : null,
             deprecatedAt: t.deprecatedAt ? t.deprecatedAt.toISOString() : null,
-          }))}
-          isAdmin={isAdmin}
-        />
-      </section>
-
-      <section className="kelpie-section">
-        <div className="kelpie-section-header">
-        <h2>Notification channels</h2>
-        <p>
-          Send case activity to Slack, Microsoft Teams, or a generic
-          HMAC-signed webhook.
-        </p>
-        </div>
-        <WebhookSettings
-          webhooks={webhookRows.map((w) => ({
-            id: w.id,
-            name: w.name,
-            kind: w.kind,
-            url: w.url,
-            events: (w.events as string[]) ?? [],
-            isActive: w.isActive,
-            createdAt: w.createdAt.toISOString(),
           }))}
           isAdmin={isAdmin}
         />

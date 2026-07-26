@@ -31,6 +31,14 @@ const KIND_LABELS: Record<WebhookKind, string> = {
   teams: "Microsoft Teams",
 };
 
+function displayDestination(value: string): string {
+  try {
+    return `${new URL(value).hostname}/••••`;
+  } catch {
+    return "Configured destination";
+  }
+}
+
 export default function WebhookSettings({
   webhooks,
   isAdmin,
@@ -45,6 +53,7 @@ export default function WebhookSettings({
   const [url, setUrl] = useState("");
   const [events, setEvents] = useState<string[]>(["case.created"]);
   const [pending, setPending] = useState(false);
+  const [pendingChannelId, setPendingChannelId] = useState<string | null>(null);
   const router = useRouter();
 
   async function onCreate(event: React.FormEvent) {
@@ -86,6 +95,33 @@ export default function WebhookSettings({
     );
   }
 
+  async function toggleChannel(webhook: Webhook) {
+    setPendingChannelId(webhook.id);
+    try {
+      await setWebhookActive(webhook.id, !webhook.isActive);
+      toast.success(
+        webhook.isActive
+          ? "Notification channel disabled"
+          : "Notification channel enabled",
+        {
+          description: webhook.isActive
+            ? `${webhook.name} will not receive new case events.`
+            : `${webhook.name} will receive its selected case events.`,
+        },
+      );
+      router.refresh();
+    } catch (error) {
+      toast.error("Notification channel could not be updated", {
+        description: feedbackError(
+          error,
+          "Nothing changed. Check the server logs and try again.",
+        ),
+      });
+    } finally {
+      setPendingChannelId(null);
+    }
+  }
+
   return (
     <div className="space-y-4">
       {webhooks.length === 0 ? (
@@ -119,7 +155,7 @@ export default function WebhookSettings({
                 </div>
                 <div className="min-w-0">
                   <p className="truncate font-mono text-xs text-slate-400">
-                    {webhook.url}
+                    {displayDestination(webhook.url)}
                   </p>
                   <p className="mt-1 text-xs text-slate-500">
                     {webhook.events.join(", ")}
@@ -129,12 +165,14 @@ export default function WebhookSettings({
                   <div className="flex gap-1 md:justify-end">
                     <button
                       className="kelpie-btn kelpie-btn-ghost text-xs"
-                      onClick={async () => {
-                        await setWebhookActive(webhook.id, !webhook.isActive);
-                        router.refresh();
-                      }}
+                      disabled={pendingChannelId === webhook.id}
+                      onClick={() => void toggleChannel(webhook)}
                     >
-                      {webhook.isActive ? "Disable" : "Enable"}
+                      {pendingChannelId === webhook.id
+                        ? "Working…"
+                        : webhook.isActive
+                          ? "Disable"
+                          : "Enable"}
                     </button>
                     <ConfirmActionButton
                       action={async () => {
@@ -161,7 +199,7 @@ export default function WebhookSettings({
       {issuedSecret ? (
         <div className="rounded border border-[color:var(--color-tan-500)] bg-[color:var(--color-navy-800)] p-3 text-sm">
           <p className="mb-1 text-slate-200">
-            Webhook secret. Copy it now — it will not be shown again.
+            Webhook secret. Copy it now; it will not be shown again.
           </p>
           <code className="break-all font-mono text-[color:var(--color-tan-300)]">
             {issuedSecret}

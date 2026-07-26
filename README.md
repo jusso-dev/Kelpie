@@ -141,6 +141,11 @@ A small TI store answers "is this IOC known bad?" as a sub-second indexed lookup
 - **Automatic matching**: when an observable is created, Kelpie runs an indexed TI lookup and attaches matches to the observable's `enrichment.ti` immediately. The `ti` provider is also part of the enrichment registry, so later passes refresh it alongside reverse DNS, VirusTotal, etc.
 - **Browse / search** the store from the **Threat intel** page: filter by value, type, feed, or tag. Each indicator's detail shows the feeds it came from (with confidence) and the cases it has appeared on.
 
+Administrators connect and test VirusTotal under **Settings → Integrations →
+Observable enrichment**. Kelpie checks IP, domain, URL, and file-hash
+observables when they are added to a case, caches reports for 24 hours, and
+shows detection counts and a VirusTotal report link on the case.
+
 New feed handlers implement `TiFeedHandler` in `src/lib/ti/handlers/`.
 
 ### Cyber brief and vendor watch

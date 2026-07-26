@@ -55,6 +55,7 @@ export async function createWebhook(
     createdBy: user.id,
   });
   revalidatePath("/settings");
+  revalidatePath("/settings/integrations");
   return { secret: kind === "generic" ? secret : null };
 }
 
@@ -65,6 +66,7 @@ export async function setWebhookActive(id: string, active: boolean) {
     .set({ isActive: active })
     .where(and(eq(webhooks.id, id), eq(webhooks.organisationId, user.organisationId)));
   revalidatePath("/settings");
+  revalidatePath("/settings/integrations");
 }
 
 export async function deleteWebhook(id: string) {
@@ -73,6 +75,7 @@ export async function deleteWebhook(id: string) {
     .delete(webhooks)
     .where(and(eq(webhooks.id, id), eq(webhooks.organisationId, user.organisationId)));
   revalidatePath("/settings");
+  revalidatePath("/settings/integrations");
 }
 
 export async function listRecentDeliveries(webhookId: string) {

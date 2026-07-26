@@ -8,29 +8,99 @@ const windowMs = 60 * 1000;
 type Window = { count: number; resetAt: number };
 const windowsByOrg = new Map<string, Window>();
 
-async function getApiKey(organisationId: string): Promise<string | null> {
+type VirusTotalSettings = Record<string, unknown>;
+
+export type VirusTotalConfiguration = {
+  configured: boolean;
+  source: "organisation" | "environment" | null;
+  rateLimitPerMinute: number;
+};
+
+export type VirusTotalConnectionTest = {
+  malicious: number;
+  suspicious: number;
+  harmless: number;
+  undetected: number;
+};
+
+async function getSettings(organisationId: string): Promise<VirusTotalSettings> {
   const [org] = await db
     .select({ settings: organisations.settings })
     .from(organisations)
     .where(eq(organisations.id, organisationId))
     .limit(1);
-  const settings = (org?.settings as Record<string, unknown>) ?? {};
+  return (org?.settings as VirusTotalSettings) ?? {};
+}
+
+async function getApiKey(organisationId: string): Promise<string | null> {
+  const settings = await getSettings(organisationId);
   const key = settings.vt_api_key;
-  if (typeof key === "string" && key.length > 0) return key;
-  const envKey = process.env.VIRUSTOTAL_API_KEY;
-  return envKey ?? null;
+  if (typeof key === "string" && key.trim()) return key.trim();
+  return process.env.VIRUSTOTAL_API_KEY?.trim() || null;
 }
 
 async function getCap(organisationId: string): Promise<number> {
-  const [org] = await db
-    .select({ settings: organisations.settings })
-    .from(organisations)
-    .where(eq(organisations.id, organisationId))
-    .limit(1);
-  const settings = (org?.settings as Record<string, unknown>) ?? {};
+  const settings = await getSettings(organisationId);
   const cap = settings.vt_rate_per_min;
   if (typeof cap === "number" && cap > 0) return cap;
   return RATE_LIMIT_PER_MIN;
+}
+
+export async function getVirusTotalConfiguration(
+  organisationId: string,
+): Promise<VirusTotalConfiguration> {
+  const settings = await getSettings(organisationId);
+  const organisationKey =
+    typeof settings.vt_api_key === "string" && settings.vt_api_key.trim()
+      ? settings.vt_api_key.trim()
+      : null;
+  const environmentKey = process.env.VIRUSTOTAL_API_KEY?.trim() || null;
+  const rateLimit =
+    typeof settings.vt_rate_per_min === "number" &&
+    Number.isInteger(settings.vt_rate_per_min) &&
+    settings.vt_rate_per_min > 0
+      ? settings.vt_rate_per_min
+      : RATE_LIMIT_PER_MIN;
+  return {
+    configured: Boolean(organisationKey || environmentKey),
+    source: organisationKey
+      ? "organisation"
+      : environmentKey
+        ? "environment"
+        : null,
+    rateLimitPerMinute: rateLimit,
+  };
+}
+
+export async function testVirusTotalConnection(
+  apiKey: string,
+): Promise<VirusTotalConnectionTest> {
+  const response = await fetch(
+    "https://www.virustotal.com/api/v3/ip_addresses/1.1.1.1",
+    {
+      headers: { "x-apikey": apiKey, accept: "application/json" },
+      signal: AbortSignal.timeout(15000),
+      cache: "no-store",
+    },
+  );
+  if (response.status === 401 || response.status === 403) {
+    throw new Error("VirusTotal rejected this API key.");
+  }
+  if (response.status === 429) {
+    throw new Error("VirusTotal rate limit reached. Try again later.");
+  }
+  if (!response.ok) {
+    throw new Error(`VirusTotal connection failed with HTTP ${response.status}.`);
+  }
+  const summary = summariseStats(
+    (await response.json()) as Record<string, unknown>,
+  );
+  return {
+    malicious: Number(summary.malicious ?? 0),
+    suspicious: Number(summary.suspicious ?? 0),
+    harmless: Number(summary.harmless ?? 0),
+    undetected: Number(summary.undetected ?? 0),
+  };
 }
 
 async function rateLimit(organisationId: string): Promise<void> {

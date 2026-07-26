@@ -1,18 +1,22 @@
 import Link from "next/link";
 import { db } from "@/db";
-import { caseSources, responseActions, tiFeeds } from "@/db/schema";
+import { caseSources, responseActions, tiFeeds, webhooks } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/session";
 import { availableActionKinds } from "@/actions/response-actions";
 import ResponseActionSettings from "@/components/response-action-settings";
 import CaseSourceSettings from "@/components/case-source-settings";
 import AutomationSchedules from "@/components/automation-schedules";
+import VirusTotalSettings from "@/components/virustotal-settings";
+import WebhookSettings from "@/components/webhook-settings";
+import { getVirusTotalConfiguration } from "@/lib/enrichment/providers/virustotal";
 import { Globe2 } from "lucide-react";
 
 export default async function IntegrationsSettingsPage() {
   const user = await requireUser();
   const isAdmin = user.role === "admin";
-  const [sources, feeds, actions, actionKinds] = await Promise.all([
+  const [sources, feeds, actions, actionKinds, webhookRows, virusTotal] =
+    await Promise.all([
     db
       .select({
         id: caseSources.id,
@@ -44,6 +48,12 @@ export default async function IntegrationsSettingsPage() {
       .where(eq(responseActions.organisationId, user.organisationId))
       .orderBy(desc(responseActions.createdAt)),
     availableActionKinds(),
+    db
+      .select()
+      .from(webhooks)
+      .where(eq(webhooks.organisationId, user.organisationId))
+      .orderBy(desc(webhooks.createdAt)),
+    getVirusTotalConfiguration(user.organisationId),
   ]);
 
   return (
@@ -73,6 +83,38 @@ export default async function IntegrationsSettingsPage() {
           }))}
           isAdmin={isAdmin}
         />
+      </section>
+
+      <section className="kelpie-section">
+        <div className="kelpie-section-header">
+          <h2>Notification channels</h2>
+          <p>
+            Send case activity to Slack, Microsoft Teams, or an HMAC-signed
+            webhook.
+          </p>
+        </div>
+        <WebhookSettings
+          webhooks={webhookRows.map((webhook) => ({
+            id: webhook.id,
+            name: webhook.name,
+            kind: webhook.kind,
+            url: webhook.url,
+            events: (webhook.events as string[]) ?? [],
+            isActive: webhook.isActive,
+            createdAt: webhook.createdAt.toISOString(),
+          }))}
+          isAdmin={isAdmin}
+        />
+      </section>
+
+      <section className="kelpie-section">
+        <div className="kelpie-section-header">
+          <h2>Observable enrichment</h2>
+          <p>
+            Enrich technical evidence as analysts add it to a case.
+          </p>
+        </div>
+        <VirusTotalSettings configuration={virusTotal} isAdmin={isAdmin} />
       </section>
 
       <section className="kelpie-section">
