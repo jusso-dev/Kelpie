@@ -2,9 +2,11 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { updateMitreTechniques } from "@/actions/cases";
 import type { MitreTechnique } from "@/data/mitre";
 import { FieldLock, useCaseCollaboration } from "@/components/case-collaboration";
+import { feedbackError } from "@/components/confirm-dialog";
 
 export default function MitrePicker({
   caseId,
@@ -51,21 +53,36 @@ export default function MitrePicker({
 
   function save(value = current, expectedVersion = version) {
     start(async () => {
-      const result = await updateMitreTechniques(caseId, value, expectedVersion);
-      if (!result.ok) {
-        setConflict({
-          mine: value,
-          theirs: Array.isArray(result.conflict.mitreTechniques)
-            ? (result.conflict.mitreTechniques as string[])
-            : [],
-          version: Number(result.conflict.version),
+      try {
+        const result = await updateMitreTechniques(caseId, value, expectedVersion);
+        if (!result.ok) {
+          setConflict({
+            mine: value,
+            theirs: Array.isArray(result.conflict.mitreTechniques)
+              ? (result.conflict.mitreTechniques as string[])
+              : [],
+            version: Number(result.conflict.version),
+          });
+          toast.warning("Techniques changed elsewhere", {
+            description: "Review both selections before deciding what to keep.",
+          });
+          return;
+        }
+        setConflict(null);
+        setOpen(false);
+        endEditing("mitreTechniques");
+        toast.success("MITRE techniques saved", {
+          description: "The case record now shows the updated technique mapping.",
         });
-        return;
+        router.refresh();
+      } catch (error) {
+        toast.error("MITRE techniques could not be saved", {
+          description: feedbackError(
+            error,
+            "Your selection is still here. Refresh the case and try again.",
+          ),
+        });
       }
-      setConflict(null);
-      setOpen(false);
-      endEditing("mitreTechniques");
-      router.refresh();
     });
   }
 

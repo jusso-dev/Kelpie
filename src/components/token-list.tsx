@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { revokeApiToken, rotateApiToken } from "@/actions/settings";
+import { ConfirmActionButton } from "@/components/confirm-dialog";
 
 type Token = {
   id: string;
@@ -25,18 +26,6 @@ export default function TokenList({
 }) {
   const [rotated, setRotated] = useState<string | null>(null);
   const router = useRouter();
-
-  async function onRevoke(id: string, name: string) {
-    if (!confirm(`Revoke token "${name}"? This cannot be undone.`)) return;
-    await revokeApiToken(id);
-    router.refresh();
-  }
-  async function onRotate(id: string) {
-    if (!confirm("Rotate token? A new token is issued; the old one is deprecated.")) return;
-    const res = await rotateApiToken(id);
-    setRotated(res.plaintext);
-    router.refresh();
-  }
 
   return (
     <div className="mt-4">
@@ -120,19 +109,37 @@ export default function TokenList({
                     {isAdmin ? (
                       <div className="flex justify-end gap-1">
                         {!t.deprecatedAt ? (
-                          <button
+                          <ConfirmActionButton
+                            action={async () => {
+                              const result = await rotateApiToken(t.id);
+                              setRotated(result.plaintext);
+                              router.refresh();
+                            }}
+                            title={`Rotate token "${t.name}"?`}
+                            description="Are you sure? Kelpie issues a new secret and marks the current token deprecated. Update integrations before revoking the old token."
+                            confirmLabel="Rotate token"
+                            triggerLabel="Rotate"
+                            successTitle="Token rotated"
+                            successDescription="Copy the new token now. It will not be shown again."
+                            errorTitle="Token could not be rotated"
+                            tone="warning"
                             className="kelpie-btn kelpie-btn-ghost text-xs"
-                            onClick={() => onRotate(t.id)}
-                          >
-                            Rotate
-                          </button>
+                          />
                         ) : null}
-                        <button
+                        <ConfirmActionButton
+                          action={async () => {
+                            await revokeApiToken(t.id);
+                            router.refresh();
+                          }}
+                          title={`Revoke token "${t.name}"?`}
+                          description="Are you sure? This immediately stops every integration using this token. This cannot be undone."
+                          confirmLabel="Revoke token"
+                          triggerLabel="Revoke"
+                          successTitle="Token revoked"
+                          successDescription={`${t.name} can no longer access Kelpie.`}
+                          errorTitle="Token could not be revoked"
                           className="kelpie-btn kelpie-btn-ghost text-red-400 text-xs"
-                          onClick={() => onRevoke(t.id, t.name)}
-                        >
-                          Revoke
-                        </button>
+                        />
                       </div>
                     ) : null}
                   </td>

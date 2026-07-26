@@ -19,6 +19,20 @@ services:
       retries: 20
       start_period: 10s
 
+  redis:
+    image: redis:7-alpine
+    pull_policy: always
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
   migrate:
     image: ${KELPIE_IMAGE_REF:?Set KELPIE_IMAGE_REF in .env}
     pull_policy: always
@@ -64,39 +78,24 @@ services:
       retries: 5
       start_period: 30s
 
-  cron:
+  jobs:
     image: ${KELPIE_IMAGE_REF:?Set KELPIE_IMAGE_REF in .env}
     pull_policy: always
     restart: unless-stopped
-    healthcheck:
-      disable: true
+    init: true
     env_file:
       - ${KELPIE_ENV_FILE:-.env}
     environment:
-      CRON_SECRET: ${CRON_SECRET:?Set CRON_SECRET in .env}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379
+      JOBS_CONCURRENCY: ${JOBS_CONCURRENCY:-5}
+      NODE_ENV: production
     depends_on:
-      app:
+      migrate:
+        condition: service_completed_successfully
+      redis:
         condition: service_healthy
-    command:
-      - node
-      - -e
-      - |
-        const paths = ["sla", "webhooks", "enrichment", "ti", "case-sources", "mobile-push"];
-        const run = async () => {
-          await Promise.all(paths.map(async (path) => {
-            try {
-              const response = await fetch("http://app:3000/api/cron/" + path, {
-                method: "POST",
-                headers: { authorization: "Bearer " + process.env.CRON_SECRET },
-              });
-              if (!response.ok) console.error("cron " + path + " failed: " + response.status);
-            } catch (error) {
-              console.error("cron " + path + " failed", error);
-            }
-          }));
-        };
-        run();
-        setInterval(run, 60_000);
+    command: ["node", "scripts/jobs-worker.cjs"]
 
   proxy:
     image: caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
@@ -128,6 +127,8 @@ services:
 volumes:
   postgres_data:
     name: kelpie_postgres_data
+  redis_data:
+    name: kelpie_redis_data
   uploads_data:
     name: kelpie_uploads_data
   caddy_data:

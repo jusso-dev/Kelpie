@@ -32,8 +32,8 @@ export async function createCaseSource(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   if (!name) throw new Error("Name is required");
   const interval = Number(formData.get("poll_interval_minutes") ?? 5);
-  if (!Number.isInteger(interval) || interval < 1 || interval > 1440) {
-    throw new Error("Poll interval must be between 1 and 1440 minutes");
+  if (!Number.isInteger(interval) || interval < 1 || interval > 10080) {
+    throw new Error("Poll interval must be between 1 minute and 7 days.");
   }
   await db.insert(caseSources).values({
     id: newId("src"),
@@ -52,6 +52,35 @@ export async function setCaseSourceActive(id: string, active: boolean) {
   await db
     .update(caseSources)
     .set({ isActive: active, lastError: active ? null : undefined })
+    .where(
+      and(
+        eq(caseSources.id, id),
+        eq(caseSources.organisationId, user.organisationId),
+      ),
+    );
+  revalidatePath("/settings/integrations");
+}
+
+export async function updateCaseSourceSchedule(
+  id: string,
+  intervalMinutes: number,
+  active: boolean,
+) {
+  const user = await requireRole(["admin"]);
+  if (
+    !Number.isInteger(intervalMinutes) ||
+    intervalMinutes < 1 ||
+    intervalMinutes > 10080
+  ) {
+    throw new Error("Choose an interval between 1 minute and 7 days.");
+  }
+  await db
+    .update(caseSources)
+    .set({
+      pollIntervalMinutes: intervalMinutes,
+      isActive: active,
+      lastError: active ? null : undefined,
+    })
     .where(
       and(
         eq(caseSources.id, id),

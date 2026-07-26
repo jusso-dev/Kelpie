@@ -31,6 +31,7 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=kelpie:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=kelpie:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=kelpie:nodejs /app/drizzle ./drizzle
+COPY --from=builder --chown=kelpie:nodejs /app/dist/jobs-worker.cjs ./scripts/jobs-worker.cjs
 COPY --from=builder --chown=kelpie:nodejs /app/scripts/migrate.mjs ./scripts/migrate.mjs
 COPY --from=production-deps --chown=kelpie:nodejs /app/node_modules ./node_modules
 USER kelpie

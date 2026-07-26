@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { ConfirmActionButton } from "@/components/confirm-dialog";
 import { authClient } from "@/lib/auth-client";
 
 type Passkey = {
@@ -32,7 +34,11 @@ export default function AccountSecurity({
   async function loadPasskeys() {
     const res = await authClient.passkey.listUserPasskeys();
     if (res.error) {
-      setError(res.error.message ?? "Could not load passkeys");
+      const message = res.error.message ?? "Could not load passkeys";
+      setError(message);
+      toast.error("Passkeys could not be loaded", {
+        description: `${message}. Your existing sign-in methods are unaffected.`,
+      });
       return;
     }
     setPasskeys(res.data ?? []);
@@ -56,12 +62,19 @@ export default function AccountSecurity({
     setPending(false);
     const data = await res.json().catch(() => null);
     if (!res.ok) {
-      setError(data?.message ?? "Could not start MFA setup");
+      const errorMessage = data?.message ?? "Could not start MFA setup";
+      setError(errorMessage);
+      toast.error("MFA setup could not start", {
+        description: `${errorMessage}. Check your current password and try again.`,
+      });
       return;
     }
     setTotpUri(data.totpURI);
     setBackupCodes(data.backupCodes ?? []);
     setMessage("Add this URI to your authenticator, then verify a code.");
+    toast.success("MFA setup started", {
+      description: "Add Kelpie to your authenticator, then enter a code to finish.",
+    });
   }
 
   async function verify() {
@@ -75,9 +88,15 @@ export default function AccountSecurity({
     setPending(false);
     if (!res.ok) {
       setError("Invalid authenticator code");
+      toast.error("Code was not accepted", {
+        description: "MFA is not enabled yet. Enter the newest code from your authenticator.",
+      });
       return;
     }
     setMessage("MFA enabled.");
+    toast.success("MFA enabled", {
+      description: "Your authenticator is now required when you sign in.",
+    });
     router.refresh();
   }
 
@@ -91,8 +110,7 @@ export default function AccountSecurity({
     });
     setPending(false);
     if (!res.ok) {
-      setError("Could not disable MFA. Check your password.");
-      return;
+      throw new Error("Your password was not accepted. MFA remains enabled.");
     }
     setMessage("MFA disabled.");
     router.refresh();
@@ -107,14 +125,25 @@ export default function AccountSecurity({
         name: passkeyName.trim() || undefined,
       });
       if (res.error) {
-        setError(res.error.message ?? "Could not add passkey");
+        const errorMessage = res.error.message ?? "Could not add passkey";
+        setError(errorMessage);
+        toast.error("Passkey could not be added", {
+          description: `${errorMessage}. Your existing sign-in methods still work.`,
+        });
         return;
       }
       setPasskeyName("");
       await loadPasskeys();
       setMessage("Passkey added.");
+      toast.success("Passkey added", {
+        description: "You can use this device for passwordless sign-in.",
+      });
     } catch {
-      setError("Passkey setup was cancelled or could not be completed");
+      const errorMessage = "Passkey setup was cancelled or could not be completed";
+      setError(errorMessage);
+      toast.warning("Passkey was not added", {
+        description: "Setup was cancelled or the device could not create a credential.",
+      });
     } finally {
       setPending(false);
     }
@@ -127,13 +156,9 @@ export default function AccountSecurity({
     try {
       const res = await authClient.passkey.deletePasskey({ id });
       if (res.error) {
-        setError(res.error.message ?? "Could not remove passkey");
-        return;
+        throw new Error(res.error.message ?? "Could not remove passkey");
       }
       await loadPasskeys();
-      setMessage("Passkey removed.");
-    } catch {
-      setError("Could not remove passkey");
     } finally {
       setPending(false);
     }
@@ -176,14 +201,19 @@ export default function AccountSecurity({
           Start MFA setup
         </button>
       ) : (
-        <button
-          type="button"
+        <ConfirmActionButton
+          action={disable}
+          title="Disable multi-factor authentication?"
+          description="Are you sure? Your authenticator and current recovery codes will stop protecting this account. Passkeys remain available."
+          confirmLabel="Disable MFA"
+          triggerLabel="Disable MFA"
+          successTitle="MFA disabled"
+          successDescription="Your authenticator is no longer required at sign-in."
+          errorTitle="MFA could not be disabled"
+          tone="warning"
           className="kelpie-btn kelpie-btn-secondary"
-          onClick={disable}
           disabled={pending || !password || mfaRequired}
-        >
-          Disable MFA
-        </button>
+        />
       )}
 
       {totpUri ? (
@@ -287,14 +317,20 @@ export default function AccountSecurity({
                     </span>
                   ) : null}
                 </span>
-                <button
-                  type="button"
+                <ConfirmActionButton
+                  action={async () => {
+                    await deletePasskey(passkey.id);
+                  }}
+                  title={`Remove passkey "${passkey.name || "Unnamed passkey"}"?`}
+                  description="Are you sure? This device can no longer use this passkey to sign in. Other passkeys and MFA methods remain unchanged."
+                  confirmLabel="Remove passkey"
+                  triggerLabel="Remove"
+                  successTitle="Passkey removed"
+                  successDescription="This credential can no longer sign in to Kelpie."
+                  errorTitle="Passkey could not be removed"
                   className="kelpie-btn kelpie-btn-secondary shrink-0"
-                  onClick={() => deletePasskey(passkey.id)}
                   disabled={pending}
-                >
-                  Remove
-                </button>
+                />
               </li>
             ))}
           </ul>

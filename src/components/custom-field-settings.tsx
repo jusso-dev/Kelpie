@@ -2,6 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import {
+  ConfirmActionButton,
+  feedbackError,
+} from "@/components/confirm-dialog";
 import {
   createFieldDefinition,
   deleteFieldDefinition,
@@ -48,11 +53,19 @@ export default function CustomFieldSettings({
       const fd = new FormData(e.currentTarget);
       fd.set("type", type);
       await createFieldDefinition(fd);
+      toast.success("Custom field created", {
+        description: "Field is now available on every case.",
+      });
       setAdding(false);
       setType("string");
       router.refresh();
     } catch (err) {
-      alert((err as Error).message);
+      toast.error("Custom field could not be created", {
+        description: feedbackError(
+          err,
+          "Nothing changed. Check the field settings and try again.",
+        ),
+      });
     } finally {
       setPending(false);
     }
@@ -133,16 +146,20 @@ export default function CustomFieldSettings({
                         >
                           {f.isActive ? "Deactivate" : "Activate"}
                         </button>
-                        <button
-                          className="kelpie-btn kelpie-btn-ghost text-red-400 text-xs"
-                          onClick={async () => {
-                            if (!confirm(`Delete field "${f.label}" and all its values?`)) return;
+                        <ConfirmActionButton
+                          action={async () => {
                             await deleteFieldDefinition(f.id);
                             router.refresh();
                           }}
-                        >
-                          Delete
-                        </button>
+                          title={`Delete field "${f.label}"?`}
+                          description="Are you sure? This permanently removes the field and its values from every case. Timeline history remains."
+                          confirmLabel="Delete field"
+                          triggerLabel="Delete"
+                          successTitle="Custom field deleted"
+                          successDescription={`${f.label} and its stored values were removed.`}
+                          errorTitle="Custom field could not be deleted"
+                          className="kelpie-btn kelpie-btn-ghost text-red-400 text-xs"
+                        />
                       </div>
                     ) : null}
                   </td>

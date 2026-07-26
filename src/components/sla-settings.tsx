@@ -2,6 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import {
+  ConfirmFormActionButton,
+  feedbackError,
+} from "@/components/confirm-dialog";
 import {
   createSlaPolicy,
   deleteSlaPolicy,
@@ -60,10 +65,22 @@ export default function SlaSettings({
                 <td colSpan={6}>
                   <form
                     action={async (fd) => {
-                      fd.set("id", p.id);
-                      await updateSlaPolicy(fd);
-                      setEditingId(null);
-                      router.refresh();
+                      try {
+                        fd.set("id", p.id);
+                        await updateSlaPolicy(fd);
+                        toast.success("SLA policy updated", {
+                          description: `${p.name} now uses the saved deadlines.`,
+                        });
+                        setEditingId(null);
+                        router.refresh();
+                      } catch (error) {
+                        toast.error("SLA policy could not be updated", {
+                          description: feedbackError(
+                            error,
+                            "Nothing changed. Check each deadline and try again.",
+                          ),
+                        });
+                      }
                     }}
                     className="flex flex-wrap items-end gap-2"
                   >
@@ -132,18 +149,17 @@ export default function SlaSettings({
                       >
                         Edit
                       </button>
-                      <form
-                        action={async (fd) => {
-                          fd.set("id", p.id);
-                          if (!confirm(`Delete ${p.name}?`)) return;
-                          await deleteSlaPolicy(fd);
-                          router.refresh();
-                        }}
-                      >
-                        <button className="kelpie-btn kelpie-btn-ghost text-red-400">
-                          Delete
-                        </button>
-                      </form>
+                      <ConfirmFormActionButton
+                        action={deleteSlaPolicy}
+                        values={{ id: p.id }}
+                        title={`Delete SLA policy "${p.name}"?`}
+                        description="Are you sure? New and open cases at this severity will no longer receive these SLA deadlines. Existing timeline events remain."
+                        confirmLabel="Delete policy"
+                        triggerLabel="Delete"
+                        successTitle="SLA policy deleted"
+                        successDescription={`${p.name} is no longer applied to cases.`}
+                        errorTitle="SLA policy could not be deleted"
+                      />
                     </div>
                   ) : null}
                 </td>
@@ -164,9 +180,21 @@ export default function SlaSettings({
         adding ? (
           <form
             action={async (fd) => {
-              await createSlaPolicy(fd);
-              setAdding(false);
-              router.refresh();
+              try {
+                await createSlaPolicy(fd);
+                toast.success("SLA policy created", {
+                  description: "Matching cases will receive the configured deadlines.",
+                });
+                setAdding(false);
+                router.refresh();
+              } catch (error) {
+                toast.error("SLA policy could not be created", {
+                  description: feedbackError(
+                    error,
+                    "Nothing changed. Check each deadline and try again.",
+                  ),
+                });
+              }
             }}
             className="flex flex-wrap items-end gap-2 kelpie-card p-4"
           >

@@ -2,6 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import {
+  ConfirmActionButton,
+  ConfirmDialog,
+  feedbackError,
+} from "@/components/confirm-dialog";
 import {
   clearOidcConfig,
   clearSamlConfig,
@@ -56,15 +62,52 @@ export default function SsoSettings({
 }: Props) {
   const router = useRouter();
   const [pending, setPending] = useState<string | null>(null);
+  const [forceSsoEnabled, setForceSsoEnabled] = useState(forceSso);
+  const [forceSsoConfirmOpen, setForceSsoConfirmOpen] = useState(false);
 
   async function submit(action: (fd: FormData) => Promise<void>, e: React.FormEvent<HTMLFormElement>, key: string) {
     e.preventDefault();
     setPending(key);
     try {
       await action(new FormData(e.currentTarget));
+      toast.success(key === "oidc" ? "OIDC configuration saved" : "SAML configuration saved", {
+        description: "New sign-ins will use the updated provider settings.",
+      });
       router.refresh();
     } catch (err) {
-      alert((err as Error).message);
+      toast.error("SSO configuration could not be saved", {
+        description: feedbackError(
+          err,
+          "Nothing changed. Check the provider details and try again.",
+        ),
+      });
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function applyForceSso(enabled: boolean) {
+    setPending("force-sso");
+    try {
+      await setForceSso(enabled);
+      setForceSsoEnabled(enabled);
+      setForceSsoConfirmOpen(false);
+      toast.success(
+        enabled ? "Password sign-in disabled" : "Password sign-in enabled",
+        {
+          description: enabled
+            ? "Organisation members must now use SSO."
+            : "Organisation members can use SSO or email and password.",
+        },
+      );
+      router.refresh();
+    } catch (error) {
+      toast.error("Sign-in policy could not be changed", {
+        description: feedbackError(
+          error,
+          "Nothing changed. Confirm your SSO provider works and try again.",
+        ),
+      });
     } finally {
       setPending(null);
     }
@@ -82,15 +125,29 @@ export default function SsoSettings({
           <input
             type="checkbox"
             className="kelpie-checkbox"
-            defaultChecked={forceSso}
-            disabled={!isAdmin}
-            onChange={async (e) => {
-              await setForceSso(e.target.checked);
-              router.refresh();
+            checked={forceSsoEnabled}
+            disabled={!isAdmin || pending === "force-sso"}
+            onChange={(e) => {
+              const enabled = e.currentTarget.checked;
+              if (enabled) {
+                setForceSsoConfirmOpen(true);
+              } else {
+                void applyForceSso(false);
+              }
             }}
           />
           Require single sign-on for all members
         </label>
+        <ConfirmDialog
+          open={forceSsoConfirmOpen}
+          onOpenChange={setForceSsoConfirmOpen}
+          title="Require SSO for every member?"
+          description="Are you sure? Password sign-in stops immediately for this organisation. Confirm the configured SSO provider works and another administrator can sign in."
+          confirmLabel="Require SSO"
+          pending={pending === "force-sso"}
+          tone="warning"
+          onConfirm={() => void applyForceSso(true)}
+        />
       </section>
 
       <section className="kelpie-card p-5 space-y-3">
@@ -116,17 +173,19 @@ export default function SsoSettings({
           {isAdmin ? (
             <div className="flex justify-end gap-2">
               {oidc ? (
-                <button
-                  type="button"
-                  className="kelpie-btn kelpie-btn-ghost text-red-400"
-                  onClick={async () => {
-                    if (!confirm("Remove OIDC configuration?")) return;
+                <ConfirmActionButton
+                  action={async () => {
                     await clearOidcConfig();
                     router.refresh();
                   }}
-                >
-                  Remove
-                </button>
+                  title="Remove OIDC configuration?"
+                  description="Are you sure? OIDC sign-in stops immediately. Confirm another administrator sign-in method remains available."
+                  confirmLabel="Remove OIDC"
+                  triggerLabel="Remove"
+                  successTitle="OIDC configuration removed"
+                  successDescription="OIDC sign-in is no longer available for this organisation."
+                  errorTitle="OIDC configuration could not be removed"
+                />
               ) : null}
               <button className="kelpie-btn kelpie-btn-primary" disabled={pending === "oidc"}>
                 {pending === "oidc" ? "Saving..." : "Save OIDC"}
@@ -157,17 +216,19 @@ export default function SsoSettings({
           {isAdmin ? (
             <div className="flex justify-end gap-2">
               {saml ? (
-                <button
-                  type="button"
-                  className="kelpie-btn kelpie-btn-ghost text-red-400"
-                  onClick={async () => {
-                    if (!confirm("Remove SAML configuration?")) return;
+                <ConfirmActionButton
+                  action={async () => {
                     await clearSamlConfig();
                     router.refresh();
                   }}
-                >
-                  Remove
-                </button>
+                  title="Remove SAML configuration?"
+                  description="Are you sure? SAML sign-in stops immediately. Confirm another administrator sign-in method remains available."
+                  confirmLabel="Remove SAML"
+                  triggerLabel="Remove"
+                  successTitle="SAML configuration removed"
+                  successDescription="SAML sign-in is no longer available for this organisation."
+                  errorTitle="SAML configuration could not be removed"
+                />
               ) : null}
               <button className="kelpie-btn kelpie-btn-primary" disabled={pending === "saml"}>
                 {pending === "saml" ? "Saving..." : "Save SAML"}

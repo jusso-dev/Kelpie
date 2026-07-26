@@ -93,7 +93,7 @@ export default function SignUpPage() {
               Load starter threat intelligence feeds
             </span>
             <span className="mt-1 block text-xs text-slate-500">
-              Adds seven public OSINT sources from the Tawny SOC starter set.
+              Adds seven curated public OSINT sources. You can edit or remove them later.
               You can edit, disable, or delete them later.
             </span>
           </span>

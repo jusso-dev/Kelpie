@@ -13,6 +13,18 @@ services:
       interval: 5s
       timeout: 3s
       retries: 12
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - kelpie_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
   migrate:
     image: ${KELPIE_IMAGE:-ghcr.io/jusso-dev/kelpie:latest}
     pull_policy: always
@@ -51,6 +63,7 @@ services:
       AZURE_COMMUNICATION_EMAIL_SENDER: ${AZURE_COMMUNICATION_EMAIL_SENDER:-}
       CRON_SECRET: ${CRON_SECRET:?Set CRON_SECRET in .env}
       VIRUSTOTAL_API_KEY: ${VIRUSTOTAL_API_KEY:-}
+      CLOUDFLARE_RADAR_API_TOKEN: ${CLOUDFLARE_RADAR_API_TOKEN:-}
       STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
       STORAGE_LOCAL_DIR: ${STORAGE_LOCAL_DIR:-/data/uploads}
       KELPIE_ALLOW_PRIVATE_NETWORKS: ${KELPIE_ALLOW_PRIVATE_NETWORKS:-false}
@@ -79,35 +92,37 @@ services:
     cap_drop:
       - ALL
 
-  cron:
+  jobs:
     image: ${KELPIE_IMAGE:-ghcr.io/jusso-dev/kelpie:latest}
     pull_policy: always
     restart: unless-stopped
     init: true
-    healthcheck:
-      disable: true
     depends_on:
-      app:
+      migrate:
+        condition: service_completed_successfully
+      redis:
         condition: service_healthy
     environment:
-      CRON_SECRET: ${CRON_SECRET:?Set CRON_SECRET in .env}
-    command:
-      - node
-      - -e
-      - >-
-        const baseUrl = 'http://app:3000/api/cron/';
-        const paths = ['sla', 'webhooks', 'enrichment', 'ti', 'case-sources', 'mobile-push'];
-        const tick = async () => {
-          await Promise.all(paths.map(async (path) => {
-            try {
-              const response = await fetch(baseUrl + path, { method: 'POST', headers: { Authorization: 'Bearer ' + process.env.CRON_SECRET } });
-              if (!response.ok) console.error('Cron ' + path + ' failed: ' + response.status);
-            } catch (error) {
-              console.error('Cron ' + path + ' failed', error);
-            }
-          }));
-        };
-        void (async () => { for (;;) { await tick(); await new Promise((resolve) => setTimeout(resolve, 60_000)); } })();
+      DATABASE_URL: postgresql://${POSTGRES_USER:-kelpie}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-kelpie}
+      REDIS_URL: redis://redis:6379
+      JOBS_CONCURRENCY: ${JOBS_CONCURRENCY:-5}
+      APP_URL: ${APP_URL:?Set APP_URL in .env}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-console}
+      EMAIL_FROM: ${EMAIL_FROM:?Set EMAIL_FROM in .env}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      AWS_REGION: ${AWS_REGION:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AZURE_COMMUNICATION_EMAIL_CONNECTION_STRING: ${AZURE_COMMUNICATION_EMAIL_CONNECTION_STRING:-}
+      AZURE_COMMUNICATION_EMAIL_SENDER: ${AZURE_COMMUNICATION_EMAIL_SENDER:-}
+      VIRUSTOTAL_API_KEY: ${VIRUSTOTAL_API_KEY:-}
+      KELPIE_ALLOW_PRIVATE_NETWORKS: ${KELPIE_ALLOW_PRIVATE_NETWORKS:-false}
+      APNS_TEAM_ID: ${APNS_TEAM_ID:-}
+      APNS_KEY_ID: ${APNS_KEY_ID:-}
+      APNS_PRIVATE_KEY: ${APNS_PRIVATE_KEY:-}
+      APNS_BUNDLE_ID: ${APNS_BUNDLE_ID:-dev.kelpie.mobile}
+      NODE_ENV: production
+    command: ["node", "scripts/jobs-worker.cjs"]
     read_only: true
     tmpfs:
       - /tmp:uid=1001,gid=1001,mode=1777
@@ -118,4 +133,5 @@ services:
 
 volumes:
   kelpie_pg:
+  kelpie_redis:
   kelpie_uploads:

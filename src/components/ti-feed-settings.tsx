@@ -2,6 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import {
+  ConfirmActionButton,
+  feedbackError,
+} from "@/components/confirm-dialog";
 import {
   clearFeedError,
   createFeed,
@@ -84,10 +89,20 @@ export default function TiFeedSettings({
       formData.set("kind", kind);
       if (editingFeed) await updateFeed(editingFeed.id, formData);
       else await createFeed(formData);
+      toast.success(editingFeed ? "Feed updated" : "Feed added", {
+        description: editingFeed
+          ? `${editingFeed.name} will use the new settings on its next poll.`
+          : "Kelpie will poll the feed on its configured schedule.",
+      });
       cancelForm();
       router.refresh();
     } catch (error) {
-      alert((error as Error).message);
+      toast.error(editingFeed ? "Feed update failed" : "Feed could not be added", {
+        description: feedbackError(
+          error,
+          "Nothing changed. Check the feed settings and try again.",
+        ),
+      });
     } finally {
       setPending(false);
     }
@@ -99,7 +114,12 @@ export default function TiFeedSettings({
       await action();
       router.refresh();
     } catch (error) {
-      alert((error as Error).message);
+      toast.error("Threat-intelligence action failed", {
+        description: feedbackError(
+          error,
+          "Nothing changed. Check the feed configuration and try again.",
+        ),
+      });
     } finally {
       setBusy(null);
     }
@@ -113,8 +133,8 @@ export default function TiFeedSettings({
             No feeds configured
           </h3>
           <p className="mx-auto mt-1 max-w-xl text-xs leading-5 text-slate-500">
-            Start empty, add one manually, or import the seven public OSINT
-            sources used by Tawny SOC. Imported feeds remain fully editable.
+            Start empty, add one manually, or import seven curated public OSINT
+            sources. Imported feeds remain fully editable.
           </p>
           {canManage ? (
             <div className="mt-4 flex flex-wrap justify-center gap-2">
@@ -124,7 +144,9 @@ export default function TiFeedSettings({
                 onClick={() =>
                   run("starter", async () => {
                     const result = await importStarterFeeds();
-                    alert(`Imported ${result.imported} starter feed(s).`);
+                    toast.success("Starter feeds loaded", {
+                      description: `${result.imported} public threat-intelligence feed${result.imported === 1 ? "" : "s"} added. You can edit or remove any feed.`,
+                    });
                   })
                 }
               >
@@ -212,11 +234,15 @@ export default function TiFeedSettings({
                       onClick={() =>
                         run(feed.id, async () => {
                           const result = await pollFeedNow(feed.id);
-                          alert(
-                            result.error
-                              ? `Poll failed: ${result.error}`
-                              : `Ingested ${result.ingested} indicator(s)`,
-                          );
+                          if (result.error) {
+                            toast.error(`Could not poll ${feed.name}`, {
+                              description: result.error,
+                            });
+                          } else {
+                            toast.success("Feed poll completed", {
+                              description: `${result.ingested} indicator${result.ingested === 1 ? "" : "s"} ingested from ${feed.name}.`,
+                            });
+                          }
                         })
                       }
                     >
@@ -242,20 +268,21 @@ export default function TiFeedSettings({
                     >
                       {feed.isActive ? "Disable" : "Enable"}
                     </button>
-                    <button
-                      className="kelpie-btn kelpie-btn-ghost justify-start text-xs text-red-400"
-                      onClick={() => {
-                        if (
-                          confirm(
-                            `Delete feed "${feed.name}" and its indicators?`,
-                          )
-                        ) {
-                          void run(feed.id, () => deleteFeed(feed.id));
-                        }
+                    <ConfirmActionButton
+                      action={async () => {
+                        await deleteFeed(feed.id);
+                        router.refresh();
                       }}
-                    >
-                      Delete
-                    </button>
+                      title={`Delete feed "${feed.name}"?`}
+                      description="Are you sure? This permanently deletes the feed configuration and every indicator imported from it. Existing case comments remain."
+                      confirmLabel="Delete feed"
+                      triggerLabel="Delete"
+                      successTitle="Feed deleted"
+                      successDescription={`${feed.name} and its imported indicators were removed.`}
+                      errorTitle="Feed could not be deleted"
+                      className="kelpie-btn kelpie-btn-ghost w-full justify-start text-xs text-red-400"
+                      disabled={busy === feed.id}
+                    />
                   </div>
                 </details>
               ) : null}
@@ -278,11 +305,15 @@ export default function TiFeedSettings({
             onClick={() =>
               run("starter", async () => {
                 const result = await importStarterFeeds();
-                alert(
-                  result.imported
-                    ? `Imported ${result.imported} missing starter feed(s).`
-                    : "All starter feeds are already configured.",
-                );
+                if (result.imported) {
+                  toast.success("Missing starter feeds added", {
+                    description: `${result.imported} feed${result.imported === 1 ? "" : "s"} added. Existing feeds were unchanged.`,
+                  });
+                } else {
+                  toast.info("Starter feeds already configured", {
+                    description: "No feeds were added or changed.",
+                  });
+                }
               })
             }
           >

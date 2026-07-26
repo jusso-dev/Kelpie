@@ -2,6 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import {
+  ConfirmActionButton,
+  feedbackError,
+} from "@/components/confirm-dialog";
 import {
   createResponseAction,
   deleteResponseAction,
@@ -53,10 +58,18 @@ export default function ResponseActionSettings({
       const fd = new FormData(e.currentTarget);
       fd.set("kind", kind);
       await createResponseAction(fd);
+      toast.success("Response action added", {
+        description: "Analysts can now run this action from eligible cases.",
+      });
       setAdding(false);
       router.refresh();
     } catch (err) {
-      alert((err as Error).message);
+      toast.error("Response action could not be added", {
+        description: feedbackError(
+          err,
+          "Nothing changed. Check the provider settings and try again.",
+        ),
+      });
     } finally {
       setPending(false);
     }
@@ -110,16 +123,20 @@ export default function ResponseActionSettings({
                         >
                           {a.isActive ? "Disable" : "Enable"}
                         </button>
-                        <button
-                          className="kelpie-btn kelpie-btn-ghost text-red-400 text-xs"
-                          onClick={async () => {
-                            if (!confirm(`Delete action "${a.name}"?`)) return;
+                        <ConfirmActionButton
+                          action={async () => {
                             await deleteResponseAction(a.id);
                             router.refresh();
                           }}
-                        >
-                          Delete
-                        </button>
+                          title={`Delete action "${a.name}"?`}
+                          description="Are you sure? Analysts can no longer run this action. Existing audit records remain."
+                          confirmLabel="Delete action"
+                          triggerLabel="Delete"
+                          successTitle="Response action deleted"
+                          successDescription={`${a.name} is no longer available on cases.`}
+                          errorTitle="Response action could not be deleted"
+                          className="kelpie-btn kelpie-btn-ghost text-red-400 text-xs"
+                        />
                       </div>
                     ) : null}
                   </td>

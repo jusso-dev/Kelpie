@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { setCaseCustomField } from "@/actions/custom-fields";
+import { feedbackError } from "@/components/confirm-dialog";
 
 type Field = {
   id: string;
@@ -39,9 +41,15 @@ export default function CustomFieldsPanel({
     setSaving(field.id);
     try {
       await setCaseCustomField(caseId, field.id, value);
+      toast.success(`${field.label} updated`);
       router.refresh();
     } catch (e) {
-      alert((e as Error).message);
+      toast.error(`${field.label} could not be updated`, {
+        description: feedbackError(
+          e,
+          "Nothing changed. Reload the case and try again.",
+        ),
+      });
     } finally {
       setSaving(null);
     }

@@ -20,6 +20,14 @@ import { seedStarterThreatFeeds } from "@/lib/ti/starter-feeds";
 
 const FEED_MANAGER_ROLES = ["admin", "analyst"] as const;
 
+function feedPollInterval(value: FormDataEntryValue | null): number {
+  const interval = Number(value ?? 60);
+  if (!Number.isInteger(interval) || interval < 5 || interval > 10080) {
+    throw new Error("Poll interval must be between 5 minutes and 7 days.");
+  }
+  return interval;
+}
+
 function collectConfig(
   kind: string,
   formData: FormData,
@@ -44,7 +52,7 @@ export async function createFeed(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const kind = String(formData.get("kind") ?? "").trim();
   const url = String(formData.get("url") ?? "").trim() || null;
-  const interval = Number(formData.get("pollIntervalMinutes") ?? 60);
+  const interval = feedPollInterval(formData.get("pollIntervalMinutes"));
   if (!name) throw new Error("Name is required");
   if (!getFeedHandler(kind)) throw new Error("Unknown feed kind");
   if (url) await assertSafeOutboundUrl(url);
@@ -56,7 +64,7 @@ export async function createFeed(formData: FormData) {
     kind,
     url,
     config,
-    pollIntervalMinutes: Number.isFinite(interval) && interval > 0 ? interval : 60,
+    pollIntervalMinutes: interval,
     isActive: true,
     createdBy: user.id,
   });
@@ -78,7 +86,7 @@ export async function updateFeed(id: string, formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const kind = String(formData.get("kind") ?? "").trim();
   const url = String(formData.get("url") ?? "").trim() || null;
-  const interval = Number(formData.get("pollIntervalMinutes") ?? 60);
+  const interval = feedPollInterval(formData.get("pollIntervalMinutes"));
   if (!name) throw new Error("Name is required");
   if (!getFeedHandler(kind)) throw new Error("Unknown feed kind");
   if (url) await assertSafeOutboundUrl(url);
@@ -94,8 +102,7 @@ export async function updateFeed(id: string, formData: FormData) {
         formData,
         (existing.config as Record<string, unknown>) ?? {},
       ),
-      pollIntervalMinutes:
-        Number.isFinite(interval) && interval >= 5 ? interval : 60,
+      pollIntervalMinutes: interval,
       lastError: null,
     })
     .where(
@@ -123,6 +130,33 @@ export async function setFeedActive(id: string, active: boolean) {
       and(eq(tiFeeds.id, id), eq(tiFeeds.organisationId, user.organisationId)),
     );
   revalidatePath("/ti");
+}
+
+export async function updateFeedSchedule(
+  id: string,
+  intervalMinutes: number,
+  active: boolean,
+) {
+  const user = await requireRole(["admin"]);
+  if (
+    !Number.isInteger(intervalMinutes) ||
+    intervalMinutes < 5 ||
+    intervalMinutes > 10080
+  ) {
+    throw new Error("Choose an interval between 5 minutes and 7 days.");
+  }
+  await db
+    .update(tiFeeds)
+    .set({
+      pollIntervalMinutes: intervalMinutes,
+      isActive: active,
+      lastError: active ? null : undefined,
+    })
+    .where(
+      and(eq(tiFeeds.id, id), eq(tiFeeds.organisationId, user.organisationId)),
+    );
+  revalidatePath("/ti");
+  revalidatePath("/settings/integrations");
 }
 
 export async function clearFeedError(id: string) {

@@ -10,6 +10,7 @@ import {
   updatePlaybook,
 } from "@/actions/playbooks";
 import PlaybookStepsEditor from "@/components/playbook-steps-editor";
+import { ConfirmActionButton } from "@/components/confirm-dialog";
 
 type Props = { params: Promise<{ id: string }> };
 
@@ -143,11 +144,19 @@ export default async function PlaybookDetailPage({ params }: Props) {
         </div>
       </form>
 
-      <form action={remove} className="flex justify-end">
-        <button className="kelpie-btn kelpie-btn-ghost text-red-400">
-          Delete playbook
-        </button>
-      </form>
+      <div className="flex justify-end">
+        <ConfirmActionButton
+          action={remove}
+          title={`Delete playbook "${pb.name}"?`}
+          description="Are you sure? This playbook and its steps are permanently removed. Existing case history remains intact."
+          confirmLabel="Delete playbook"
+          triggerLabel="Delete playbook"
+          successTitle="Playbook deleted"
+          successDescription="Existing case history was not changed."
+          errorTitle="Playbook could not be deleted"
+          redirectTo="/playbooks"
+        />
+      </div>
     </div>
   );
 }

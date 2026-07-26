@@ -2,9 +2,11 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { updateCaseField, updateCaseStatus, updateCaseTags } from "@/actions/cases";
 import { DATA_CLASSIFICATION_SUGGESTIONS, parseTagsInput } from "@/lib/tags";
 import { FieldLock, useCaseCollaboration } from "@/components/case-collaboration";
+import { feedbackError } from "@/components/confirm-dialog";
 
 type Props = {
   caseId: string;
@@ -36,7 +38,6 @@ const STATUS_OPTIONS = [
   "contained",
   "eradicated",
   "recovered",
-  "closed",
 ] as const;
 type CaseStatusOpt = (typeof STATUS_OPTIONS)[number];
 const SEVERITY_OPTIONS = ["low", "medium", "high", "critical"];
@@ -83,26 +84,41 @@ export function CaseControls(props: Props) {
     version = props.version,
   ) {
     start(async () => {
-      const res = await submit(mine, version);
-      if (!res.ok) {
-        const theirs = res.conflict[field];
-        const nextConflict = {
-          field,
-          label,
-          mine,
-          theirs: Array.isArray(theirs) ? theirs.join(", ") : String(theirs ?? ""),
-          version: Number(res.conflict.version),
-          options,
-          submit,
-        };
-        setConflict(nextConflict);
-        setMergeValue(mine);
+      try {
+        const res = await submit(mine, version);
+        if (!res.ok) {
+          const theirs = res.conflict[field];
+          const nextConflict = {
+            field,
+            label,
+            mine,
+            theirs: Array.isArray(theirs) ? theirs.join(", ") : String(theirs ?? ""),
+            version: Number(res.conflict.version),
+            options,
+            submit,
+          };
+          setConflict(nextConflict);
+          setMergeValue(mine);
+          setMergeOpen(false);
+          toast.warning(`${label} changed elsewhere`, {
+            description: "Review both values before deciding what to keep.",
+          });
+          return;
+        }
+        setConflict(null);
         setMergeOpen(false);
-        return;
+        toast.success(`${label} updated`, {
+          description: "The case record and timeline now show the new value.",
+        });
+        router.refresh();
+      } catch (error) {
+        toast.error(`${label} could not be updated`, {
+          description: feedbackError(
+            error,
+            "The previous value remains. Refresh the case and try again.",
+          ),
+        });
       }
-      setConflict(null);
-      setMergeOpen(false);
-      router.refresh();
     });
   }
 
@@ -222,6 +238,7 @@ export function CaseControls(props: Props) {
               {s.replace(/_/g, " ")}
             </option>
           ))}
+          {props.status === "closed" ? <option value="closed">closed</option> : null}
         </select>
         <FieldLock field="status" />
       </Row>

@@ -7,6 +7,9 @@ import {
   setUserRole,
   unlockUser,
 } from "@/actions/users";
+import {
+  ConfirmFormActionButton,
+} from "@/components/confirm-dialog";
 
 type TeamMember = {
   id: string;
@@ -179,28 +182,40 @@ export default function TeamManagement({
                       Manage
                     </summary>
                     <div className="z-20 mt-2 grid min-w-52 gap-1 rounded border border-[color:var(--color-navy-600)] bg-[color:var(--color-navy-800)] p-2 shadow-xl lg:absolute lg:right-0">
-                      <ActionForm action={resetUserPassword} userId={member.id}>
-                        Reset password
-                      </ActionForm>
+                      <ConfirmFormActionButton
+                        action={resetUserPassword}
+                        values={{ userId: member.id }}
+                        title={`Reset ${member.name}'s password?`}
+                        description="Are you sure? Their current password will stop working. A temporary password is emailed when email delivery is configured, and they must choose a new password at next sign-in."
+                        confirmLabel="Reset password"
+                        triggerLabel="Reset password"
+                        successTitle="Password reset"
+                        successDescription={`${member.name} must use the new temporary password at next sign-in.`}
+                        errorTitle="Password could not be reset"
+                        tone="warning"
+                        className="kelpie-btn kelpie-btn-ghost w-full justify-start text-xs"
+                      />
                       {member.banned ? (
                         <ActionForm action={unlockUser} userId={member.id}>
                           Unlock
                         </ActionForm>
                       ) : (
-                        <form action={lockUser}>
-                          <input type="hidden" name="userId" value={member.id} />
-                          <input
-                            type="hidden"
-                            name="reason"
-                            value="Locked by organisation administrator"
-                          />
-                          <button
-                            className="kelpie-btn kelpie-btn-ghost w-full justify-start text-xs text-red-400"
-                            disabled={isSelf}
-                          >
-                            Lock account
-                          </button>
-                        </form>
+                        <ConfirmFormActionButton
+                          action={lockUser}
+                          values={{
+                            userId: member.id,
+                            reason: "Locked by organisation administrator",
+                          }}
+                          title={`Lock ${member.name}'s account?`}
+                          description="Are you sure? Access is revoked immediately. Their cases, comments, and audit history remain intact, and an administrator can unlock the account later."
+                          confirmLabel="Lock account"
+                          triggerLabel="Lock account"
+                          successTitle="Account locked"
+                          successDescription={`${member.name} can no longer sign in.`}
+                          errorTitle="Account could not be locked"
+                          className="kelpie-btn kelpie-btn-ghost w-full justify-start text-xs text-red-400"
+                          disabled={isSelf}
+                        />
                       )}
                       <form action={setMfaRequired}>
                         <input type="hidden" name="userId" value={member.id} />
@@ -213,9 +228,18 @@ export default function TeamManagement({
                           {member.mfaRequired ? "Make MFA optional" : "Require MFA"}
                         </button>
                       </form>
-                      <ActionForm action={resetUserMfa} userId={member.id}>
-                        Reset MFA
-                      </ActionForm>
+                      <ConfirmFormActionButton
+                        action={resetUserMfa}
+                        values={{ userId: member.id }}
+                        title={`Reset ${member.name}'s MFA?`}
+                        description="Are you sure? Their current authenticator enrolment and recovery codes will stop working. They must enrol again if MFA is required."
+                        confirmLabel="Reset MFA"
+                        triggerLabel="Reset MFA"
+                        successTitle="MFA reset"
+                        successDescription={`${member.name}'s existing MFA credentials were removed.`}
+                        errorTitle="MFA could not be reset"
+                        className="kelpie-btn kelpie-btn-ghost w-full justify-start text-xs text-red-400"
+                      />
                     </div>
                   </details>
                 ) : null}

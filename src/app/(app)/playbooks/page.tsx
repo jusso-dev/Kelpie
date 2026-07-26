@@ -3,6 +3,7 @@ import { caseTemplates, playbooks } from "@/db/schema";
 import { eq, asc } from "drizzle-orm";
 import { requireUser } from "@/lib/session";
 import { deleteCaseTemplate } from "@/actions/case-templates";
+import { ConfirmFormActionButton } from "@/components/confirm-dialog";
 import Link from "next/link";
 
 export default async function PlaybooksPage() {
@@ -153,18 +154,18 @@ export default async function PlaybooksPage() {
                     <td className="tabular-nums text-slate-400">{tasks.length}</td>
                     <td className="text-right">
                       {isAdmin ? (
-                        <form
-                          action={async (fd) => {
-                            "use server";
-                            fd.set("id", t.id);
-                            await deleteCaseTemplate(fd);
-                          }}
-                          className="inline"
-                        >
-                          <button className="kelpie-btn kelpie-btn-ghost text-red-400 text-xs">
-                            Delete
-                          </button>
-                        </form>
+                        <ConfirmFormActionButton
+                          action={deleteCaseTemplate}
+                          values={{ id: t.id }}
+                          title={`Delete template "${t.name}"?`}
+                          description="Are you sure? This template is permanently removed. Cases already created from it remain unchanged."
+                          confirmLabel="Delete template"
+                          triggerLabel="Delete"
+                          successTitle="Template deleted"
+                          successDescription="Existing cases were not changed."
+                          errorTitle="Template could not be deleted"
+                          className="kelpie-btn kelpie-btn-ghost text-red-400 text-xs"
+                        />
                       ) : null}
                     </td>
                   </tr>

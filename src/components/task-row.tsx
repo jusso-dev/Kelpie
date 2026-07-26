@@ -2,9 +2,11 @@
 
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { setTaskStatus } from "@/actions/tasks";
 import { TaskStatusBadge } from "@/components/badges";
 import { format, formatDistanceToNowStrict, isPast } from "date-fns";
+import { feedbackError } from "@/components/confirm-dialog";
 
 type Task = {
   id: string;
@@ -42,8 +44,20 @@ export default function TaskRow({
 
   function change(next: string) {
     start(async () => {
-      await setTaskStatus(task.id, next);
-      router.refresh();
+      try {
+        await setTaskStatus(task.id, next);
+        toast.success("Task status updated", {
+          description: `"${task.title}" is now ${next.replace(/_/g, " ")}.`,
+        });
+        router.refresh();
+      } catch (error) {
+        toast.error("Task could not be updated", {
+          description: feedbackError(
+            error,
+            "The previous status remains. Refresh and try again.",
+          ),
+        });
+      }
     });
   }
 

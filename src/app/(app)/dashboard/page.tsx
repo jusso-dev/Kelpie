@@ -19,6 +19,19 @@ function formatMinutes(m: number | null): string {
   return `${(m / 1440).toFixed(1)}d`;
 }
 
+function timeOfDayGreeting(timezone: string): string {
+  const hour = Number(
+    new Intl.DateTimeFormat("en-AU", {
+      hour: "numeric",
+      hourCycle: "h23",
+      timeZone: timezone,
+    }).format(new Date()),
+  );
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+}
+
 export default async function DashboardPage() {
   const user = await requireUser();
 
@@ -174,16 +187,9 @@ export default async function DashboardPage() {
     <div className="space-y-6">
       <header className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <div>
-          <div className="mb-2 inline-flex items-center rounded-full border border-[color:var(--color-navy-700)] bg-[color:var(--color-navy-900)] px-3 py-1 text-xs font-medium text-[color:var(--color-tan-300)]">
-            SOC case management
-          </div>
           <h1 className="max-w-3xl text-3xl font-semibold tracking-tight text-slate-50 sm:text-4xl">
-            Prioritise, automate, and close security cases from one workbench.
+            {timeOfDayGreeting(user.timezone)}, {user.name}.
           </h1>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400">
-            Track active incidents, attach response workflows, measure SLA pressure,
-            and keep every investigation artefact connected to the case.
-          </p>
         </div>
         <div className="kelpie-panel p-4">
           <div className="flex items-center justify-between">

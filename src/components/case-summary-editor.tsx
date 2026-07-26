@@ -2,8 +2,10 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { updateCaseSummary, type CaseFieldResult } from "@/actions/cases";
 import { FieldLock, useCaseCollaboration } from "@/components/case-collaboration";
+import { feedbackError } from "@/components/confirm-dialog";
 
 type Conflict = { mine: string; theirs: string; version: number };
 
@@ -33,26 +35,41 @@ export default function CaseSummaryEditor({
 
   function save(value: string, expectedVersion = version) {
     startTransition(async () => {
-      const result: CaseFieldResult = await updateCaseSummary(
-        caseId,
-        value,
-        expectedVersion,
-      );
-      if (!result.ok) {
-        const theirs = String(result.conflict.summary ?? "");
-        setConflict({
-          mine: value,
-          theirs,
-          version: Number(result.conflict.version),
+      try {
+        const result: CaseFieldResult = await updateCaseSummary(
+          caseId,
+          value,
+          expectedVersion,
+        );
+        if (!result.ok) {
+          const theirs = String(result.conflict.summary ?? "");
+          setConflict({
+            mine: value,
+            theirs,
+            version: Number(result.conflict.version),
+          });
+          setMergeValue(value);
+          setMergeOpen(false);
+          toast.warning("Summary changed elsewhere", {
+            description: "Review both versions before deciding what to keep.",
+          });
+          return;
+        }
+        setConflict(null);
+        setEditing(false);
+        endEditing("summary");
+        toast.success("Summary saved", {
+          description: "The case record and timeline now include this update.",
         });
-        setMergeValue(value);
-        setMergeOpen(false);
-        return;
+        router.refresh();
+      } catch (error) {
+        toast.error("Summary could not be saved", {
+          description: feedbackError(
+            error,
+            "Your draft is still here. Refresh the case and try again.",
+          ),
+        });
       }
-      setConflict(null);
-      setEditing(false);
-      endEditing("summary");
-      router.refresh();
     });
   }
 

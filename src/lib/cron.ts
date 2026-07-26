@@ -1,7 +1,6 @@
 /**
- * Auth helper for internal cron endpoints. An external scheduler (cron,
- * docker-compose sidecar, k8s CronJob, GitHub Actions schedule) hits the
- * endpoint every minute with the shared secret.
+ * Auth helper for legacy/manual cron endpoints. The bundled deployment uses
+ * BullMQ; these routes remain for recovery and backwards compatibility.
  */
 export function isAuthorisedCron(req: Request): boolean {
   const secret = process.env.CRON_SECRET;

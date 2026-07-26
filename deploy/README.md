@@ -24,9 +24,13 @@ docker compose --env-file .env -f compose.yaml ps
 curl -fsS http://127.0.0.1:3000/api/health
 ```
 
-`migrate` must exit `0` before `app` starts. Compose stores PostgreSQL in
-`kelpie_postgres_data` and uploads in `kelpie_uploads_data`; do not remove these
-volumes during routine updates.
+`migrate` must exit `0` before `app` and `jobs` start. Compose stores PostgreSQL
+in `kelpie_postgres_data`, BullMQ state in `kelpie_redis_data`, and uploads in
+`kelpie_uploads_data`; do not remove these volumes during routine updates.
+
+The dedicated `jobs` service owns recurring work through BullMQ. It reconciles
+administrator-configured TI and case-source intervals within one minute and
+retries transient failures with exponential backoff.
 
 ## HTTPS reverse proxy
 
@@ -100,7 +104,7 @@ docker compose --env-file .env -f compose.yaml ps
 curl -fsS http://127.0.0.1:3000/api/health
 ```
 
-Inspect `docker compose --env-file .env -f compose.yaml logs --tail=100 migrate app cron`
+Inspect `docker compose --env-file .env -f compose.yaml logs --tail=100 migrate app redis jobs`
 if health check fails. Database migrations can be forward-only: validate staging and
 backup before client production update.
 

@@ -134,7 +134,6 @@ export async function deletePlaybook(playbookId: string) {
       ),
     );
   revalidatePath("/playbooks");
-  redirect("/playbooks");
 }
 
 export async function togglePlaybookActive(playbookId: string, active: boolean) {

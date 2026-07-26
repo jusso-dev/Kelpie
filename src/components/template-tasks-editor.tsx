@@ -1,11 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 
 type DraftTask = { title: string; description: string };
 
 export default function TemplateTasksEditor() {
   const [tasks, setTasks] = useState<DraftTask[]>([]);
+  const [removeIndex, setRemoveIndex] = useState<number | null>(null);
 
   function add() {
     setTasks((prev) => [...prev, { title: "", description: "" }]);
@@ -15,6 +18,10 @@ export default function TemplateTasksEditor() {
   }
   function remove(i: number) {
     setTasks((prev) => prev.filter((_, idx) => idx !== i));
+    setRemoveIndex(null);
+    toast.success("Task removed from draft", {
+      description: "The template is unchanged until you create it.",
+    });
   }
 
   return (
@@ -40,7 +47,7 @@ export default function TemplateTasksEditor() {
               <button
                 type="button"
                 className="kelpie-btn kelpie-btn-ghost text-red-400"
-                onClick={() => remove(i)}
+                onClick={() => setRemoveIndex(i)}
               >
                 Remove
               </button>
@@ -63,6 +70,18 @@ export default function TemplateTasksEditor() {
       >
         Add task
       </button>
+      <ConfirmDialog
+        open={removeIndex !== null}
+        onOpenChange={(open) => {
+          if (!open) setRemoveIndex(null);
+        }}
+        title="Remove this default task?"
+        description="Are you sure? The task is removed from the draft template."
+        confirmLabel="Remove task"
+        onConfirm={() => {
+          if (removeIndex !== null) remove(removeIndex);
+        }}
+      />
     </div>
   );
 }

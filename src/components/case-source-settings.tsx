@@ -2,6 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import {
+  ConfirmActionButton,
+  feedbackError,
+} from "@/components/confirm-dialog";
 import {
   createCaseSource,
   deleteCaseSource,
@@ -38,7 +43,12 @@ export default function CaseSourceSettings({
       await work();
       router.refresh();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Request failed");
+      const message = feedbackError(
+        caught,
+        "Nothing changed. Check the source settings and try again.",
+      );
+      setError(message);
+      toast.error("Case-source action failed", { description: message });
     } finally {
       setPending(false);
     }
@@ -49,6 +59,9 @@ export default function CaseSourceSettings({
     const form = event.currentTarget;
     await run(async () => {
       await createCaseSource(new FormData(form));
+      toast.success("Microsoft Sentinel source added", {
+        description: "Kelpie will import new incidents on the configured schedule.",
+      });
       setAdding(false);
       form.reset();
     });
@@ -127,17 +140,21 @@ export default function CaseSourceSettings({
                     >
                       {source.isActive ? "Disable" : "Enable"}
                     </button>
-                    <button
-                      type="button"
+                    <ConfirmActionButton
+                      action={async () => {
+                        await deleteCaseSource(source.id);
+                        router.refresh();
+                      }}
+                      title={`Delete case source "${source.name}"?`}
+                      description="Are you sure? Kelpie stops importing incidents from this source. Cases already imported remain unchanged."
+                      confirmLabel="Delete source"
+                      triggerLabel="Delete"
+                      successTitle="Case source deleted"
+                      successDescription={`${source.name} will no longer import cases.`}
+                      errorTitle="Case source could not be deleted"
                       className="kelpie-btn kelpie-btn-ghost text-xs text-red-400"
                       disabled={pending}
-                      onClick={() => {
-                        if (!confirm(`Delete case source "${source.name}"?`)) return;
-                        void run(() => deleteCaseSource(source.id));
-                      }}
-                    >
-                      Delete
-                    </button>
+                    />
                   </div>
                 ) : null}
               </div>

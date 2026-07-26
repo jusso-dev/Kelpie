@@ -2,6 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import {
+  ConfirmActionButton,
+  feedbackError,
+} from "@/components/confirm-dialog";
 import {
   createWebhook,
   deleteWebhook,
@@ -57,9 +62,17 @@ export default function WebhookSettings({
       setName("");
       setUrl("");
       setAdding(false);
+      toast.success("Notification channel added", {
+        description: `${name} will receive selected case events.`,
+      });
       router.refresh();
     } catch (error) {
-      alert((error as Error).message);
+      toast.error("Notification channel could not be added", {
+        description: feedbackError(
+          error,
+          "Nothing changed. Check the webhook URL and selected events.",
+        ),
+      });
     } finally {
       setPending(false);
     }
@@ -123,16 +136,20 @@ export default function WebhookSettings({
                     >
                       {webhook.isActive ? "Disable" : "Enable"}
                     </button>
-                    <button
-                      className="kelpie-btn kelpie-btn-ghost text-xs text-red-400"
-                      onClick={async () => {
-                        if (!confirm(`Delete notification channel "${webhook.name}"?`)) return;
+                    <ConfirmActionButton
+                      action={async () => {
                         await deleteWebhook(webhook.id);
                         router.refresh();
                       }}
-                    >
-                      Delete
-                    </button>
+                      title={`Delete channel "${webhook.name}"?`}
+                      description="Are you sure? Kelpie stops sending notifications to this destination. Delivery history remains available for audit."
+                      confirmLabel="Delete channel"
+                      triggerLabel="Delete"
+                      successTitle="Notification channel deleted"
+                      successDescription={`${webhook.name} will no longer receive case events.`}
+                      errorTitle="Notification channel could not be deleted"
+                      className="kelpie-btn kelpie-btn-ghost text-xs text-red-400"
+                    />
                   </div>
                 ) : null}
               </article>

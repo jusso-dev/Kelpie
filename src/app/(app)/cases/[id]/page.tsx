@@ -8,7 +8,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/session";
-import { closeCase } from "@/actions/cases";
+import CaseCloseForm from "@/components/case-close-form";
 import { CaseControls } from "@/components/case-controls";
 import { MITRE_TECHNIQUES, findTechnique } from "@/data/mitre";
 import MitrePicker from "@/components/mitre-picker";
@@ -157,47 +157,7 @@ export default async function CaseOverviewPage({ params }: Props) {
             </p>
           </div>
         ) : (
-          <form
-            action={closeCase}
-            className="kelpie-card p-5 space-y-3 border-amber-700/50"
-          >
-            <input type="hidden" name="caseId" value={c.id} />
-            <h2 className="text-sm font-medium text-slate-300">Close this case</h2>
-            <div>
-              <label
-                htmlFor="closure-reason"
-                className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
-              >
-                Closure reason
-              </label>
-              <select id="closure-reason" name="reason" className="kelpie-input" required>
-                <option value="resolved">Resolved</option>
-                <option value="false_positive">False positive</option>
-                <option value="duplicate">Duplicate</option>
-                <option value="benign">Benign</option>
-                <option value="risk_accepted">Risk accepted</option>
-              </select>
-            </div>
-            <div>
-              <label
-                htmlFor="closure-summary"
-                className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
-              >
-                Summary for the record
-              </label>
-              <textarea
-                id="closure-summary"
-                name="summary"
-                className="kelpie-input"
-                rows={4}
-                required
-                placeholder="Short narrative of what happened, what was done, and what to watch for."
-              />
-            </div>
-            <div className="flex justify-end">
-              <button className="kelpie-btn kelpie-btn-danger">Close case</button>
-            </div>
-          </form>
+          <CaseCloseForm caseId={c.id} caseNumber={c.caseNumber} />
         )}
       </div>
 

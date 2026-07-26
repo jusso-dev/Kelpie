@@ -2,7 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { runCaseAction } from "@/actions/response-actions";
+import {
+  ConfirmDialog,
+  feedbackError,
+} from "@/components/confirm-dialog";
 
 type InputField = {
   key: string;
@@ -34,6 +39,10 @@ export default function CaseActionRunner({
   const router = useRouter();
   const [openId, setOpenId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [requested, setRequested] = useState<{
+    action: Action;
+    formData: FormData;
+  } | null>(null);
 
   if (actions.length === 0) {
     return (
@@ -47,26 +56,32 @@ export default function CaseActionRunner({
     );
   }
 
-  async function run(action: Action, e: React.FormEvent<HTMLFormElement>) {
+  function requestRun(action: Action, e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (
-      !confirm(
-        `Run "${action.label}" now? This performs a real action on the target system.`,
-      )
-    ) {
-      return;
-    }
+    const formData = new FormData(e.currentTarget);
+    formData.set("actionId", action.id);
+    formData.set("caseId", caseId);
+    setRequested({ action, formData });
+  }
+
+  async function run() {
+    if (!requested) return;
     setPending(true);
     try {
-      const fd = new FormData(e.currentTarget);
-      fd.set("actionId", action.id);
-      fd.set("caseId", caseId);
-      const res = await runCaseAction(fd);
-      alert(res.summary);
+      const result = await runCaseAction(requested.formData);
+      toast.success(`${requested.action.label} completed`, {
+        description: result.summary,
+      });
+      setRequested(null);
       setOpenId(null);
       router.refresh();
     } catch (err) {
-      alert((err as Error).message);
+      toast.error(`${requested.action.label} failed`, {
+        description: feedbackError(
+          err,
+          "The target system was not changed. Check the integration and try again.",
+        ),
+      });
     } finally {
       setPending(false);
     }
@@ -98,7 +113,7 @@ export default function CaseActionRunner({
               ) : null}
             </div>
             {openId === a.id ? (
-              <form onSubmit={(e) => run(a, e)} className="mt-3 space-y-2">
+              <form onSubmit={(e) => requestRun(a, e)} className="mt-3 space-y-2">
                 {a.inputFields.map((f) => (
                   <div key={f.key}>
                     <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
@@ -143,6 +158,21 @@ export default function CaseActionRunner({
           </li>
         ))}
       </ul>
+      <ConfirmDialog
+        open={Boolean(requested)}
+        onOpenChange={(open) => {
+          if (!open) setRequested(null);
+        }}
+        title={
+          requested
+            ? `Run "${requested.action.label}" on the target system?`
+            : "Run response action?"
+        }
+        description="Are you sure? This performs a real change on an external system. Kelpie records the request and result on the case timeline."
+        confirmLabel={requested?.action.label ?? "Run action"}
+        pending={pending}
+        onConfirm={() => void run()}
+      />
     </div>
   );
 }

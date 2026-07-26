@@ -22,7 +22,7 @@ Kelpie is a SOC case management tool built as a single Next.js application backe
 - Microsoft Sentinel incident import with source deduplication.
 - Local file attachments with SHA256.
 - Dashboard with open cases by severity, MTTA / MTTC / MTTR, top classifications.
-- Docker Compose deployment with Postgres.
+- Docker Compose deployment with Postgres, Redis, and a dedicated BullMQ worker.
 
 The original roadmap is tracked as GitHub issues under the **roadmap** label. Phase 2 and Phase 3 are shipped, including the native iOS companion and collaborative field editing; see [Shipped Phase 3 features](#shipped-phase-3-features) below.
 
@@ -105,7 +105,7 @@ Screenshots below were captured from a seeded local demo workspace with fake use
 - Drizzle ORM with PostgreSQL.
 - BetterAuth, with SAML 2.0 and OIDC single sign-on (via `@node-saml/node-saml` and a hand-rolled OIDC flow).
 - Tailwind v4 with bespoke components (no shadcn install needed at MVP scope).
-- Background work runs through internal `/api/cron/*` endpoints driven by an external scheduler (a Docker Compose sidecar in the bundled stack). No extra queue or worker process is required.
+- Background work runs through BullMQ Job Schedulers backed by Redis. The bundled Compose stack runs a separate worker service with durable schedules, retry/backoff, and graceful shutdown.
 
 ## Shipped Phase 3 features
 
@@ -133,7 +133,7 @@ New action handlers implement `ActionHandler` in `src/lib/response-actions/handl
 
 A small TI store answers "is this IOC known bad?" as a sub-second indexed lookup.
 
-- **Feeds** (generic CSV/TXT URL, MISP via API, OTX via API) are configured under the **Threat intel** page (admin). Each feed polls on its own interval (driven by `POST /api/cron/ti`), tracks last-poll status and indicator count, and halts on a credential error until cleared.
+- **Feeds** (generic CSV/TXT URL, MISP via API, OTX via API) are configured under the **Threat intel** page. Each feed has an administrator-controlled BullMQ schedule, tracks last-poll status and indicator count, and retries transient failures.
 - **Automatic matching**: when an observable is created, Kelpie runs an indexed TI lookup and attaches matches to the observable's `enrichment.ti` immediately. The `ti` provider is also part of the enrichment registry, so later passes refresh it alongside reverse DNS, VirusTotal, etc.
 - **Browse / search** the store from the **Threat intel** page: filter by value, type, feed, or tag. Each indicator's detail shows the feeds it came from (with confidence) and the cases it has appeared on.
 
@@ -161,7 +161,7 @@ SSO sessions are BetterAuth-compatible: the callback creates a session row and s
 
 ### Real-time presence and version-guarded edits
 
-- **Presence**: opening a case shows the avatars of other analysts viewing it, plus a "typing a comment" indicator. Transport is a Postgres-backed roster streamed over server-sent events at `/api/cases/{id}/presence`, so it works across app replicas without Redis. Rows expire after 30s of inactivity and are pruned on the cron tick.
+- **Presence**: opening a case shows the avatars of other analysts viewing it, plus a "typing a comment" indicator. Transport is a Postgres-backed roster streamed over server-sent events at `/api/cases/{id}/presence`, so it works across app replicas. Rows expire after 30s of inactivity and are pruned by the jobs worker.
 - **Version-guarded field saves**: guarded case fields (severity, classification, TLP, PAP, assignee, tags) carry an optimistic version stamp. A conflicting save is rejected with the current value so the analyst can reload and choose what to keep. The same version guard is enforced on `PATCH /api/v1/cases/{id}` (send `version`; a stale value returns `409 version_conflict`).
 
 ### Native iOS companion
@@ -174,13 +174,14 @@ APNs notifications route SLA breaches to the assigned analyst and comment mentio
 
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template?template=https%3A%2F%2Fgithub.com%2Fjusso-dev%2FKelpie&plugins=postgresql&envs=DATABASE_URL%2CBETTER_AUTH_SECRET%2CBETTER_AUTH_URL%2CAPP_URL%2CCRON_SECRET%2CEMAIL_FROM%2CSTORAGE_DRIVER%2CSTORAGE_LOCAL_DIR&DATABASE_URLDesc=Railway+Postgres+connection+string&DATABASE_URLDefault=%24%7B%7BPostgres.DATABASE_URL%7D%7D&BETTER_AUTH_SECRETDesc=Secret+used+to+sign+authentication+sessions&BETTER_AUTH_SECRETDefault=%24%7B%7Bsecret%2864%29%7D%7D&BETTER_AUTH_URLDesc=Public+origin+used+by+BetterAuth&BETTER_AUTH_URLDefault=https%3A%2F%2F%24%7B%7BRAILWAY_PUBLIC_DOMAIN%7D%7D&APP_URLDesc=Public+origin+used+for+links+and+SSO+callbacks&APP_URLDefault=https%3A%2F%2F%24%7B%7BRAILWAY_PUBLIC_DOMAIN%7D%7D&CRON_SECRETDesc=Secret+protecting+the+background+job+endpoints&CRON_SECRETDefault=%24%7B%7Bsecret%2864%29%7D%7D&EMAIL_FROMDesc=From+address+for+notification+emails&EMAIL_FROMDefault=kelpie%40example.com&STORAGE_DRIVERDesc=Attachment+storage+driver&STORAGE_DRIVERDefault=local&STORAGE_LOCAL_DIRDesc=Local+attachment+directory&STORAGE_LOCAL_DIRDefault=%2Fdata%2Fuploads)
 
-The button provisions Kelpie and Postgres, generates the authentication and cron secrets, applies database migrations before each release, and waits for the database-backed health check before routing traffic.
+The button provisions the web service and Postgres. A complete production deployment also needs Redis and a worker service, as described below.
 
 After the first deploy:
 
 1. Open the generated Railway domain and create the first organisation and administrator account.
 2. For durable local attachments, attach a Railway volume to the Kelpie service at `/data`. Without a volume, attachments are lost on redeploy. Alternatively, configure the S3 variables from `.env.example`.
-3. Schedule the six authenticated `/api/cron/*` endpoints described in [Background jobs](#background-jobs-cron). Railway cron services, or any external scheduler, can call them with `Authorization: Bearer $CRON_SECRET`.
+3. Add a persistent Redis service and set `REDIS_URL` on both Kelpie services.
+4. Add a second service from the same image with start command `node scripts/jobs-worker.cjs`. Give it the same application environment plus `DATABASE_URL`, `REDIS_URL`, and optional `JOBS_CONCURRENCY`.
 
 Kelpie rejects webhook, feed, response-action, and OIDC destinations that resolve to private or local network addresses. If your self-hosted deployment intentionally connects to services on its private network, set `KELPIE_ALLOW_PRIVATE_NETWORKS=true`. Leave it disabled for public integrations.
 
@@ -194,8 +195,8 @@ npm install
 cp .env.example .env
 # (the defaults work against the bundled docker-compose db)
 
-# 3. Bring up Postgres (or run your own; just point DATABASE_URL at it)
-docker compose up -d db
+# 3. Bring up Postgres and Redis (or point DATABASE_URL / REDIS_URL at your own)
+docker compose up -d db redis
 
 # 4. Generate and apply migrations, then seed
 npm run db:generate
@@ -220,7 +221,7 @@ docker compose pull
 docker compose up -d
 ```
 
-The compose stack starts Postgres, an idempotent migration job, Kelpie, and a cron sidecar. Uploads land in the `kelpie_uploads` volume. Put TLS and public ingress at a reverse proxy (for example Caddy or Traefik) on the same host. Set `KELPIE_BIND_ADDRESS=0.0.0.0` only when direct network exposure is intentional.
+The compose stack starts Postgres, persistent Redis, an idempotent migration job, Kelpie, and a dedicated BullMQ worker. Uploads land in the `kelpie_uploads` volume. Put TLS and public ingress at a reverse proxy (for example Caddy or Traefik) on the same host. Set `KELPIE_BIND_ADDRESS=0.0.0.0` only when direct network exposure is intentional.
 
 Images publish from `main` and `v*` tags to `ghcr.io/jusso-dev/kelpie`. First release requires changing package visibility to **Public** in GitHub package settings; homelab hosts can then pull without credentials. Pin deployments to a release tag or digest after validation instead of tracking `latest`:
 
@@ -229,20 +230,13 @@ KELPIE_IMAGE=ghcr.io/jusso-dev/kelpie:v1.0.0 docker compose pull
 KELPIE_IMAGE=ghcr.io/jusso-dev/kelpie:v1.0.0 docker compose up -d
 ```
 
-## Background jobs (cron)
+## Background jobs (BullMQ)
 
-Background work runs through authenticated internal endpoints, hit once a minute by an external scheduler. The bundled `docker-compose.yml` includes a sidecar that curls them with `CRON_SECRET`. The endpoints are:
+The `jobs` service runs `scripts/jobs-worker.cjs` against persistent Redis. BullMQ owns recurring schedules for SLA checks, webhook delivery, observable enrichment, mobile push delivery, presence cleanup, each enabled TI feed, and each enabled external case source.
 
-| Endpoint | Job |
-| --- | --- |
-| `POST /api/cron/sla` | SLA breach + warning checks and assignee email |
-| `POST /api/cron/webhooks` | Outbound webhook delivery with retry/backoff |
-| `POST /api/cron/enrichment` | Observable enrichment passes + cache purge |
-| `POST /api/cron/ti` | Poll due TI feeds + prune stale presence rows |
-| `POST /api/cron/case-sources` | Import due external case sources |
-| `POST /api/cron/mobile-push` | Deliver the APNs notification outbox |
+Administrators set feed and case-source intervals under **Settings → Integrations → Automation schedules**. Kelpie stores the desired schedule in Postgres; the worker reconciles BullMQ Job Schedulers within one minute. Jobs retry three times with exponential backoff, completed history is retained for 24 hours, and failed history for seven days.
 
-Each requires `Authorization: Bearer $CRON_SECRET`. Point any scheduler (cron, a k8s CronJob, a GitHub Actions schedule) at them if you are not using the bundled sidecar.
+The authenticated `/api/cron/*` routes remain available for manual recovery and backwards compatibility. They are not used by the bundled Compose stack.
 
 ## Smoke test
 

@@ -3,10 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { toast } from "sonner";
 import { format, formatDistanceToNowStrict } from "date-fns";
 import { AlertTriangle, CalendarClock, UserRound } from "lucide-react";
 import { setTaskStatus } from "@/actions/tasks";
 import { SeverityBadge, TaskStatusBadge } from "@/components/badges";
+import { feedbackError } from "@/components/confirm-dialog";
 
 const STATUSES = ["todo", "in_progress", "done", "blocked"] as const;
 
@@ -45,10 +47,18 @@ export default function TaskInboxRow({
     startTransition(async () => {
       try {
         await setTaskStatus(task.id, next);
+        toast.success("Task status updated", {
+          description: `"${task.title}" is now ${next.replace(/_/g, " ")}.`,
+        });
         router.refresh();
-      } catch {
+      } catch (caught) {
         setStatus(previous);
-        setError("Could not update this task. Try again.");
+        const message = feedbackError(
+          caught,
+          "The previous status was restored. Try again.",
+        );
+        setError(message);
+        toast.error("Task could not be updated", { description: message });
       }
     });
   }

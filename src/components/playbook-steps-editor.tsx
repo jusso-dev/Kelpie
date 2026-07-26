@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 
 type DraftStep = {
   title: string;
@@ -24,6 +26,7 @@ export default function PlaybookStepsEditor({
   initial?: DraftStep[];
 }) {
   const [steps, setSteps] = useState<DraftStep[]>(initial ?? STARTING);
+  const [removeIndex, setRemoveIndex] = useState<number | null>(null);
 
   function update(i: number, patch: Partial<DraftStep>) {
     setSteps((prev) =>
@@ -32,6 +35,10 @@ export default function PlaybookStepsEditor({
   }
   function remove(i: number) {
     setSteps((prev) => prev.filter((_, idx) => idx !== i));
+    setRemoveIndex(null);
+    toast.success("Step removed from draft", {
+      description: "Save the playbook to make this change permanent.",
+    });
   }
   function add() {
     setSteps((prev) => [
@@ -64,7 +71,7 @@ export default function PlaybookStepsEditor({
               <button
                 type="button"
                 className="kelpie-btn kelpie-btn-ghost text-red-400"
-                onClick={() => remove(i)}
+                onClick={() => setRemoveIndex(i)}
               >
                 Remove
               </button>
@@ -111,6 +118,18 @@ export default function PlaybookStepsEditor({
       >
         Add step
       </button>
+      <ConfirmDialog
+        open={removeIndex !== null}
+        onOpenChange={(open) => {
+          if (!open) setRemoveIndex(null);
+        }}
+        title="Remove this playbook step?"
+        description="Are you sure? The step is removed from the draft. The saved playbook remains unchanged until you save."
+        confirmLabel="Remove step"
+        onConfirm={() => {
+          if (removeIndex !== null) remove(removeIndex);
+        }}
+      />
     </div>
   );
 }
