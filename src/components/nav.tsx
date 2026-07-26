@@ -11,6 +11,7 @@ import {
   Database,
   Globe2,
   LayoutDashboard,
+  Library,
   ListChecks,
   Menu,
   Newspaper,
@@ -30,6 +31,7 @@ const links = [
   { href: "/briefing", label: "Cyber brief", icon: Newspaper },
   { href: "/threat-landscape", label: "Threat landscape", icon: Globe2 },
   { href: "/playbooks", label: "Playbooks", icon: BookOpen },
+  { href: "/guides", label: "Guides", icon: Library },
   { href: "/settings", label: "Settings", icon: Settings },
   { href: "/account/security", label: "Security", icon: ShieldCheck },
 ];

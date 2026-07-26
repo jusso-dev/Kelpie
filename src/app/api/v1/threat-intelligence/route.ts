@@ -10,6 +10,18 @@ function positiveInteger(value: string | null): number | undefined {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
+function boundedInteger(
+  value: string | null,
+  minimum: number,
+  maximum: number,
+): number | undefined {
+  if (value === null || value === "") return undefined;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= minimum && parsed <= maximum
+    ? parsed
+    : undefined;
+}
+
 export async function GET(req: Request) {
   const auth = await authenticateApiTokenWithScope(
     req,
@@ -25,7 +37,9 @@ export async function GET(req: Request) {
     type: params.get("type")?.trim() || undefined,
     feedId: params.get("feedId")?.trim() || undefined,
     tag: params.get("tag")?.trim() || undefined,
+    minConfidence: boundedInteger(params.get("minConfidence"), 0, 100),
     limit: positiveInteger(params.get("limit")),
+    offset: boundedInteger(params.get("offset"), 0, 1_000_000),
   });
   return NextResponse.json(data, {
     headers: { "cache-control": "private, no-store" },

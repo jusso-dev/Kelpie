@@ -54,7 +54,7 @@ export default async function SettingsPage() {
           <h2>More configuration</h2>
           <p>Identity, integrations, and organisation data structure.</p>
         </div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <Link
             href="/settings/integrations"
             className="kelpie-btn kelpie-btn-secondary justify-center"
@@ -66,6 +66,12 @@ export default async function SettingsPage() {
             className="kelpie-btn kelpie-btn-secondary justify-center"
           >
             Custom fields
+          </Link>
+          <Link
+            href="/settings/tags"
+            className="kelpie-btn kelpie-btn-secondary justify-center"
+          >
+            Team tags
           </Link>
           <Link
             href="/settings/sso"

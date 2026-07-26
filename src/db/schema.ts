@@ -811,6 +811,10 @@ export const tiIndicators = pgTable(
     ),
     index("ti_indicators_org_value_idx").on(t.organisationId, t.value),
     index("ti_indicators_org_type_idx").on(t.organisationId, t.type),
+    index("ti_indicators_org_confidence_idx").on(
+      t.organisationId,
+      t.confidence,
+    ),
   ],
 );
 

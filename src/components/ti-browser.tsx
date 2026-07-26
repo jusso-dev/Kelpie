@@ -1,15 +1,18 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import {
   indicatorDetail,
   searchIndicators,
   type IndicatorSearchRow,
 } from "@/actions/ti";
+import { feedbackError } from "@/components/confirm-dialog";
 
 type Detail = Awaited<ReturnType<typeof indicatorDetail>>;
 
 const TYPES = ["", "ip", "domain", "url", "file_hash", "email", "other"];
+const CONFIDENCE_THRESHOLDS = ["", "25", "50", "75", "90"] as const;
 
 export default function TiBrowser({
   feeds,
@@ -20,21 +23,46 @@ export default function TiBrowser({
   const [type, setType] = useState("");
   const [feedId, setFeedId] = useState("");
   const [tag, setTag] = useState("");
+  const [minConfidence, setMinConfidence] = useState("");
   const [rows, setRows] = useState<IndicatorSearchRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
 
-  async function runSearch(e?: React.FormEvent) {
+  async function runSearch(e?: React.FormEvent, requestedPage = 1) {
     e?.preventDefault();
     setLoading(true);
     const t0 = performance.now();
     try {
-      const res = await searchIndicators({ q, type, feedId, tag });
-      setRows(res);
+      const result = await searchIndicators({
+        q,
+        type,
+        feedId,
+        tag,
+        minConfidence: minConfidence ? Number(minConfidence) : undefined,
+        page: requestedPage,
+      });
+      setRows(result.rows);
+      setTotal(result.total);
+      setPage(result.page);
+      setPageSize(result.pageSize);
+      setTotalPages(result.totalPages);
       setSearched(true);
       setTookMs(Math.round(performance.now() - t0));
+      setSelected(null);
+      setDetail(null);
+    } catch (error) {
+      toast.error("Threat intelligence search failed", {
+        description: feedbackError(
+          error,
+          "Filters were not changed. Try the search again.",
+        ),
+      });
     } finally {
       setLoading(false);
     }
@@ -98,8 +126,8 @@ export default function TiBrowser({
             </select>
           </div>
         </div>
-        <div className="flex items-end gap-2">
-          <div className="flex-1">
+        <div className="grid gap-2 md:grid-cols-[minmax(12rem,1fr)_12rem_auto] md:items-end">
+          <div>
             <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
               Tag
             </label>
@@ -109,6 +137,22 @@ export default function TiBrowser({
               onChange={(e) => setTag(e.target.value)}
             />
           </div>
+          <div>
+            <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+              Minimum confidence
+            </label>
+            <select
+              className="kelpie-input"
+              value={minConfidence}
+              onChange={(event) => setMinConfidence(event.target.value)}
+            >
+              {CONFIDENCE_THRESHOLDS.map((confidence) => (
+                <option key={confidence || "any"} value={confidence}>
+                  {confidence ? `${confidence}+` : "any"}
+                </option>
+              ))}
+            </select>
+          </div>
           <button className="kelpie-btn kelpie-btn-primary" disabled={loading}>
             {loading ? "Searching…" : "Search"}
           </button>
@@ -117,48 +161,81 @@ export default function TiBrowser({
 
       {searched ? (
         <p className="text-xs text-slate-500">
-          {rows.length} result(s){tookMs !== null ? ` in ${tookMs}ms` : ""}
+          {total === 0
+            ? "No results"
+            : `Showing ${(page - 1) * pageSize + 1}-${Math.min(page * pageSize, total)} of ${total.toLocaleString()} results`}
+          {tookMs !== null ? ` in ${tookMs}ms` : ""}
         </p>
       ) : null}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2 kelpie-scroll-x" tabIndex={0}>
-          <table className="kelpie-table">
-            <thead>
-              <tr>
-                <th>Value</th>
-                <th>Type</th>
-                <th>Feed</th>
-                <th>Conf.</th>
-                <th>Last seen</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 ? (
+        <div className="space-y-3 lg:col-span-2">
+          <div className="kelpie-scroll-x" tabIndex={0}>
+            <table className="kelpie-table">
+              <thead>
                 <tr>
-                  <td colSpan={5} className="text-center text-slate-500 py-6">
-                    {searched ? "No matches." : "Search the TI store."}
-                  </td>
+                  <th>Value</th>
+                  <th>Type</th>
+                  <th>Feed</th>
+                  <th>Conf.</th>
+                  <th>Last seen</th>
                 </tr>
-              ) : (
-                rows.map((r) => (
-                  <tr
-                    key={`${r.feedId}-${r.value}-${r.type}`}
-                    className="cursor-pointer hover:bg-[color:var(--color-navy-800)]"
-                    onClick={() => openDetail(r.value)}
-                  >
-                    <td className="font-mono text-xs">{r.value}</td>
-                    <td className="text-xs text-slate-400">{r.type}</td>
-                    <td className="text-xs text-slate-400">{r.feedName}</td>
-                    <td>{r.confidence}</td>
-                    <td className="text-xs text-slate-400">
-                      {r.lastSeen ? new Date(r.lastSeen).toLocaleDateString() : "—"}
+              </thead>
+              <tbody>
+                {rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-6 text-center text-slate-500">
+                      {searched ? "No matches." : "Search the TI store."}
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  rows.map((r) => (
+                    <tr
+                      key={`${r.feedId}-${r.value}-${r.type}`}
+                      className="cursor-pointer hover:bg-[color:var(--color-navy-800)]"
+                      onClick={() => openDetail(r.value)}
+                    >
+                      <td className="font-mono text-xs">{r.value}</td>
+                      <td className="text-xs text-slate-400">{r.type}</td>
+                      <td className="text-xs text-slate-400">{r.feedName}</td>
+                      <td>{r.confidence}</td>
+                      <td className="text-xs text-slate-400">
+                        {r.lastSeen
+                          ? new Date(r.lastSeen).toLocaleDateString()
+                          : "—"}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          {searched && totalPages > 1 ? (
+            <nav
+              className="flex items-center justify-between gap-3"
+              aria-label="Threat intelligence result pages"
+            >
+              <button
+                type="button"
+                className="kelpie-btn kelpie-btn-secondary"
+                disabled={loading || page <= 1}
+                onClick={() => runSearch(undefined, page - 1)}
+              >
+                Previous
+              </button>
+              <span className="text-xs text-slate-400">
+                Page {page.toLocaleString()} of {totalPages.toLocaleString()}
+              </span>
+              <button
+                type="button"
+                className="kelpie-btn kelpie-btn-secondary"
+                disabled={loading || page >= totalPages}
+                onClick={() => runSearch(undefined, page + 1)}
+              >
+                Next
+              </button>
+            </nav>
+          ) : null}
         </div>
 
         <aside className="kelpie-card p-4">

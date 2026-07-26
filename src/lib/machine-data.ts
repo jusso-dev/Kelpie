@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   tiFeeds,
@@ -17,7 +17,9 @@ export type ThreatIntelQuery = {
   type?: string;
   feedId?: string;
   tag?: string;
+  minConfidence?: number;
   limit?: number;
+  offset?: number;
 };
 
 export async function queryThreatIntelligence(
@@ -35,9 +37,19 @@ export async function queryThreatIntelligence(
   if (query.type) filters.push(eq(tiIndicators.type, query.type));
   if (query.feedId) filters.push(eq(tiIndicators.feedId, query.feedId));
   if (query.tag) filters.push(sql`${tiIndicators.tags} ? ${query.tag}`);
+  if (
+    Number.isInteger(query.minConfidence) &&
+    query.minConfidence !== undefined &&
+    query.minConfidence >= 0 &&
+    query.minConfidence <= 100
+  ) {
+    filters.push(gte(tiIndicators.confidence, query.minConfidence));
+  }
   const limit = Math.min(Math.max(query.limit ?? 100, 1), 500);
+  const offset = Math.min(Math.max(query.offset ?? 0, 0), 1_000_000);
+  const where = and(...filters);
 
-  const [indicators, feeds] = await Promise.all([
+  const [indicators, feeds, totalRows] = await Promise.all([
     db
       .select({
         id: tiIndicators.id,
@@ -54,9 +66,10 @@ export async function queryThreatIntelligence(
       })
       .from(tiIndicators)
       .innerJoin(tiFeeds, eq(tiFeeds.id, tiIndicators.feedId))
-      .where(and(...filters))
+      .where(where)
       .orderBy(desc(tiIndicators.lastSeen), desc(tiIndicators.createdAt))
-      .limit(limit),
+      .limit(limit)
+      .offset(offset),
     db
       .select({
         id: tiFeeds.id,
@@ -70,7 +83,12 @@ export async function queryThreatIntelligence(
       .from(tiFeeds)
       .where(eq(tiFeeds.organisationId, organisationId))
       .orderBy(desc(tiFeeds.createdAt)),
+    db
+      .select({ total: sql<number>`count(*)::int` })
+      .from(tiIndicators)
+      .where(where),
   ]);
+  const total = totalRows[0]?.total ?? 0;
 
   return {
     indicators: indicators.map((indicator) => ({
@@ -83,7 +101,11 @@ export async function queryThreatIntelligence(
       lastPolledAt: feed.lastPolledAt?.toISOString() ?? null,
     })),
     count: indicators.length,
+    total,
     limit,
+    offset,
+    nextOffset:
+      offset + indicators.length < total ? offset + indicators.length : null,
   };
 }
 

@@ -1,0 +1,1 @@
+CREATE INDEX "ti_indicators_org_confidence_idx" ON "ti_indicators" USING btree ("organisation_id","confidence");

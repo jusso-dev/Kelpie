@@ -24,7 +24,9 @@ const threatIntelInput = z.object({
   type: z.string().trim().min(1).max(64).optional(),
   feed_id: z.string().trim().min(1).max(128).optional(),
   tag: z.string().trim().min(1).max(128).optional(),
+  min_confidence: z.number().int().min(0).max(100).optional(),
   limit: z.number().int().min(1).max(200).optional(),
+  offset: z.number().int().min(0).max(1_000_000).optional(),
 });
 
 const briefingInput = z.object({
@@ -53,7 +55,14 @@ const tools = [
         type: { type: "string", description: "Indicator type filter." },
         feed_id: { type: "string", description: "Feed identifier filter." },
         tag: { type: "string", description: "Exact indicator tag filter." },
+        min_confidence: {
+          type: "integer",
+          minimum: 0,
+          maximum: 100,
+          description: "Minimum indicator confidence, inclusive.",
+        },
         limit: { type: "integer", minimum: 1, maximum: 200, default: 100 },
+        offset: { type: "integer", minimum: 0, default: 0 },
       },
       additionalProperties: false,
     },
@@ -193,7 +202,9 @@ async function callTool(
         type: input.type,
         feedId: input.feed_id,
         tag: input.tag,
+        minConfidence: input.min_confidence,
         limit: input.limit,
+        offset: input.offset,
       }),
     );
   }

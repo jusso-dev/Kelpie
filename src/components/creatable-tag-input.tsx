@@ -7,15 +7,17 @@ export default function CreatableTagInput({
   name,
   label,
   suggestions,
+  initialTags = [],
   help,
 }: {
   name: string;
   label: string;
   suggestions: string[];
+  initialTags?: string[];
   help: string;
 }) {
   const id = useId();
-  const [tags, setTags] = useState<string[]>([]);
+  const [tags, setTags] = useState<string[]>(() => normalizeTags(initialTags));
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);

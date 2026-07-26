@@ -6,10 +6,11 @@ import { createCase } from "@/actions/cases";
 import { applyCaseTemplate } from "@/actions/case-templates";
 import CreatableTagInput from "@/components/creatable-tag-input";
 import { DATA_CLASSIFICATION_SUGGESTIONS, normalizeTags } from "@/lib/tags";
+import { getTeamTags } from "@/lib/team-tags";
 
 export default async function NewCasePage() {
   const user = await requireUser();
-  const [templates, caseTagRows] = await Promise.all([
+  const [templates, caseTagRows, teamTags] = await Promise.all([
     db
       .select({
         id: caseTemplates.id,
@@ -26,12 +27,19 @@ export default async function NewCasePage() {
       })
       .from(cases)
       .where(eq(cases.organisationId, user.organisationId)),
+    getTeamTags(user.organisationId),
   ]);
   const tagSuggestions = normalizeTags(
-    caseTagRows.flatMap((row) => (Array.isArray(row.tags) ? row.tags as string[] : [])),
+    [
+      ...teamTags.caseTags,
+      ...caseTagRows.flatMap((row) =>
+        Array.isArray(row.tags) ? row.tags as string[] : [],
+      ),
+    ],
   );
   const classificationTagSuggestions = normalizeTags([
     ...DATA_CLASSIFICATION_SUGGESTIONS,
+    ...teamTags.dataClassificationTags,
     ...caseTagRows.flatMap((row) =>
       Array.isArray(row.dataClassificationTags)
         ? row.dataClassificationTags as string[]

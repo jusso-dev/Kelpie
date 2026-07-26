@@ -37,6 +37,17 @@ export default async function CustomFieldsSettingsPage() {
           isAdmin={isAdmin}
         />
       </section>
+
+      <p className="text-sm text-slate-400">
+        Need help choosing fields?{" "}
+        <Link
+          href="/guides#tags-and-custom-fields"
+          className="text-[color:var(--color-tan-300)] hover:underline"
+        >
+          Read the tags and custom fields guide
+        </Link>
+        .
+      </p>
     </div>
   );
 }
