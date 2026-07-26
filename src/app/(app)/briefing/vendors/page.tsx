@@ -150,6 +150,7 @@ export default async function VendorWatchPage({
                   alt=""
                   width={44}
                   height={44}
+                  unoptimized
                   className="h-11 w-11 shrink-0 rounded-lg bg-white object-contain p-1"
                 />
                 <div className="min-w-0 flex-1">
@@ -266,6 +267,7 @@ export default async function VendorWatchPage({
                       alt=""
                       width={48}
                       height={48}
+                      unoptimized
                       className="h-12 w-12 shrink-0 rounded-lg bg-white object-contain p-1"
                     />
                     <div className="min-w-0">

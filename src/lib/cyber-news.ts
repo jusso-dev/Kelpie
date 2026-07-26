@@ -18,6 +18,28 @@ export type CyberNewsResult = {
 
 const SOURCES = [
   {
+    name: "ASD's ACSC Advisories",
+    feedUrl: "https://www.cyber.gov.au/rss/advisories",
+    homeUrl:
+      "https://www.cyber.gov.au/about-us/view-all-content/alerts-and-advisories",
+  },
+  {
+    name: "ASD's ACSC Alerts",
+    feedUrl: "https://www.cyber.gov.au/rss/alerts",
+    homeUrl:
+      "https://www.cyber.gov.au/about-us/view-all-content/alerts-and-advisories",
+  },
+  {
+    name: "ASD's ACSC News",
+    feedUrl: "https://www.cyber.gov.au/rss/news",
+    homeUrl: "https://www.cyber.gov.au/about-us/view-all-content/news",
+  },
+  {
+    name: "Scamwatch",
+    feedUrl: "https://www.scamwatch.gov.au/rss/news-feed.xml",
+    homeUrl: "https://www.scamwatch.gov.au/about-us/news-and-alerts",
+  },
+  {
     name: "CISA",
     feedUrl: "https://www.cisa.gov/cybersecurity-advisories/all.xml",
     homeUrl: "https://www.cisa.gov/news-events/cybersecurity-advisories",
@@ -177,7 +199,8 @@ async function fetchSource(
   const response = await fetch(source.feedUrl, {
     headers: {
       accept: "application/rss+xml, application/atom+xml, application/xml, text/xml",
-      "user-agent": "Kelpie/0.2 (+https://github.com/jusso-dev/Kelpie)",
+      "accept-encoding": "identity",
+      "user-agent": "Kelpie/0.2",
     },
     next: { revalidate: 900 },
     signal: AbortSignal.timeout(10_000),

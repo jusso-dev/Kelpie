@@ -343,6 +343,7 @@ export default async function CyberBriefingPage({
                             alt=""
                             width={16}
                             height={16}
+                            unoptimized
                             className="h-4 w-4 rounded bg-white object-contain"
                           />
                           Matches {vendor.displayName}
