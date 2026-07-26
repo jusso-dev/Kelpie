@@ -68,6 +68,8 @@ services:
     image: ${KELPIE_IMAGE_REF:?Set KELPIE_IMAGE_REF in .env}
     pull_policy: always
     restart: unless-stopped
+    healthcheck:
+      disable: true
     env_file:
       - ${KELPIE_ENV_FILE:-.env}
     environment:
