@@ -138,7 +138,11 @@ export default function ThreatLandscapeMap({
               const value = byId.get(id);
               const isSelected = value?.code === selectedCode;
               const label = value
-                ? `${value.name}: ${value.percentage.toFixed(2)}% of observed ${mode} activity, rank ${value.rank}. Select for findings.`
+                ? `${value.name}: ${value.percentage.toFixed(2)}% of observed ${mode} activity, rank ${value.rank}. ${
+                    isSelected
+                      ? "Select again to clear findings."
+                      : "Select for findings."
+                  }`
                 : "No activity in the current top results";
               return (
                 <path
@@ -161,14 +165,21 @@ export default function ThreatLandscapeMap({
                       ? "cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-tan-400)]"
                       : undefined
                   }
-                  onClick={() => value && setSelectedCode(value.code)}
+                  onClick={() =>
+                    value &&
+                    setSelectedCode((current) =>
+                      current === value.code ? null : value.code,
+                    )
+                  }
                   onKeyDown={(event) => {
                     if (
                       value &&
                       (event.key === "Enter" || event.key === " ")
                     ) {
                       event.preventDefault();
-                      setSelectedCode(value.code);
+                      setSelectedCode((current) =>
+                        current === value.code ? null : value.code,
+                      );
                     }
                   }}
                 >
