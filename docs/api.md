@@ -16,6 +16,9 @@ Errors return `{ "error": "..." }` with an appropriate HTTP status (`400` invali
 | `tasks:read` / `tasks:write` | Read or create/update tasks |
 | `observables:read` / `observables:write` | Search or add observables |
 | `comments:read` / `comments:write` | Read or post comments |
+| `threat_intelligence:read` | Search TI indicators and inspect feed state |
+| `threat_landscape:read` | Read current Cloudflare Radar Threat landscape data |
+| `briefing:read` | Read Cyber brief, watched vendors, and vendor matches |
 
 ## Cases
 
@@ -65,6 +68,51 @@ Adding an observable kicks off enrichment.
 
 ### `GET /api/v1/observables?value=&exact=`
 Cross-case search. With `exact=true` does an equality match; otherwise substring.
+
+## Threat intelligence
+
+### `GET /api/v1/threat-intelligence`
+
+Returns matching indicators plus feed state. Optional query: `value`, `exact`,
+`type`, `feedId`, `tag`, and `limit` (maximum 500).
+
+## Threat landscape
+
+### `GET /api/v1/threat-landscape`
+
+Returns Cloudflare Radar configuration state, update time, confidence, rolling
+window, observed origin/target totals, and top attack routes. Requires
+`CLOUDFLARE_RADAR_API_TOKEN` on the Kelpie app container.
+
+## Cyber brief
+
+### `GET /api/v1/briefing`
+
+Returns public cyber reporting with watched-vendor matches. Optional query:
+`q`, `source`, `vendor` (catalog slug or `watched`), `sort` (`newest`,
+`oldest`, `source`), `page`, and `pageSize` (maximum 100).
+
+## Model Context Protocol
+
+Kelpie exposes the same read-only machine data over stateless Streamable HTTP:
+
+```text
+POST https://your-kelpie.example/api/mcp
+Authorization: Bearer klp_yourtoken
+Accept: application/json, text/event-stream
+Content-Type: application/json
+```
+
+Configure an MCP client with the endpoint above and a Kelpie API token carrying
+one or more machine-data scopes. Available tools:
+
+- `search_threat_intelligence` — `threat_intelligence:read`
+- `get_threat_landscape` — `threat_landscape:read`
+- `get_cyber_briefing` — `briefing:read`
+- `list_watched_vendors` — `briefing:read`
+
+MCP tools are read-only. Tool discovery only returns tools permitted by the
+token's scopes.
 
 ## Comments
 

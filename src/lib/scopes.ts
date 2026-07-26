@@ -7,6 +7,9 @@ export const KNOWN_SCOPES = [
   { value: "observables:write", label: "Add observables" },
   { value: "comments:read", label: "Read comments" },
   { value: "comments:write", label: "Post comments" },
+  { value: "threat_intelligence:read", label: "Read threat intelligence" },
+  { value: "threat_landscape:read", label: "Read Threat landscape data" },
+  { value: "briefing:read", label: "Read Cyber brief and vendor matches" },
 ] as const;
 
 export type ScopeValue = (typeof KNOWN_SCOPES)[number]["value"];

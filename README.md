@@ -23,6 +23,7 @@ Kelpie is a SOC case management tool built as a single Next.js application backe
 - Searchable Cyber brief with source and watched-vendor filters, sorting, and pagination.
 - Organisation vendor watchlists backed by a 606-entry curated catalog with vendor icons and matched-report highlighting.
 - Threat landscape showing near-real-time Cloudflare Radar application-attack activity.
+- Scoped REST and MCP access to threat intelligence, Threat landscape, Cyber brief, and watched-vendor matches.
 - Local file attachments with SHA256.
 - Dashboard with open cases by severity, MTTA / MTTC / MTTR, top classifications.
 - Docker Compose deployment with Postgres, Redis, and a dedicated BullMQ worker.
@@ -160,6 +161,11 @@ The **Threat landscape** presents rolling 24-hour Cloudflare Radar
 application-layer attack activity by observed origin, target, and route. Configure
 `CLOUDFLARE_RADAR_API_TOKEN` with **Account → Radar → Read** permission. Kelpie
 formats provider timestamps in the signed-in user's configured timezone.
+
+REST consumers use `/api/v1/threat-intelligence`, `/api/v1/threat-landscape`,
+and `/api/v1/briefing`. Agents can connect to the stateless Streamable HTTP MCP
+endpoint at `/api/mcp`; create a scoped bearer token under **Settings → API
+tokens**. See [API and MCP documentation](docs/api.md).
 
 ### Custom field builder
 
