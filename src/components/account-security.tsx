@@ -8,7 +8,6 @@ type Passkey = {
   id: string;
   name?: string | null;
   deviceType?: string;
-  createdAt?: string;
 };
 
 export default function AccountSecurity({
@@ -31,15 +30,12 @@ export default function AccountSecurity({
   const [passkeysLoading, setPasskeysLoading] = useState(true);
 
   async function loadPasskeys() {
-    const res = await fetch("/api/auth/passkey/list-user-passkeys", {
-      cache: "no-store",
-    });
-    if (!res.ok) {
-      setError("Could not load passkeys");
+    const res = await authClient.passkey.listUserPasskeys();
+    if (res.error) {
+      setError(res.error.message ?? "Could not load passkeys");
       return;
     }
-    const data = (await res.json()) as Passkey[];
-    setPasskeys(data);
+    setPasskeys(res.data ?? []);
   }
 
   useEffect(() => {
@@ -129,14 +125,9 @@ export default function AccountSecurity({
     setError(null);
     setMessage(null);
     try {
-      const res = await fetch("/api/auth/passkey/delete-passkey", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        setError(data?.message ?? "Could not remove passkey");
+      const res = await authClient.passkey.deletePasskey({ id });
+      if (res.error) {
+        setError(res.error.message ?? "Could not remove passkey");
         return;
       }
       await loadPasskeys();

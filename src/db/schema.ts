@@ -198,7 +198,7 @@ export const passkeys = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     credentialID: text("credential_id").notNull(),
-    counter: integer("counter").notNull(),
+    counter: bigint("counter", { mode: "number" }).notNull(),
     deviceType: text("device_type").notNull(),
     backedUp: boolean("backed_up").notNull(),
     transports: text("transports"),

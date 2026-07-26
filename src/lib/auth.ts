@@ -37,6 +37,14 @@ export const AUTH_SECRET =
 export const AUTH_BASE_URL =
   process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
 
+export function parseAbsoluteUrl(value: string, variableName: string): URL {
+  try {
+    return new URL(value);
+  } catch {
+    throw new Error(`${variableName} must be an absolute URL, got: ${value}`);
+  }
+}
+
 export function parseTrustedOrigins(value: string | undefined): string[] {
   return (value ?? "")
     .split(",")
@@ -48,11 +56,15 @@ export const AUTH_TRUSTED_ORIGINS = parseTrustedOrigins(
   process.env.BETTER_AUTH_TRUSTED_ORIGINS,
 );
 
-export const PASSKEY_RP_ID =
-  process.env.PASSKEY_RP_ID ?? new URL(AUTH_BASE_URL).hostname;
+const authBaseUrl = parseAbsoluteUrl(AUTH_BASE_URL, "BETTER_AUTH_URL");
 
-export const PASSKEY_ORIGIN =
-  process.env.PASSKEY_ORIGIN ?? AUTH_BASE_URL;
+export const PASSKEY_RP_ID =
+  process.env.PASSKEY_RP_ID?.trim() || authBaseUrl.hostname;
+
+export const PASSKEY_ORIGIN = parseAbsoluteUrl(
+  process.env.PASSKEY_ORIGIN ?? AUTH_BASE_URL,
+  process.env.PASSKEY_ORIGIN ? "PASSKEY_ORIGIN" : "BETTER_AUTH_URL",
+).origin;
 
 export const auth = betterAuth({
   database: drizzleAdapter(db, {

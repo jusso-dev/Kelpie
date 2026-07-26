@@ -39,6 +39,7 @@ For the included `https://homelab` deployment:
 
 ```dotenv
 KELPIE_BIND_ADDRESS=127.0.0.1
+KELPIE_HTTPS_BIND_ADDRESS=192.168.1.19
 BETTER_AUTH_URL=https://homelab
 APP_URL=https://homelab
 PASSKEY_RP_ID=homelab
@@ -64,6 +65,9 @@ Keep `BETTER_AUTH_TRUSTED_ORIGINS` to exact origins. Trusting an origin only
 permits authentication requests; it does not expose a listener or make one
 passkey valid across unrelated hostnames. WebAuthn requires HTTPS outside
 `localhost`, and passkeys created for RP ID `homelab` work only at that RP ID.
+The Caddy site address comes from `PASSKEY_ORIGIN`, its listener from
+`KELPIE_HTTPS_BIND_ADDRESS`, and its upstream port from `KELPIE_PORT`; keep
+`BETTER_AUTH_URL`, `APP_URL`, and `PASSKEY_ORIGIN` identical.
 
 For a client deployment, replace `homelab` and the internal CA with the client's
 real DNS name and publicly or organisationally trusted TLS certificate. Only use

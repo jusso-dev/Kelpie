@@ -2,8 +2,8 @@
 	auto_https disable_redirects
 }
 
-https://homelab {
-	bind 192.168.1.19
+{$PASSKEY_ORIGIN} {
+	bind {$KELPIE_HTTPS_BIND_ADDRESS}
 	tls internal
-	reverse_proxy 127.0.0.1:3000
+	reverse_proxy 127.0.0.1:{$KELPIE_PORT}
 }

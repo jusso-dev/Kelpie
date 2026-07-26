@@ -71,6 +71,13 @@
       "when": 1785038981572,
       "tag": "0009_majestic_iron_fist",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785040470674,
+      "tag": "0010_workable_talos",
+      "breakpoints": true
     }
   ]
 }

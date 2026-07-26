@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { eq } from "drizzle-orm";
 import {
   auth,
+  parseAbsoluteUrl,
   parseTrustedOrigins,
   PASSKEY_RP_ID,
 } from "../src/lib/auth";
@@ -59,6 +60,14 @@ async function main() {
       "https://homelab",
       "http://homelab:3000",
     ],
+  );
+  assert.equal(
+    parseAbsoluteUrl("https://homelab/account/security/", "test URL").origin,
+    "https://homelab",
+  );
+  assert.throws(
+    () => parseAbsoluteUrl("homelab", "test URL"),
+    /test URL must be an absolute URL/,
   );
 
   const email = `${newId("auth-test")}@example.test`;
