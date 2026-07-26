@@ -98,8 +98,25 @@ services:
         run();
         setInterval(run, 60_000);
 
+  proxy:
+    image: caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    pull_policy: always
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      app:
+        condition: service_healthy
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
 volumes:
   postgres_data:
     name: kelpie_postgres_data
   uploads_data:
     name: kelpie_uploads_data
+  caddy_data:
+    name: kelpie_caddy_data
+  caddy_config:
+    name: kelpie_caddy_config

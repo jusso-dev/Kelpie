@@ -28,12 +28,47 @@ curl -fsS http://127.0.0.1:3000/api/health
 `kelpie_postgres_data` and uploads in `kelpie_uploads_data`; do not remove these
 volumes during routine updates.
 
-## Reverse proxy
+## HTTPS reverse proxy
 
-Default bind is `127.0.0.1:3000`. Configure existing host proxy to send final
-HTTPS origin to that address, then set identical `APP_URL` and `BETTER_AUTH_URL`.
-Only use `KELPIE_BIND_ADDRESS=0.0.0.0` behind an intentionally configured firewall
-and TLS terminator.
+Default bind is `127.0.0.1:3000`. The included Caddy service terminates HTTPS on
+the homelab LAN address and proxies to that loopback listener. Its internal CA
+root is stored in the `kelpie_caddy_data` volume and must be trusted on every
+client before passkeys will work.
+
+For the included `https://homelab` deployment:
+
+```dotenv
+KELPIE_BIND_ADDRESS=127.0.0.1
+BETTER_AUTH_URL=https://homelab
+APP_URL=https://homelab
+PASSKEY_RP_ID=homelab
+PASSKEY_ORIGIN=https://homelab
+```
+
+After first start, export Caddy's root certificate:
+
+```sh
+docker compose --env-file .env -f compose.yaml cp \
+  proxy:/data/caddy/pki/authorities/local/root.crt ./kelpie-caddy-root.crt
+```
+
+Install `kelpie-caddy-root.crt` as a trusted root CA on every browser device.
+On macOS, an administrator can add it to the System keychain:
+
+```sh
+sudo security add-trusted-cert -d -r trustRoot \
+  -k /Library/Keychains/System.keychain ./kelpie-caddy-root.crt
+```
+
+Keep `BETTER_AUTH_TRUSTED_ORIGINS` to exact origins. Trusting an origin only
+permits authentication requests; it does not expose a listener or make one
+passkey valid across unrelated hostnames. WebAuthn requires HTTPS outside
+`localhost`, and passkeys created for RP ID `homelab` work only at that RP ID.
+
+For a client deployment, replace `homelab` and the internal CA with the client's
+real DNS name and publicly or organisationally trusted TLS certificate. Only use
+`KELPIE_BIND_ADDRESS=0.0.0.0` behind an intentionally configured firewall and
+TLS terminator.
 
 ## Upgrade
 

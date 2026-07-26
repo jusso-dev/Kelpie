@@ -41,6 +41,24 @@ export default function SignInPage() {
     router.refresh();
   }
 
+  async function signInWithPasskey() {
+    setError(null);
+    setPending(true);
+    try {
+      const res = await signIn.passkey();
+      if (res.error) {
+        setError(res.error.message ?? "Passkey sign in failed");
+        return;
+      }
+      router.push("/dashboard");
+      router.refresh();
+    } catch {
+      setError("Passkey sign in was cancelled or could not be completed");
+    } finally {
+      setPending(false);
+    }
+  }
+
   return (
     <div className="kelpie-card p-6">
       <h2 className="text-lg font-medium mb-4">Sign in</h2>
@@ -93,6 +111,15 @@ export default function SignInPage() {
           {pending ? "Signing in..." : "Sign in"}
         </button>
       </form>
+      <div className="my-4 border-t border-[color:var(--color-navy-700)]" />
+      <button
+        type="button"
+        className="kelpie-btn kelpie-btn-secondary w-full justify-center"
+        onClick={signInWithPasskey}
+        disabled={pending}
+      >
+        Sign in with passkey
+      </button>
       <p className="text-sm text-slate-400 mt-4 text-center">
         No account yet?{" "}
         <Link href="/sign-up" className="kelpie-link">

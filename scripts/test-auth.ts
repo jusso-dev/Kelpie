@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { eq } from "drizzle-orm";
-import { auth } from "../src/lib/auth";
+import {
+  auth,
+  parseTrustedOrigins,
+  PASSKEY_RP_ID,
+} from "../src/lib/auth";
 import { db } from "../src/db";
 import { users } from "../src/db/schema";
 import { newId } from "../src/lib/utils";
@@ -46,6 +50,17 @@ function currentTotp(secret: string): string {
 }
 
 async function main() {
+  assert.deepEqual(
+    parseTrustedOrigins(
+      " http://localhost:3000, https://homelab, ,http://homelab:3000 ",
+    ),
+    [
+      "http://localhost:3000",
+      "https://homelab",
+      "http://homelab:3000",
+    ],
+  );
+
   const email = `${newId("auth-test")}@example.test`;
   const password = "Kelpie-auth-test-9";
   const signUp = await auth.api.signUpEmail({
@@ -60,6 +75,13 @@ async function main() {
     assert.equal(signIn.response?.user.email, email);
     const headers = sessionHeaders(signIn.headers.get("set-cookie") ?? "");
     assert.equal((await auth.api.getSession({ headers }))?.user.email, email);
+
+    const passkeyOptions = await auth.api.generatePasskeyRegistrationOptions({
+      headers,
+      query: { name: "Kelpie test key" },
+    });
+    assert.equal(passkeyOptions.rp.id, PASSKEY_RP_ID);
+    assert.equal(passkeyOptions.user.name, "Kelpie test key");
 
     const enabled = await auth.api.enableTwoFactor({
       headers,
@@ -78,7 +100,9 @@ async function main() {
       .where(eq(users.id, signUp.user.id))
       .limit(1);
     assert.equal(enrolled?.twoFactorEnabled, true);
-    console.log("Better Auth sign-up, sign-in, session, and TOTP enrolment passed.");
+    console.log(
+      "Better Auth sign-up, sign-in, passkey challenge, session, and TOTP enrolment passed.",
+    );
   } finally {
     await db.delete(users).where(eq(users.id, signUp.user.id));
   }

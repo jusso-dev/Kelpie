@@ -1,7 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { authClient } from "@/lib/auth-client";
+
+type Passkey = {
+  id: string;
+  name?: string | null;
+  deviceType?: string;
+  createdAt?: string;
+};
 
 export default function AccountSecurity({
   twoFactorEnabled,
@@ -18,6 +26,27 @@ export default function AccountSecurity({
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [passkeyName, setPasskeyName] = useState("");
+  const [passkeys, setPasskeys] = useState<Passkey[]>([]);
+  const [passkeysLoading, setPasskeysLoading] = useState(true);
+
+  async function loadPasskeys() {
+    const res = await fetch("/api/auth/passkey/list-user-passkeys", {
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      setError("Could not load passkeys");
+      return;
+    }
+    const data = (await res.json()) as Passkey[];
+    setPasskeys(data);
+  }
+
+  useEffect(() => {
+    loadPasskeys()
+      .catch(() => setError("Could not load passkeys"))
+      .finally(() => setPasskeysLoading(false));
+  }, []);
 
   async function enable() {
     setPending(true);
@@ -71,6 +100,52 @@ export default function AccountSecurity({
     }
     setMessage("MFA disabled.");
     router.refresh();
+  }
+
+  async function addPasskey() {
+    setPending(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await authClient.passkey.addPasskey({
+        name: passkeyName.trim() || undefined,
+      });
+      if (res.error) {
+        setError(res.error.message ?? "Could not add passkey");
+        return;
+      }
+      setPasskeyName("");
+      await loadPasskeys();
+      setMessage("Passkey added.");
+    } catch {
+      setError("Passkey setup was cancelled or could not be completed");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function deletePasskey(id: string) {
+    setPending(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/auth/passkey/delete-passkey", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setError(data?.message ?? "Could not remove passkey");
+        return;
+      }
+      await loadPasskeys();
+      setMessage("Passkey removed.");
+    } catch {
+      setError("Could not remove passkey");
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
@@ -166,6 +241,74 @@ export default function AccountSecurity({
           ) : null}
         </div>
       ) : null}
+
+      <section
+        className="space-y-3 border-t border-[color:var(--color-navy-700)] pt-4"
+        aria-labelledby="passkeys-heading"
+      >
+        <div>
+          <h2 id="passkeys-heading" className="text-lg font-medium">
+            Passkeys
+          </h2>
+          <p className="text-sm text-slate-400">
+            Use a device passkey to sign in without your password.
+          </p>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <label className="sr-only" htmlFor="passkey-name">
+            Passkey name
+          </label>
+          <input
+            id="passkey-name"
+            className="kelpie-input"
+            value={passkeyName}
+            onChange={(e) => setPasskeyName(e.target.value)}
+            placeholder="Passkey name (optional)"
+            autoComplete="off"
+          />
+          <button
+            type="button"
+            className="kelpie-btn kelpie-btn-primary shrink-0"
+            onClick={addPasskey}
+            disabled={pending}
+          >
+            Add passkey
+          </button>
+        </div>
+        {passkeysLoading ? (
+          <p className="text-sm text-slate-400">Loading passkeys...</p>
+        ) : passkeys.length === 0 ? (
+          <p className="text-sm text-slate-400">No passkeys added yet.</p>
+        ) : (
+          <ul className="space-y-2">
+            {passkeys.map((passkey) => (
+              <li
+                key={passkey.id}
+                className="flex items-center justify-between gap-3 rounded border border-[color:var(--color-navy-700)] p-3"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-medium">
+                    {passkey.name || "Unnamed passkey"}
+                  </span>
+                  {passkey.deviceType ? (
+                    <span className="block text-xs text-slate-400">
+                      {passkey.deviceType}
+                    </span>
+                  ) : null}
+                </span>
+                <button
+                  type="button"
+                  className="kelpie-btn kelpie-btn-secondary shrink-0"
+                  onClick={() => deletePasskey(passkey.id)}
+                  disabled={pending}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       {message ? <p className="text-sm text-green-400">{message}</p> : null}
       {error ? (

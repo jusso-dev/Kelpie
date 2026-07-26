@@ -2,6 +2,7 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, twoFactor } from "better-auth/plugins";
 import { APIError, createAuthMiddleware } from "better-auth/api";
+import { passkey } from "@better-auth/passkey";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
@@ -36,6 +37,23 @@ export const AUTH_SECRET =
 export const AUTH_BASE_URL =
   process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
 
+export function parseTrustedOrigins(value: string | undefined): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
+
+export const AUTH_TRUSTED_ORIGINS = parseTrustedOrigins(
+  process.env.BETTER_AUTH_TRUSTED_ORIGINS,
+);
+
+export const PASSKEY_RP_ID =
+  process.env.PASSKEY_RP_ID ?? new URL(AUTH_BASE_URL).hostname;
+
+export const PASSKEY_ORIGIN =
+  process.env.PASSKEY_ORIGIN ?? AUTH_BASE_URL;
+
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
     provider: "pg",
@@ -45,10 +63,12 @@ export const auth = betterAuth({
       account: schema.accounts,
       verification: schema.verifications,
       twoFactor: schema.twoFactors,
+      passkey: schema.passkeys,
     },
   }),
   secret: AUTH_SECRET,
   baseURL: AUTH_BASE_URL,
+  trustedOrigins: AUTH_TRUSTED_ORIGINS,
   emailAndPassword: {
     enabled: true,
     autoSignIn: true,
@@ -103,6 +123,11 @@ export const auth = betterAuth({
     twoFactor({
       issuer: "Kelpie",
       skipVerificationOnEnable: false,
+    }),
+    passkey({
+      rpID: PASSKEY_RP_ID,
+      rpName: "Kelpie",
+      origin: PASSKEY_ORIGIN,
     }),
   ],
 });

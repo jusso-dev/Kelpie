@@ -180,8 +180,35 @@ export const twoFactors = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     verified: boolean("verified").notNull().default(true),
+    failedVerificationCount: integer("failed_verification_count")
+      .notNull()
+      .default(0),
+    lockedUntil: timestamp("locked_until", { withTimezone: true }),
   },
   (t) => [index("two_factor_user_idx").on(t.userId)],
+);
+
+export const passkeys = pgTable(
+  "passkey",
+  {
+    id: text("id").primaryKey(),
+    name: text("name"),
+    publicKey: text("public_key").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    credentialID: text("credential_id").notNull(),
+    counter: integer("counter").notNull(),
+    deviceType: text("device_type").notNull(),
+    backedUp: boolean("backed_up").notNull(),
+    transports: text("transports"),
+    createdAt: timestamp("created_at", { withTimezone: true }),
+    aaguid: text("aaguid"),
+  },
+  (t) => [
+    index("passkey_user_id_idx").on(t.userId),
+    uniqueIndex("passkey_credential_id_idx").on(t.credentialID),
+  ],
 );
 
 export const verifications = pgTable("verifications", {
