@@ -240,7 +240,7 @@ export default function TiFeedSettings({
                             });
                           } else {
                             toast.success("Feed poll completed", {
-                              description: `${result.ingested} indicator${result.ingested === 1 ? "" : "s"} ingested from ${feed.name}.`,
+                              description: `${result.ingested} indicator${result.ingested === 1 ? "" : "s"} ingested from ${feed.name}.${result.skipped > 0 ? ` ${result.skipped} oversized or empty ${result.skipped === 1 ? "entry was" : "entries were"} skipped.` : ""}`,
                             });
                           }
                         })

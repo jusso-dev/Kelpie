@@ -21,6 +21,7 @@
     "test:auth": "tsx scripts/test-auth.ts",
     "test:case-queue": "tsx scripts/test-case-queue.ts",
     "test:task-inbox": "tsx scripts/test-task-inbox.ts",
+    "test:ti-indicator-limits": "tsx scripts/test-ti-indicator-limits.ts",
     "test:recovery-states": "tsx scripts/test-recovery-states.ts",
     "test:collaboration": "tsx scripts/test-collaboration.ts",
     "test:mobile": "tsx scripts/test-mobile.ts",

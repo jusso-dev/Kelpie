@@ -182,6 +182,7 @@ export async function deleteFeed(id: string) {
 
 export async function pollFeedNow(id: string): Promise<{
   ingested: number;
+  skipped: number;
   error: string | null;
 }> {
   const user = await requireRole([...FEED_MANAGER_ROLES]);

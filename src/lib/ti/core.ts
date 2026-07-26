@@ -8,6 +8,7 @@ import {
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { newId } from "@/lib/utils";
 import { getFeedHandler } from "./registry";
+import { normaliseIndicatorValue } from "./indicator-limits";
 
 export type TiMatch = {
   value?: string;
@@ -123,6 +124,7 @@ export async function casesForValue(
 
 export async function pollFeed(feedId: string): Promise<{
   ingested: number;
+  skipped: number;
   error: string | null;
 }> {
   const [feed] = await db
@@ -130,14 +132,14 @@ export async function pollFeed(feedId: string): Promise<{
     .from(tiFeeds)
     .where(eq(tiFeeds.id, feedId))
     .limit(1);
-  if (!feed) return { ingested: 0, error: "feed not found" };
+  if (!feed) return { ingested: 0, skipped: 0, error: "feed not found" };
   const handler = getFeedHandler(feed.kind);
   if (!handler) {
     await db
       .update(tiFeeds)
       .set({ lastError: `unknown feed kind: ${feed.kind}`, lastPolledAt: new Date() })
       .where(eq(tiFeeds.id, feed.id));
-    return { ingested: 0, error: "unknown kind" };
+    return { ingested: 0, skipped: 0, error: "unknown kind" };
   }
 
   try {
@@ -147,15 +149,20 @@ export async function pollFeed(feedId: string): Promise<{
     });
     const now = new Date();
     let ingested = 0;
+    let skipped = 0;
     for (const ind of indicators) {
-      if (!ind.value) continue;
+      const value = normaliseIndicatorValue(ind.value);
+      if (!value) {
+        skipped++;
+        continue;
+      }
       await db
         .insert(tiIndicators)
         .values({
           id: newId("tii"),
           organisationId: feed.organisationId,
           feedId: feed.id,
-          value: ind.value,
+          value,
           type: ind.type,
           confidence: ind.confidence ?? 50,
           firstSeen: now,
@@ -186,15 +193,27 @@ export async function pollFeed(feedId: string): Promise<{
         indicatorCount: count ?? 0,
       })
       .where(eq(tiFeeds.id, feed.id));
-    return { ingested, error: null };
+    return { ingested, skipped, error: null };
   } catch (e) {
-    const error = (e as Error).message;
+    const error = conciseError(e);
     await db
       .update(tiFeeds)
       .set({ lastPolledAt: new Date(), lastError: error })
       .where(eq(tiFeeds.id, feed.id));
-    return { ingested: 0, error };
+    return { ingested: 0, skipped: 0, error };
   }
+}
+
+function conciseError(error: unknown): string {
+  let current = error;
+  let message = "Threat-intelligence feed poll failed.";
+  for (let depth = 0; depth < 5; depth++) {
+    if (!(current instanceof Error)) break;
+    if (current.message.trim()) message = current.message.trim();
+    if (!current.cause) break;
+    current = current.cause;
+  }
+  return message.slice(0, 500);
 }
 
 /** Polls active feeds whose interval has elapsed and that are not halted. */
