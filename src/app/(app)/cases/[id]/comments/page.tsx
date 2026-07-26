@@ -16,6 +16,7 @@ export default async function CaseCommentsPage({ params }: Props) {
       id: comments.id,
       body: comments.body,
       mentions: comments.mentions,
+      source: comments.source,
       createdAt: comments.createdAt,
       authorName: users.name,
       authorEmail: users.email,
@@ -39,10 +40,21 @@ export default async function CaseCommentsPage({ params }: Props) {
           </div>
         ) : (
           rows.map((c) => (
-            <div key={c.id} className="kelpie-card p-4">
+            <div
+              key={c.id}
+              className={`kelpie-card p-4 ${
+                c.source === "system"
+                  ? "border-[color:var(--color-tan-500)]/40 bg-[color:var(--color-navy-950)]"
+                  : ""
+              }`}
+            >
               <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
                 <span className="text-slate-200 font-medium">
-                  {c.authorName ?? "Unknown"}
+                  {c.source === "system"
+                    ? "Kelpie Intelligence"
+                    : c.source === "api"
+                      ? "API integration"
+                      : c.authorName ?? "Unknown"}
                 </span>
                 <span>{format(c.createdAt, "PP p")}</span>
               </div>

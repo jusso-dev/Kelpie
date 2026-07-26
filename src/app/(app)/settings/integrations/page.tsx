@@ -1,71 +1,74 @@
 import Link from "next/link";
 import { db } from "@/db";
-import { responseActions, siemConnectors } from "@/db/schema";
+import { caseSources, responseActions } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/session";
-import { connectorKinds } from "@/actions/connectors";
 import { availableActionKinds } from "@/actions/response-actions";
-import ConnectorSettings from "@/components/connector-settings";
 import ResponseActionSettings from "@/components/response-action-settings";
+import CaseSourceSettings from "@/components/case-source-settings";
 
 export default async function IntegrationsSettingsPage() {
   const user = await requireUser();
   const isAdmin = user.role === "admin";
-  const [connectors, actions, kinds, actionKinds] = await Promise.all([
+  const [sources, actions, actionKinds] = await Promise.all([
     db
-      .select()
-      .from(siemConnectors)
-      .where(eq(siemConnectors.organisationId, user.organisationId))
-      .orderBy(desc(siemConnectors.createdAt)),
+      .select({
+        id: caseSources.id,
+        name: caseSources.name,
+        isActive: caseSources.isActive,
+        pollIntervalMinutes: caseSources.pollIntervalMinutes,
+        lastPolledAt: caseSources.lastPolledAt,
+        lastError: caseSources.lastError,
+        importedCaseCount: caseSources.importedCaseCount,
+      })
+      .from(caseSources)
+      .where(eq(caseSources.organisationId, user.organisationId))
+      .orderBy(desc(caseSources.createdAt)),
     db
       .select()
       .from(responseActions)
       .where(eq(responseActions.organisationId, user.organisationId))
       .orderBy(desc(responseActions.createdAt)),
-    connectorKinds(),
     availableActionKinds(),
   ]);
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="kelpie-page max-w-6xl">
       <header>
         <Link href="/settings" className="text-xs text-slate-400 hover:text-slate-200">
           ← Settings
         </Link>
         <h1 className="text-2xl font-semibold mt-1">Integrations</h1>
         <p className="text-sm text-slate-400">
-          SIEM connectors and SOAR-style response actions.
+          Import external cases and configure response automation.
         </p>
       </header>
 
-      <section className="kelpie-card p-5">
-        <h2 className="text-sm font-medium text-slate-300 mb-1">SIEM connectors</h2>
-        <p className="text-xs text-slate-500 mb-3">
-          Poll Splunk, Elastic, or Sentinel on a schedule and turn results into
-          alerts. A credential error halts polling until cleared.
-        </p>
-        <ConnectorSettings
-          connectors={connectors.map((c) => ({
-            id: c.id,
-            kind: c.kind,
-            name: c.name,
-            isActive: c.isActive,
-            lastPolledAt: c.lastPolledAt ? c.lastPolledAt.toISOString() : null,
-            lastError: c.lastError,
-            alertsProduced: c.alertsProduced,
-            mapping: c.mapping,
+      <section className="kelpie-section">
+        <div className="kelpie-section-header">
+          <h2>Case sources</h2>
+          <p>
+            Import Microsoft Sentinel incidents directly as Kelpie cases.
+            Source references prevent duplicates on later polls.
+          </p>
+        </div>
+        <CaseSourceSettings
+          sources={sources.map((source) => ({
+            ...source,
+            lastPolledAt: source.lastPolledAt?.toISOString() ?? null,
           }))}
-          kinds={kinds}
           isAdmin={isAdmin}
         />
       </section>
 
-      <section className="kelpie-card p-5">
+      <section className="kelpie-section">
+        <div className="kelpie-section-header">
         <h2 className="text-sm font-medium text-slate-300 mb-1">Response actions</h2>
-        <p className="text-xs text-slate-500 mb-3">
+        <p>
           Bounded actions an analyst can run from a case (block an IP, disable a
           user, isolate a host). Every run is audit-logged on the case timeline.
         </p>
+        </div>
         <ResponseActionSettings
           actions={actions.map((a) => ({
             id: a.id,

@@ -40,11 +40,11 @@ export default function TeamManagement({
   currentUserId: string;
 }) {
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {isAdmin ? (
         <form
           action={inviteUser}
-          className="rounded-lg border border-[color:var(--color-navy-700)] p-4 md:p-5"
+          className="rounded-lg border border-[color:var(--color-navy-800)] bg-[color:var(--color-navy-950)] p-5"
         >
           <div className="mb-4">
             <h3 className="text-sm font-medium text-slate-200">Invite user</h3>
@@ -52,13 +52,13 @@ export default function TeamManagement({
               A temporary password is emailed when an email provider is configured.
             </p>
           </div>
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(10rem,1fr)_minmax(14rem,1.4fr)_minmax(10rem,.75fr)_auto] lg:items-end">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-[minmax(10rem,1fr)_minmax(14rem,1.4fr)_minmax(10rem,.75fr)_auto] xl:items-end">
             <Field label="Name" name="name" />
             <Field label="Email" name="email" type="email" />
-            <div>
+            <div className="kelpie-field">
               <label
                 htmlFor="invite-role"
-                className="mb-1 block text-xs uppercase tracking-wider text-slate-400"
+                className="kelpie-label"
               >
                 Role
               </label>
@@ -75,7 +75,7 @@ export default function TeamManagement({
                 ))}
               </select>
             </div>
-            <button className="kelpie-btn kelpie-btn-primary justify-center px-8">
+            <button className="kelpie-btn kelpie-btn-primary justify-center px-6 md:self-end">
               Invite
             </button>
           </div>
@@ -137,7 +137,7 @@ export default function TeamManagement({
                         ))}
                       </select>
                       <button
-                        className="kelpie-btn kelpie-btn-secondary"
+                        className="kelpie-btn kelpie-btn-secondary kelpie-btn-sm"
                         disabled={isSelf}
                       >
                         Save
@@ -175,7 +175,7 @@ export default function TeamManagement({
                 </div>
                 {isAdmin ? (
                   <details className="relative justify-self-start lg:justify-self-end">
-                    <summary className="kelpie-btn kelpie-btn-secondary cursor-pointer list-none text-xs">
+                    <summary className="kelpie-btn kelpie-btn-secondary kelpie-btn-sm cursor-pointer list-none">
                       Manage
                     </summary>
                     <div className="z-20 mt-2 grid min-w-52 gap-1 rounded border border-[color:var(--color-navy-600)] bg-[color:var(--color-navy-800)] p-2 shadow-xl lg:absolute lg:right-0">
@@ -257,10 +257,10 @@ function Field({
   type?: string;
 }) {
   return (
-    <div>
+    <div className="kelpie-field">
       <label
         htmlFor={`invite-${name}`}
-        className="mb-1 block text-xs uppercase tracking-wider text-slate-400"
+        className="kelpie-label"
       >
         {label}
       </label>

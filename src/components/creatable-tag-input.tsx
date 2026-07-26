@@ -50,17 +50,17 @@ export default function CreatableTagInput({
   }
 
   return (
-    <div>
+    <div className="kelpie-field">
       <label
         id={`${id}-label`}
         htmlFor={`${id}-input`}
-        className="mb-1 block text-xs uppercase tracking-wider text-slate-400"
+        className="kelpie-label"
       >
         {label}
       </label>
       <input type="hidden" name={name} value={tags.join(",")} />
       <div className="relative">
-        <div className="flex min-h-12 flex-wrap items-center gap-2 rounded border border-[color:var(--color-navy-600)] bg-[color:var(--color-navy-900)] px-3 py-2 focus-within:border-[color:var(--color-tan-500)]">
+        <div className="flex min-h-10 flex-wrap items-center gap-2 rounded-lg border border-[color:var(--color-navy-700)] bg-[color:var(--color-navy-950)] px-3 py-1.5 focus-within:border-[color:var(--color-tan-400)] focus-within:outline-2 focus-within:outline-offset-1 focus-within:outline-[color:color-mix(in_oklch,var(--color-tan-500)_55%,transparent)]">
           {tags.map((tag) => (
             <span key={tag} className="kelpie-badge flex items-center gap-1 text-slate-200">
               {tag}
@@ -148,7 +148,7 @@ export default function CreatableTagInput({
           </div>
         ) : null}
       </div>
-      <p className="mt-1 text-xs leading-5 text-slate-500">{help}</p>
+      <p className="kelpie-help">{help}</p>
     </div>
   );
 }

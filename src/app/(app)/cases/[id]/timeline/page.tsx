@@ -119,7 +119,13 @@ function summarisePayload(
     case "comment":
       return <>{String(payload.preview ?? "")}</>;
     case "case_created":
-      return <>{payload.from_alert ? "From alert " + String(payload.from_alert) : "Manually opened"}</>;
+      return (
+        <>
+          {String(payload.source_system ?? "").startsWith("microsoft_sentinel:")
+            ? "Imported from Microsoft Sentinel"
+            : "Manually opened"}
+        </>
+      );
     default:
       return (
         <code className="text-xs text-slate-400">

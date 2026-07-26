@@ -96,7 +96,7 @@ services:
       - -e
       - >-
         const baseUrl = 'http://app:3000/api/cron/';
-        const paths = ['sla', 'webhooks', 'enrichment', 'connectors', 'ti', 'mobile-push'];
+        const paths = ['sla', 'webhooks', 'enrichment', 'ti', 'case-sources', 'mobile-push'];
         const tick = async () => {
           await Promise.all(paths.map(async (path) => {
             try {

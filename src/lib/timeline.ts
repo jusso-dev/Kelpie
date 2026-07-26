@@ -16,6 +16,7 @@ export type TimelineEventType =
   | "playbook_started"
   | "sla_breach"
   | "response_action"
+  | "ti_enrichment"
   | "custom_field_changed"
   | "custom";
 

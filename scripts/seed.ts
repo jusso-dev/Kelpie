@@ -1,6 +1,5 @@
 /**
- * Seed Kelpie with an organisation, an administrator user, a playbook, a couple of
- * alerts, and one promoted case so the UI has realistic sample data.
+ * Seed Kelpie with an organisation, users, playbooks, and a realistic case.
  *
  * Re-running this script is idempotent: it only inserts when nothing exists
  * for the chosen organisation slug.
@@ -9,7 +8,6 @@
 import { db } from "../src/db";
 import {
   accounts,
-  alerts,
   caseTasks,
   cases,
   observables,
@@ -87,57 +85,6 @@ async function main() {
     .limit(1);
   if (!seededPhishingPlaybook) throw new Error("Baseline playbook seed failed");
   const pbId = seededPhishingPlaybook.id;
-
-  // Two open alerts and one already promoted.
-  const a1 = newId("alert");
-  const a2 = newId("alert");
-  const a3 = newId("alert");
-  await db.insert(alerts).values([
-    {
-      id: a1,
-      organisationId: orgId,
-      source: "siem-splunk",
-      externalRef: "splunk-1001",
-      title: "Possible brute force against VPN gateway",
-      description: "Many failed auths from 203.0.113.4 against vpn.acme.local",
-      severity: "high",
-      status: "new",
-      observables: [
-        { type: "ip", value: "203.0.113.4" },
-        { type: "hostname", value: "vpn.acme.local" },
-      ],
-      rawPayload: { count: 412, window_minutes: 5 },
-    },
-    {
-      id: a2,
-      organisationId: orgId,
-      source: "email-report",
-      externalRef: "report-44",
-      title: "Reported phishing: invoice from unknown sender",
-      description: "Finance reported a suspicious invoice email",
-      severity: "medium",
-      status: "new",
-      observables: [
-        { type: "email", value: "billing@acm3.co" },
-        { type: "url", value: "https://acm3.co/login" },
-      ],
-      rawPayload: { reporter: "j.kim@acme.local" },
-    },
-    {
-      id: a3,
-      organisationId: orgId,
-      source: "edr-crowdstrike",
-      externalRef: "cs-9091",
-      title: "Suspicious PowerShell execution on workstation",
-      severity: "medium",
-      status: "new",
-      observables: [
-        { type: "hostname", value: "WIN-01-FIN" },
-        { type: "file_hash", value: "d41d8cd98f00b204e9800998ecf8427e" },
-      ],
-      rawPayload: { detection: "powershell_encoded_command" },
-    },
-  ]);
 
   // One case demonstrating the lifecycle.
   const caseId = newId("case");

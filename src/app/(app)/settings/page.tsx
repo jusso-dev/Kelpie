@@ -47,18 +47,19 @@ export default async function SettingsPage() {
   const isAdmin = user.role === "admin";
 
   return (
-    <div className="max-w-6xl space-y-6">
+    <div className="kelpie-page max-w-6xl">
       <header>
-        <h1 className="text-2xl font-semibold">Settings</h1>
-        <p className="text-sm text-slate-400">
+        <h1>Settings</h1>
+        <p>
           Organisation: {user.organisationName}
         </p>
       </header>
 
-      <section className="kelpie-card p-5 md:p-6">
-        <h2 className="text-sm font-medium text-slate-300 mb-3">
-          More configuration
-        </h2>
+      <section className="kelpie-section">
+        <div className="kelpie-section-header">
+          <h2>More configuration</h2>
+          <p>Identity, integrations, and organisation data structure.</p>
+        </div>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
           <Link
             href="/settings/integrations"
@@ -81,8 +82,11 @@ export default async function SettingsPage() {
         </div>
       </section>
 
-      <section className="kelpie-card p-5 md:p-6">
-        <h2 className="text-sm font-medium text-slate-300 mb-3">Team</h2>
+      <section className="kelpie-section">
+        <div className="kelpie-section-header">
+          <h2>Team</h2>
+          <p>Manage roles, access, passwords, and MFA requirements.</p>
+        </div>
         <TeamManagement
           members={teamMembers.map((u) => ({
             id: u.id,
@@ -104,12 +108,14 @@ export default async function SettingsPage() {
         />
       </section>
 
-      <section className="kelpie-card p-5">
-        <h2 className="text-sm font-medium text-slate-300 mb-3">SLA policies</h2>
-        <p className="text-xs text-slate-500 mb-3">
+      <section className="kelpie-section">
+        <div className="kelpie-section-header">
+        <h2>SLA policies</h2>
+        <p>
           One policy per severity. The breach checker uses these to flag the
           timeline and email the assignee when a target slips.
         </p>
+        </div>
         <SlaSettings
           policies={slaRows.map((p) => ({
             id: p.id,
@@ -123,8 +129,11 @@ export default async function SettingsPage() {
         />
       </section>
 
-      <section className="kelpie-card p-5">
-        <h2 className="text-sm font-medium text-slate-300 mb-3">API tokens</h2>
+      <section className="kelpie-section">
+        <div className="kelpie-section-header">
+          <h2>API tokens</h2>
+          <p>Create scoped credentials for case automation and integrations.</p>
+        </div>
         {!isAdmin ? (
           <p className="text-xs text-slate-500">Only administrators can manage tokens.</p>
         ) : (
@@ -145,14 +154,14 @@ export default async function SettingsPage() {
         />
       </section>
 
-      <section className="kelpie-card p-5">
-        <h2 className="text-sm font-medium text-slate-300 mb-3">
-          Notification channels
-        </h2>
-        <p className="text-xs text-slate-500 mb-3">
-          Send case and alert activity to Slack, Microsoft Teams, or a generic
+      <section className="kelpie-section">
+        <div className="kelpie-section-header">
+        <h2>Notification channels</h2>
+        <p>
+          Send case activity to Slack, Microsoft Teams, or a generic
           HMAC-signed webhook.
         </p>
+        </div>
         <WebhookSettings
           webhooks={webhookRows.map((w) => ({
             id: w.id,
@@ -167,28 +176,25 @@ export default async function SettingsPage() {
         />
       </section>
 
-      <section className="kelpie-card p-5 text-sm text-slate-300 space-y-2">
-        <h2 className="text-sm font-medium text-slate-300">Sending alerts via API</h2>
-        <p className="text-slate-400 text-xs">
-          POST a JSON alert to the URL below with{" "}
+      <section className="kelpie-section text-sm text-slate-300">
+        <div className="kelpie-section-header">
+        <h2>Creating cases via API</h2>
+        <p>
+          POST a JSON case to the URL below with{" "}
           <code className="text-xs">Authorization: Bearer &lt;token&gt;</code>.
         </p>
+        </div>
         <pre className="overflow-x-auto rounded bg-[color:var(--color-navy-800)] p-3 text-xs">
-{`POST /api/v1/alerts
+{`POST /api/v1/cases
 Content-Type: application/json
 Authorization: Bearer klp_xxxxxxxx
 
 {
-  "title": "Suspicious login from new geo",
-  "description": "Auth log shows a successful login from a country we have never seen",
+  "title": "Suspicious login investigation",
+  "summary": "Auth logs show a successful login from an unusual location.",
   "severity": "high",
-  "source": "siem-splunk",
-  "externalRef": "splunk-12345",
-  "observables": [
-    {"type": "ip", "value": "203.0.113.4"},
-    {"type": "username", "value": "j.kim"}
-  ],
-  "rawPayload": {"...": "the full alert json"}
+  "classification": "unauthorised_access",
+  "tags": ["identity", "unusual-location"]
 }`}
         </pre>
       </section>

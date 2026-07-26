@@ -8,7 +8,6 @@ import { and, eq } from "drizzle-orm";
 export const MOBILE_TOKEN_DAYS = 30;
 
 const MOBILE_READ_SCOPES: ScopeValue[] = [
-  "alerts:read",
   "cases:read",
   "tasks:read",
   "observables:read",
@@ -17,7 +16,7 @@ const MOBILE_READ_SCOPES: ScopeValue[] = [
 
 const MOBILE_ANALYST_SCOPES: ScopeValue[] = [
   ...MOBILE_READ_SCOPES,
-  "alerts:write",
+  "cases:write",
   "tasks:write",
   "comments:write",
 ];

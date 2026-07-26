@@ -2,7 +2,7 @@
   "name": "kelpie",
   "version": "0.2.0",
   "private": true,
-  "description": "Kelpie SOC case management. Herd the incident from alert to closed.",
+  "description": "Kelpie security case management. Herd the case from open to closed.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -16,7 +16,6 @@
     "smoke": "tsx scripts/smoke.ts",
     "smoke:phase2": "tsx scripts/smoke-phase2.ts",
     "smoke:phase3": "tsx scripts/smoke-phase3.ts",
-    "test:alert-ingestion": "tsx scripts/test-alert-ingestion.ts",
     "test:outbound-request": "tsx scripts/test-outbound-request.ts",
     "test:auth": "tsx scripts/test-auth.ts",
     "test:case-queue": "tsx scripts/test-case-queue.ts",
@@ -24,7 +23,9 @@
     "test:recovery-states": "tsx scripts/test-recovery-states.ts",
     "test:collaboration": "tsx scripts/test-collaboration.ts",
     "test:mobile": "tsx scripts/test-mobile.ts",
-    "test:notification-config": "tsx scripts/test-notification-config.ts"
+    "test:notification-config": "tsx scripts/test-notification-config.ts",
+    "test:case-intelligence": "tsx scripts/test-case-intelligence.ts",
+    "test:visual": "tsx scripts/visual-smoke.ts"
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "^3.1095.0",

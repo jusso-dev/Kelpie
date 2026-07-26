@@ -6,11 +6,11 @@ product
 
 ## Users
 
-Kelpie serves analysts and administrators in small security operations teams. Analysts use it repeatedly during active investigations, often under time pressure, to triage alerts, coordinate response work, preserve evidence, and move incidents to closure. Administrators configure the self-hosted workspace, integrations, access, and operational policy.
+Kelpie serves analysts and administrators in small security operations teams. Analysts use it repeatedly during active investigations, often under time pressure, to manage cases, coordinate response work, preserve evidence, and move incidents to closure. Administrators configure the self-hosted workspace, integrations, access, and operational policy.
 
 ## Product Purpose
 
-Kelpie is an open-source, self-hosted SOC case-management workbench. It keeps alerts, cases, observables, tasks, response actions, comments, and audit history connected so a small team can understand what needs attention, act safely, and account for every decision. Success means less duplicated triage, fewer missed response steps, faster incident resolution, and a trustworthy record of what happened.
+Kelpie is an open-source, self-hosted SOC case-management workbench. It keeps cases, observables, tasks, response actions, comments, and audit history connected so a small team can understand what needs attention, act safely, and account for every decision. Success means fewer missed response steps, faster incident resolution, and a trustworthy record of what happened.
 
 ## Brand Personality
 

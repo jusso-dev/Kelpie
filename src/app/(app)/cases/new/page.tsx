@@ -40,24 +40,25 @@ export default async function NewCasePage() {
   ]);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div className="kelpie-page mx-auto max-w-6xl">
       <header>
-        <h1 className="text-2xl font-semibold mb-1">Open a new case</h1>
-        <p className="text-sm text-slate-400">
+        <h1>Open a new case</h1>
+        <p>
           A case number is generated automatically per organisation.
         </p>
       </header>
 
       {templates.length > 0 ? (
-        <form action={applyCaseTemplate} className="kelpie-card space-y-4 p-6">
-          <h2 className="text-sm font-medium text-slate-300">
-            Start from a template
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-            <div className="md:col-span-2">
+        <form action={applyCaseTemplate} className="kelpie-section">
+          <div className="kelpie-section-header">
+            <h2>Start from a template</h2>
+            <p>Apply a repeatable structure, then adjust the case as needed.</p>
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div className="kelpie-field md:col-span-2">
               <label
                 htmlFor="template-id"
-                className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+                className="kelpie-label"
               >
                 Template
               </label>
@@ -69,10 +70,10 @@ export default async function NewCasePage() {
                 ))}
               </select>
             </div>
-            <div>
+            <div className="kelpie-field">
               <label
                 htmlFor="template-title"
-                className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+                className="kelpie-label"
               >
                 Title override (optional)
               </label>
@@ -87,10 +88,10 @@ export default async function NewCasePage() {
         </form>
       ) : null}
 
-      <form action={createCase} className="kelpie-card space-y-6 p-6 md:p-8">
-        <div>
-          <h2 className="text-base font-medium text-slate-200">Case details</h2>
-          <p className="mt-1 text-xs text-slate-500">
+      <form action={createCase} className="kelpie-section">
+        <div className="kelpie-section-header">
+          <h2>Case details</h2>
+          <p>
             Capture what is known now. Everything remains editable after creation.
           </p>
         </div>
@@ -120,7 +121,7 @@ export default async function NewCasePage() {
             />
           </div>
         </div>
-        <div className="grid grid-cols-1 gap-4 border-t border-[color:var(--color-navy-700)] pt-6 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 border-t border-[color:var(--color-navy-800)] pt-5 sm:grid-cols-2 lg:grid-cols-4">
           <Select
             label="Severity"
             name="severity"
@@ -154,7 +155,7 @@ export default async function NewCasePage() {
             defaultValue="amber"
           />
         </div>
-        <div className="flex justify-end border-t border-[color:var(--color-navy-700)] pt-5">
+        <div className="flex justify-end border-t border-[color:var(--color-navy-800)] pt-5">
           <button className="kelpie-btn kelpie-btn-primary">Create case</button>
         </div>
       </form>
@@ -178,10 +179,10 @@ function Field({
   help?: string;
 }) {
   return (
-    <div>
+    <div className="kelpie-field">
       <label
         htmlFor={`case-${name}`}
-        className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+        className="kelpie-label"
       >
         {label}
       </label>
@@ -190,7 +191,7 @@ function Field({
       ) : (
         <input id={`case-${name}`} name={name} className="kelpie-input" required={required} />
       )}
-      {help ? <p className="text-xs text-slate-500 mt-1">{help}</p> : null}
+      {help ? <p className="kelpie-help">{help}</p> : null}
     </div>
   );
 }
@@ -207,10 +208,10 @@ function Select({
   defaultValue: string;
 }) {
   return (
-    <div>
+    <div className="kelpie-field">
       <label
         htmlFor={`case-${name}`}
-        className="block text-xs uppercase tracking-wider text-slate-400 mb-1"
+        className="kelpie-label"
       >
         {label}
       </label>

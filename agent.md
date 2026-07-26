@@ -6,7 +6,7 @@ The iOS app is a triage-first companion for on-call analysts. It is not a full r
 
 ## Product Context
 
-Kelpie manages security alerts, cases, observables, tasks, comments, threat-intelligence matches, response actions, and audit timelines.
+Kelpie manages security cases, observables, tasks, comments, threat-intelligence matches, response actions, and audit timelines.
 
 The web product is already shipped as a Next.js and Postgres app. Treat it as the source of truth for backend behaviour and domain vocabulary. Read `README.md` for feature context and `docs/api.md` for REST API contracts before building iOS features.
 
@@ -19,13 +19,11 @@ Core user roles:
 Critical workflows for iOS:
 
 - View open and recently updated cases.
-- View critical/new alerts.
-- Acknowledge, dismiss, or promote alerts when API support is available.
 - Read case detail, severity, status, assignee, observables, tasks, timeline, and comments.
 - Add a concise comment from the field.
 - Mark a task done.
 - See SLA pressure and priority clearly.
-- Open push notifications directly into the relevant alert or case.
+- Open push notifications directly into the relevant case.
 
 Non-goals for the first iOS app:
 
@@ -62,7 +60,6 @@ apps/ios/Kelpie/
     Persistence/
     Utilities/
   Features/
-    Alerts/
     Cases/
     Tasks/
     Comments/
@@ -122,7 +119,6 @@ Content-Type: application/json
 
 Model API scopes explicitly:
 
-- `alerts:read` and `alerts:write`
 - `cases:read` and `cases:write`
 - `tasks:read` and `tasks:write`
 - `observables:read` and `observables:write`
@@ -181,7 +177,6 @@ Recommended first-run fields:
 
 Use backend terminology exactly:
 
-- `alert`
 - `case`
 - `caseNumber`
 - `observable`
@@ -248,18 +243,16 @@ Use `NavigationStack` on iPhone. If an iPad layout is added, use `NavigationSpli
 Primary tabs for the first app:
 
 - Cases
-- Alerts
 - Tasks
 - Settings
 
-Case detail should be reachable from cases, alerts, tasks, comments, and notifications. Avoid duplicate detail implementations.
+Case detail should be reachable from cases, tasks, comments, and notifications. Avoid duplicate detail implementations.
 
 Use route values rather than stringly typed navigation where possible:
 
 ```swift
 enum AppRoute: Hashable {
     case caseDetail(Case.ID)
-    case alertDetail(Alert.ID)
     case taskDetail(CaseTask.ID)
 }
 ```
@@ -289,13 +282,11 @@ Push notifications should be sparse, high-value, and actionable.
 
 Initial notification types:
 
-- New critical alert.
 - SLA breach or imminent breach on an assigned case.
 - Mention in a comment.
 
 Notification tap behaviour:
 
-- Critical alert opens alert detail.
 - SLA notification opens case detail.
 - Mention opens case comments.
 
@@ -304,7 +295,7 @@ Requirements:
 - Ask for notification permission at a meaningful moment, not at first launch.
 - Respect system Focus and notification settings.
 - Never include sensitive observables, credentials, full incident summaries, or customer secrets in notification text.
-- Use generic but useful copy, such as "Critical alert in Kelpie" and the case number when safe.
+- Use generic but useful copy and include the case number when safe.
 
 ## Security Requirements
 
@@ -352,7 +343,7 @@ Required test coverage for new iOS work:
 - Unit tests for enum fallback/unknown decoding.
 - Unit tests for error mapping.
 - Unit tests for view models covering loading, empty, error, success, and mutation states.
-- UI tests for the critical alert to case/comment path once the app shell exists.
+- UI tests for the case/comment notification path once the app shell exists.
 
 Use fixtures based on `docs/api.md` and seeded demo responses. Keep fixtures small and readable.
 

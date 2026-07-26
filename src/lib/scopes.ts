@@ -1,6 +1,4 @@
 export const KNOWN_SCOPES = [
-  { value: "alerts:read", label: "Read alerts" },
-  { value: "alerts:write", label: "Create alerts" },
   { value: "cases:read", label: "Read cases" },
   { value: "cases:write", label: "Create and update cases" },
   { value: "tasks:read", label: "Read tasks" },

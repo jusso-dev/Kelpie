@@ -87,7 +87,7 @@ export default function CaseSummaryEditor({
       <FieldLock field="summary" />
 
       {conflict ? (
-        <div className="mt-3 space-y-3 rounded border border-amber-700/60 bg-amber-950/30 p-3 text-xs text-amber-100">
+        <div className="kelpie-notice kelpie-notice-warning kelpie-notice-block mt-3 space-y-3">
           <p role="alert">Another analyst saved the summary while you were editing.</p>
           <div className="grid gap-3 sm:grid-cols-2">
             <ConflictValue label="Theirs" value={conflict.theirs} />

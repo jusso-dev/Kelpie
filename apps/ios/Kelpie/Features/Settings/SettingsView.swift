@@ -27,7 +27,7 @@ struct SettingsView: View {
                         Task { notificationStatus = await NotificationService.requestPermission() }
                     }
                 } else {
-                    Text("Critical alerts, assigned-case SLA breaches and mentions can open directly in Kelpie.")
+                    Text("Assigned-case SLA breaches and mentions can open directly in Kelpie.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

@@ -1,11 +1,11 @@
 import { db } from "@/db";
-import { cases, alerts, observables, slaPolicies } from "@/db/schema";
+import { cases, observables, slaPolicies } from "@/db/schema";
 import { and, count, eq, sql, gte } from "drizzle-orm";
 import { requireUser } from "@/lib/session";
 import { StatusBadge, SeverityBadge } from "@/components/badges";
 import { evaluateSla } from "@/lib/sla";
 import Link from "next/link";
-import { ArrowUpRight, Bot, Clock3, ListChecks, ShieldAlert, Workflow } from "lucide-react";
+import { ArrowUpRight, Clock3, ListChecks, ShieldAlert, Workflow } from "lucide-react";
 import type { ComponentType } from "react";
 
 function minutesBetween(a: Date, b: Date): number {
@@ -29,7 +29,6 @@ export default async function DashboardPage() {
     casesBySeverity,
     recentlyClosed,
     recentOpened,
-    openAlertsRow,
     recentCases,
     openCasesForSla,
     slaRows,
@@ -73,15 +72,6 @@ export default async function DashboardPage() {
           and(
             eq(cases.organisationId, user.organisationId),
             gte(cases.openedAt, thirtyDaysAgo),
-          ),
-        ),
-      db
-        .select({ count: count() })
-        .from(alerts)
-        .where(
-          and(
-            eq(alerts.organisationId, user.organisationId),
-            eq(alerts.status, "new"),
           ),
         ),
       db
@@ -215,9 +205,8 @@ export default async function DashboardPage() {
         </div>
       </header>
 
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Active cases" value={openCases[0]?.count ?? 0} icon={ShieldAlert} />
-        <Stat label="New alerts" value={openAlertsRow[0]?.count ?? 0} accent icon={Bot} />
         <Stat label="Opened 30d" value={recentOpened.length} icon={ListChecks} />
         <Stat label="Closed 30d" value={recentlyClosed.length} icon={ListChecks} />
         <Stat

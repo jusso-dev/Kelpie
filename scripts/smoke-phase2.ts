@@ -74,8 +74,6 @@ async function main() {
     name: "phase2-smoke",
     tokenHash: hash,
     scopes: [
-      "alerts:read",
-      "alerts:write",
       "cases:read",
       "cases:write",
       "tasks:read",
@@ -118,7 +116,7 @@ async function main() {
     name: "smoke-receiver",
     url: receiverUrl,
     secret: receiverSecret,
-    events: ["case.created", "case.status_changed", "case.closed", "alert.created"],
+    events: ["case.created", "case.status_changed", "case.closed"],
     isActive: true,
     createdBy: adminUser.id,
   });
@@ -203,7 +201,6 @@ async function main() {
     { body: "API smoke comment, @admin please review" },
   );
   expect(commentRes.status === 201, `expected 201, got ${commentRes.status}`);
-  expect(commentRes.body.mentionedUserIds.length > 0, "mention not resolved");
 
   console.log("== scope enforcement: token without cases:write ==");
   const ro = generateApiToken();

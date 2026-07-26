@@ -85,26 +85,6 @@ actor KelpieAPIClient {
         )
     }
 
-    func alerts() async throws -> [AlertRecord] {
-        let response: AlertsResponse = try await request(
-            path: "api/v1/alerts",
-            query: [URLQueryItem(name: "status", value: "open"), URLQueryItem(name: "limit", value: "100")]
-        )
-        return response.alerts
-    }
-
-    func alert(id: String) async throws -> AlertRecord {
-        try await request(path: "api/v1/alerts/\(id)")
-    }
-
-    func triageAlert(id: String, action: AlertAction) async throws -> AlertMutationResponse {
-        try await request(
-            path: "api/v1/alerts/\(id)",
-            method: "PATCH",
-            body: AlertActionRequest(action: action)
-        )
-    }
-
     func registerDevice(token: String, environment: String) async throws {
         let _: DeviceResponse = try await request(
             path: "api/mobile/devices",
@@ -233,14 +213,6 @@ actor KelpieAPIClient {
     }
 }
 
-enum AlertAction: String, Codable, Sendable { case acknowledge, dismiss, promote }
-
-struct AlertMutationResponse: Decodable, Sendable {
-    let id: String
-    let status: AlertStatus
-    let caseId: String?
-}
-
 struct MobileSignInResponse: Decodable, Sendable {
     let token: String
     let expiresAt: Date
@@ -258,13 +230,11 @@ private struct SignInRequest: Encodable { let email: String; let password: Strin
 private struct EmptyRequest: Encodable {}
 private struct CommentRequest: Encodable { let body: String }
 private struct TaskPatchRequest: Encodable { let status: TaskStatus }
-private struct AlertActionRequest: Encodable { let action: AlertAction }
 private struct DeviceRequest: Encodable { let token: String; let environment: String }
 private struct DeviceDeleteRequest: Encodable { let token: String }
 private struct CasesResponse: Decodable { let cases: [CaseRecord] }
 private struct CommentsResponse: Decodable { let comments: [CommentRecord] }
 private struct TasksResponse: Decodable { let tasks: [TaskRecord] }
-private struct AlertsResponse: Decodable { let alerts: [AlertRecord] }
 private struct ErrorResponse: Decodable { let error: String }
 private struct OKResponse: Decodable { let ok: Bool }
 private struct DeviceResponse: Decodable { let id: String }

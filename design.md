@@ -13,7 +13,7 @@ The app should feel calm, precise, and operational. It should not feel like a ma
    Case numbers, severities, statuses, task states, observables, and timestamps must be scannable.
 
 3. Make dangerous actions explicit.
-   Running response actions, dismissing alerts, closing cases, or changing status must clearly state the consequence.
+   Running response actions, closing cases, or changing status must clearly state the consequence.
 
 4. Avoid visual noise.
    Use restrained colour, compact spacing, and clear hierarchy. Decorative graphics do not belong in the operational surfaces.
@@ -101,7 +101,6 @@ Design for one-handed phone use first.
 Top-level tabs:
 
 - Cases
-- Alerts
 - Tasks
 - Settings
 
@@ -109,7 +108,7 @@ Preferred top-level structure:
 
 - `TabView` for the main sections.
 - `NavigationStack` per tab.
-- Searchable case and alert lists.
+- Searchable case lists.
 - Pull to refresh on lists.
 
 Use native list patterns where appropriate, but customise rows enough to expose security-specific metadata.
@@ -192,32 +191,8 @@ Dangerous actions:
 
 - Close case.
 - Run response action.
-- Dismiss alert.
 
 These must use confirmation dialogs with concrete target text.
-
-### Alerts
-
-The alert list should focus on triage.
-
-Each row should show:
-
-- Alert title.
-- Severity.
-- Source.
-- Created time.
-- Observable count or key observable.
-- Status.
-
-Critical and high alerts should be visually prominent without flooding the screen with red.
-
-Alert actions should be obvious and scope-aware:
-
-- Promote to case.
-- Dismiss.
-- Open related case if already promoted.
-
-Do not bury critical alert actions in a hidden menu if the action is central to the workflow.
 
 ### Tasks
 
@@ -318,7 +293,7 @@ Use native `Button` styles adapted through custom modifiers.
 Primary button:
 
 - Blue fill.
-- Used for main safe action, such as "Add comment" or "Promote".
+- Used for the main safe action, such as "Add comment".
 
 Secondary button:
 
@@ -328,7 +303,7 @@ Secondary button:
 Destructive button:
 
 - Red, with native destructive role.
-- Always specific: "Dismiss alert", "Close case", "Run block action".
+- Always specific: "Close case", "Run block action".
 
 Icon-only buttons:
 
@@ -343,7 +318,7 @@ Empty states should be concise and operational.
 Examples:
 
 - "No open cases."
-- "No critical alerts."
+- "No critical cases."
 - "No tasks due."
 - "No observables on this case."
 
@@ -386,7 +361,6 @@ Use `confirmationDialog` or `alert` with the target named.
 
 Good:
 
-- "Dismiss alert 'Suspicious login from new geo'?"
 - "Close case KP-2026-0042?"
 - "Block 203.0.113.4 on Cloudflare?"
 
@@ -421,7 +395,6 @@ Notification copy must be safe for a locked screen.
 
 Good:
 
-- "Critical alert in Kelpie"
 - "SLA risk on KP-2026-0042"
 - "You were mentioned on KP-2026-0042"
 
@@ -468,7 +441,7 @@ Appropriate:
 Avoid:
 
 - Animated backgrounds.
-- Pulsing critical alerts.
+- Pulsing critical cases.
 - Excessive badge animation.
 - Motion required to understand state.
 

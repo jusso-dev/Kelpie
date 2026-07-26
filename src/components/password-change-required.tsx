@@ -43,7 +43,7 @@ export default function PasswordChangeRequired() {
           autoComplete="new-password"
         />
         {state.error ? (
-          <p className="text-sm text-red-400" role="alert">
+          <p className="kelpie-notice kelpie-notice-error kelpie-notice-block" role="alert">
             {state.error}
           </p>
         ) : null}

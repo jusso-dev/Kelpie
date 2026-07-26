@@ -24,12 +24,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         centre.delegate = self
         centre.setNotificationCategories([
             UNNotificationCategory(
-                identifier: "KELPIE_CRITICAL_ALERT",
-                actions: [],
-                intentIdentifiers: [],
-                options: []
-            ),
-            UNNotificationCategory(
                 identifier: "KELPIE_UPDATE",
                 actions: [],
                 intentIdentifiers: [],
@@ -76,9 +70,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     }
 
     private func route(userInfo: [AnyHashable: Any]) {
-        guard let type = userInfo["destination_type"] as? String,
-              let id = userInfo["destination_id"] as? String else { return }
-        let destination: AppDestination = type == "alert" ? .alertDetail(id) : .caseDetail(id)
+        guard let id = userInfo["destination_id"] as? String else { return }
+        let destination: AppDestination = .caseDetail(id)
         if let router { router.navigate(to: destination) } else { pendingDestination = destination }
     }
 }

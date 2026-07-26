@@ -141,7 +141,7 @@ const BASELINE_PLAYBOOKS: BaselinePlaybook[] = [
     steps: [
       {
         title: "Preserve source evidence",
-        description: "Capture alert, access logs, file names, recipient lists, and affected systems.",
+        description: "Capture source evidence, access logs, file names, recipient lists, and affected systems.",
         offsetMinutes: 30,
         isRequired: true,
       },
@@ -230,7 +230,7 @@ const BASELINE_TEMPLATES = [
     ],
   },
   {
-    name: "Endpoint malware alert",
+    name: "Endpoint malware investigation",
     classification: "malware" as const,
     defaultSeverity: "high" as const,
     defaultTlp: "amber" as const,

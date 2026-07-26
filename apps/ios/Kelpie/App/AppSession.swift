@@ -19,7 +19,6 @@ final class AppSession {
         self.credentials = credentials
     }
 
-    var canTriageAlerts: Bool { scopes.contains("alerts:write") }
     var canWriteTasks: Bool { scopes.contains("tasks:write") }
     var canComment: Bool { scopes.contains("comments:write") }
 

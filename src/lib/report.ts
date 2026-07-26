@@ -8,7 +8,7 @@ import {
   users,
   type Case,
 } from "@/db/schema";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { findTechnique } from "@/data/mitre";
 
 export type CaseReportData = {
@@ -109,7 +109,8 @@ export async function loadCaseReport(
       id: comments.id,
       body: comments.body,
       createdAt: comments.createdAt,
-      authorName: users.name,
+      authorName:
+        sql<string>`case when ${comments.source} = 'system' then 'Kelpie Intelligence' when ${comments.source} = 'api' then 'API integration' else ${users.name} end`,
     })
     .from(comments)
     .leftJoin(users, eq(users.id, comments.authorId))

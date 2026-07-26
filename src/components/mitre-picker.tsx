@@ -91,7 +91,7 @@ export default function MitrePicker({
   return (
     <div className="space-y-2">
       {conflict ? (
-        <div className="space-y-2 rounded border border-amber-700/60 bg-amber-950/30 p-3 text-xs text-amber-100">
+        <div className="kelpie-notice kelpie-notice-warning kelpie-notice-block space-y-2">
           <p role="alert">Another analyst changed the MITRE techniques while you were editing.</p>
           <p><span className="text-amber-300">Theirs:</span> {conflict.theirs.join(", ") || "None"}</p>
           <p><span className="text-amber-300">Yours:</span> {conflict.mine.join(", ") || "None"}</p>

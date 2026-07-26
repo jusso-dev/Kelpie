@@ -1,7 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
 import {
-  Bell,
   BookOpen,
   BriefcaseBusiness,
   CircleUserRound,
@@ -16,7 +15,6 @@ import SignOutButton from "./sign-out-button";
 
 const links = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
-  { href: "/alerts", label: "Alerts", icon: Bell },
   { href: "/cases", label: "Cases", icon: BriefcaseBusiness },
   { href: "/tasks", label: "Tasks", icon: ListChecks },
   { href: "/observables", label: "Observables", icon: Database },
@@ -34,7 +32,7 @@ export default async function Nav({
   userName: string;
 }) {
   return (
-    <header className="border-b border-[color:var(--color-navy-700)] bg-[color:var(--color-navy-950)]">
+    <header className="sticky top-0 z-40 border-b border-[color:var(--color-navy-700)] bg-[color:var(--color-navy-950)]">
       <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 sm:px-6 lg:flex-row lg:items-center lg:gap-6">
         <div className="flex items-center justify-between gap-3">
           <Link href="/dashboard" className="flex min-h-11 items-center gap-2 rounded-sm">
@@ -66,7 +64,7 @@ export default async function Nav({
             <Link
               key={l.href}
               href={l.href}
-              className="flex min-h-11 shrink-0 items-center gap-2 rounded px-3 py-2 text-slate-300 hover:bg-[color:var(--color-navy-800)] hover:text-slate-100"
+              className="flex min-h-10 shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-slate-300 transition-colors hover:bg-[color:var(--color-navy-800)] hover:text-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-tan-500)]"
             >
               <l.icon size={16} aria-hidden="true" />
               {l.label}

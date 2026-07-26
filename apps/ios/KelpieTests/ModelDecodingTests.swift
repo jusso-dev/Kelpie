@@ -11,7 +11,7 @@ struct ModelDecodingTests {
 
     @Test("Notification destinations are hashable")
     func destinations() {
-        let values: Set<AppDestination> = [.alertDetail("alert_1"), .caseDetail("case_1")]
-        #expect(values.count == 2)
+        let values: Set<AppDestination> = [.caseDetail("case_1")]
+        #expect(values.count == 1)
     }
 }

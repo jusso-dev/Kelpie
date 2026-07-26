@@ -13,12 +13,13 @@ Kelpie is a SOC case management tool built as a single Next.js application backe
 ## Features in this MVP
 
 - Multi-tenant organisations, BetterAuth email-and-password sign-in, administrator / analyst / read_only roles.
-- Inbound alert API (`POST /api/v1/alerts`), triage queue, dismiss or promote to a case.
 - Cases with the full incident lifecycle (`open → in_progress → contained → eradicated → recovered → closed`), severity, TLP, PAP, classification, MITRE ATT&CK tagging, per-org case numbers (`KP-YYYY-NNNN`).
 - Tasks with cadence: define playbooks with timed steps, applying a playbook spawns tasks with due times.
-- Observables with manual entry, automatic carry-across from promoted alerts, cross-case lookup, and a pluggable enrichment interface (reverse DNS and URL parsing wired in).
+- Observables with manual entry, cross-case lookup, and a pluggable enrichment interface (reverse DNS and URL parsing wired in).
 - Append-only timeline that captures every state change, comment, task and observable event.
 - Markdown comments with `@mention` email notifications.
+- Automatic threat-intelligence enrichment comment when a case is created.
+- Microsoft Sentinel incident import with source deduplication.
 - Local file attachments with SHA256.
 - Dashboard with open cases by severity, MTTA / MTTC / MTTR, top classifications.
 - Docker Compose deployment with Postgres.
@@ -27,7 +28,7 @@ The original roadmap is tracked as GitHub issues under the **roadmap** label. Ph
 
 ## Product screenshots
 
-Screenshots below were captured from a seeded local demo workspace with fake users, cases, alerts, threat intelligence, integrations, SSO, and custom-field data.
+Screenshots below were captured from a seeded local demo workspace with fake users, cases, threat intelligence, integrations, SSO, and custom-field data.
 
 <details>
 <summary>Operations workspace</summary>
@@ -35,10 +36,6 @@ Screenshots below were captured from a seeded local demo workspace with fake use
 ### Dashboard
 
 ![Kelpie dashboard](public/screenshots/kelpie-dashboard.png)
-
-### Alert triage queue
-
-![Kelpie alert triage queue](public/screenshots/kelpie-alerts.png)
 
 ### Case list
 
@@ -114,18 +111,6 @@ Screenshots below were captured from a seeded local demo workspace with fake use
 
 These shipped features turn Kelpie from a standalone case manager into something that plugs into a SOC's existing tooling. Everything below is multi-tenant: configuration lives per organisation.
 
-### SIEM connectors (Splunk, Elastic, Sentinel)
-
-A single connector framework hosts every vendor. Each connector is one file under `src/lib/connectors/handlers/` that implements a small `poll()` interface; the framework handles scheduling, cursors, idempotent alert emission, and field mapping.
-
-- **Configure** under **Settings → Integrations → SIEM connectors**. Pick a kind (Splunk, Elastic, Sentinel), name it, and fill in the credentials. The connector starts active.
-- **Field mapping** is a single JSON document describing how a vendor record becomes a Kelpie alert (`title`, `description`, `severity` with a `severityMap`, `externalRef` for dedupe, and `observables`). Each connector ships a sensible default mapping.
-- **Idempotency**: alerts are deduplicated on `externalRef`, so re-polling never creates duplicates.
-- **Credential errors halt polling**: a failed poll records `last_error` on the connector and stops further polls until an admin clicks **Clear error**. Status (last poll, last error, total alerts produced) is visible per connector.
-- Polling is driven by `POST /api/cron/connectors` (every minute in the bundled stack). **Poll now** runs a connector on demand.
-
-Adding a new vendor is a single file implementing the `Connector` interface plus a line in `src/lib/connectors/registry.ts`.
-
 ### SOAR-style response actions (Cloudflare, Entra, CrowdStrike)
 
 Kelpie is a case manager, not a SOAR, but a handful of well-bounded actions can be run straight from a case:
@@ -135,6 +120,12 @@ Kelpie is a case manager, not a SOAR, but a handful of well-bounded actions can 
 - **Isolate host in CrowdStrike** — resolves a hostname observable to a Falcon agent id and contains the device.
 
 Configure credentials under **Settings → Integrations → Response actions** (admin only, per action enable/disable). On a case, the **Response actions** panel only offers actions whose required observable type is present. Running an action requires the admin or analyst role, shows a confirm dialog, and writes a `response_action` timeline event with the actor, target, and result. Every run is stored in `response_action_runs` for audit. Rollback is documented but not automated: run the inverse action manually.
+
+### External case sources
+
+Administrators can configure Microsoft Sentinel under **Settings → Integrations → Case sources**. Kelpie uses an Entra service principal to poll workspace incidents and creates cases directly, preserving the source link and reference. Repeated polls are idempotent. Closed incidents are excluded by default and can be enabled per source.
+
+Every newly created case is checked against the organisation's local threat-intelligence store. Kelpie writes the result as an automated case comment, including matching feeds, confidence, and tags.
 
 New action handlers implement `ActionHandler` in `src/lib/response-actions/handlers/` and register in `registry.ts`.
 
@@ -175,9 +166,9 @@ SSO sessions are BetterAuth-compatible: the callback creates a session row and s
 
 ### Native iOS companion
 
-The SwiftUI companion under `apps/ios` is deliberately triage-first: open cases, readable case detail, comments, assigned and team task queues, task completion, and alert acknowledge/dismiss/promote. It uses the same BetterAuth identities through dedicated least-privilege mobile bearer sessions stored in the iOS Keychain.
+The SwiftUI companion under `apps/ios` is case-first: open cases, readable case detail, comments, assigned and team task queues, and task completion. It uses the same BetterAuth identities through dedicated least-privilege mobile bearer sessions stored in the iOS Keychain.
 
-APNs notifications route new critical alerts to analysts, SLA breaches to the assigned analyst, and comment mentions to the mentioned user. Tapping a critical notification opens the alert detail directly, where **Acknowledge** is the first primary action. See `apps/ios/README.md` for Xcode and simulator instructions.
+APNs notifications route SLA breaches to the assigned analyst and comment mentions to the mentioned user. See `apps/ios/README.md` for Xcode and simulator instructions.
 
 ## Deploy on Railway
 
@@ -191,7 +182,7 @@ After the first deploy:
 2. For durable local attachments, attach a Railway volume to the Kelpie service at `/data`. Without a volume, attachments are lost on redeploy. Alternatively, configure the S3 variables from `.env.example`.
 3. Schedule the six authenticated `/api/cron/*` endpoints described in [Background jobs](#background-jobs-cron). Railway cron services, or any external scheduler, can call them with `Authorization: Bearer $CRON_SECRET`.
 
-Kelpie rejects webhook, feed, connector, response-action, and OIDC destinations that resolve to private or local network addresses. If your self-hosted deployment intentionally connects to services on its private network, set `KELPIE_ALLOW_PRIVATE_NETWORKS=true`. Leave it disabled for public integrations.
+Kelpie rejects webhook, feed, response-action, and OIDC destinations that resolve to private or local network addresses. If your self-hosted deployment intentionally connects to services on its private network, set `KELPIE_ALLOW_PRIVATE_NETWORKS=true`. Leave it disabled for public integrations.
 
 ## Getting started (local dev)
 
@@ -247,8 +238,8 @@ Background work runs through authenticated internal endpoints, hit once a minute
 | `POST /api/cron/sla` | SLA breach + warning checks and assignee email |
 | `POST /api/cron/webhooks` | Outbound webhook delivery with retry/backoff |
 | `POST /api/cron/enrichment` | Observable enrichment passes + cache purge |
-| `POST /api/cron/connectors` | Poll active SIEM connectors |
 | `POST /api/cron/ti` | Poll due TI feeds + prune stale presence rows |
+| `POST /api/cron/case-sources` | Import due external case sources |
 | `POST /api/cron/mobile-push` | Deliver the APNs notification outbox |
 
 Each requires `Authorization: Bearer $CRON_SECRET`. Point any scheduler (cron, a k8s CronJob, a GitHub Actions schedule) at them if you are not using the bundled sidecar.
@@ -258,25 +249,26 @@ Each requires `Authorization: Bearer $CRON_SECRET`. Point any scheduler (cron, a
 After seeding, with the dev server running:
 
 ```bash
-npm run smoke         # Phase 1: alert round trip
+npm run smoke         # Basic case API round trip
 npm run smoke:phase2  # Phase 2: cases/tasks/observables API, webhooks, reports, cron
-npm run smoke:phase3  # Phase 3: connectors, response actions, TI, custom fields, presence, SSO
-npm run test:mobile   # iOS sessions, alert triage, and the three push routes
+npm run smoke:phase3  # Phase 3: response actions, TI, custom fields, presence, SSO
+npm run test:mobile   # iOS sessions and case notification routes
 ```
 
-`smoke:phase3` exercises the Phase 3 backend directly against the database (TI ingestion + lookup, custom field validation, a response-action run with audit trail, a connector credential-failure halt, the presence roster, and SSO session-cookie signing).
+`smoke:phase3` exercises the Phase 3 backend directly against the database (TI ingestion + lookup, custom field validation, a response-action run with audit trail, the presence roster, and SSO session-cookie signing).
 
-## Sending alerts from a SIEM
+## Creating cases through the API
 
 ```bash
-curl -X POST http://localhost:3000/api/v1/alerts \
+curl -X POST http://localhost:3000/api/v1/cases \
   -H "Authorization: Bearer klp_yourtoken" \
   -H "Content-Type: application/json" \
   -d '{
-    "title": "Suspicious login from new geo",
+    "title": "Suspicious login investigation",
+    "summary": "Successful login from an unusual location.",
     "severity": "high",
-    "source": "siem-splunk",
-    "observables": [{"type": "ip", "value": "203.0.113.4"}]
+    "classification": "unauthorised_access",
+    "tags": ["identity"]
   }'
 ```
 

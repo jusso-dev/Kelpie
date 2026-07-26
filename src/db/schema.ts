@@ -18,13 +18,6 @@ import { sql } from "drizzle-orm";
 
 export const roleEnum = pgEnum("role", ["admin", "analyst", "read_only"]);
 
-export const alertStatusEnum = pgEnum("alert_status", [
-  "new",
-  "triaged",
-  "dismissed",
-  "promoted",
-]);
-
 export const caseStatusEnum = pgEnum("case_status", [
   "open",
   "in_progress",
@@ -225,43 +218,6 @@ export const verifications = pgTable("verifications", {
 });
 
 /* ────────────────────────────────────────────────────────────────────────── */
-/* Alerts                                                                     */
-/* ────────────────────────────────────────────────────────────────────────── */
-
-export const alerts = pgTable(
-  "alerts",
-  {
-    id: text("id").primaryKey(),
-    organisationId: text("organisation_id")
-      .notNull()
-      .references(() => organisations.id, { onDelete: "cascade" }),
-    source: text("source").notNull(),
-    externalRef: text("external_ref"),
-    title: text("title").notNull(),
-    description: text("description"),
-    severity: severityEnum("severity").notNull().default("medium"),
-    status: alertStatusEnum("status").notNull().default("new"),
-    rawPayload: jsonb("raw_payload").notNull().default(sql`'{}'::jsonb`),
-    observables: jsonb("observables").notNull().default(sql`'[]'::jsonb`),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    triagedBy: text("triaged_by").references(() => users.id, {
-      onDelete: "set null",
-    }),
-    triagedAt: timestamp("triaged_at", { withTimezone: true }),
-    promotedCaseId: text("promoted_case_id"),
-  },
-  (t) => [
-    index("alerts_org_status_idx").on(t.organisationId, t.status),
-    index("alerts_org_created_idx").on(t.organisationId, t.createdAt),
-    uniqueIndex("alerts_org_source_external_ref_idx")
-      .on(t.organisationId, t.source, t.externalRef)
-      .where(sql`${t.externalRef} is not null`),
-  ],
-);
-
-/* ────────────────────────────────────────────────────────────────────────── */
 /* Cases                                                                      */
 /* ────────────────────────────────────────────────────────────────────────── */
 
@@ -296,9 +252,6 @@ export const cases = pgTable(
     classification: classificationEnum("classification")
       .notNull()
       .default("other"),
-    sourceAlertId: text("source_alert_id").references(() => alerts.id, {
-      onDelete: "set null",
-    }),
     openedAt: timestamp("opened_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -317,9 +270,17 @@ export const cases = pgTable(
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     slaState: jsonb("sla_state").notNull().default(sql`'{}'::jsonb`),
     version: integer("version").notNull().default(0),
+    sourceSystem: text("source_system"),
+    sourceReference: text("source_reference"),
+    sourceUrl: text("source_url"),
   },
   (t) => [
     uniqueIndex("cases_org_number_idx").on(t.organisationId, t.caseNumber),
+    uniqueIndex("cases_org_source_reference_idx")
+      .on(t.organisationId, t.sourceSystem, t.sourceReference)
+      .where(
+        sql`${t.sourceSystem} is not null and ${t.sourceReference} is not null`,
+      ),
     index("cases_org_status_idx").on(t.organisationId, t.status),
     index("cases_org_opened_idx").on(t.organisationId, t.openedAt),
   ],
@@ -469,6 +430,7 @@ export const comments = pgTable(
     authorId: text("author_id").references(() => users.id, {
       onDelete: "set null",
     }),
+    source: text("source").notNull().default("user"),
     body: text("body").notNull(),
     mentions: jsonb("mentions").notNull().default(sql`'[]'::jsonb`),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -791,45 +753,6 @@ export const responseActionRuns = pgTable(
 );
 
 /* ────────────────────────────────────────────────────────────────────────── */
-/* Phase 3: SIEM connectors                                                   */
-/* ────────────────────────────────────────────────────────────────────────── */
-
-export const siemConnectors = pgTable(
-  "siem_connectors",
-  {
-    id: text("id").primaryKey(),
-    organisationId: text("organisation_id")
-      .notNull()
-      .references(() => organisations.id, { onDelete: "cascade" }),
-    kind: text("kind").notNull(),
-    name: text("name").notNull(),
-    config: jsonb("config").notNull().default(sql`'{}'::jsonb`),
-    mapping: jsonb("mapping").notNull().default(sql`'{}'::jsonb`),
-    isActive: boolean("is_active").notNull().default(true),
-    lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
-    lastError: text("last_error"),
-    alertsProduced: integer("alerts_produced").notNull().default(0),
-    createdBy: text("created_by").references(() => users.id, {
-      onDelete: "set null",
-    }),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => [index("siem_connectors_org_idx").on(t.organisationId)],
-);
-
-export const siemCursors = pgTable("siem_cursors", {
-  connectorId: text("connector_id")
-    .primaryKey()
-    .references(() => siemConnectors.id, { onDelete: "cascade" }),
-  cursor: text("cursor"),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
-
-/* ────────────────────────────────────────────────────────────────────────── */
 /* Phase 3: Threat intelligence                                               */
 /* ────────────────────────────────────────────────────────────────────────── */
 
@@ -889,6 +812,36 @@ export const tiIndicators = pgTable(
     index("ti_indicators_org_value_idx").on(t.organisationId, t.value),
     index("ti_indicators_org_type_idx").on(t.organisationId, t.type),
   ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* External case sources                                                      */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+export const caseSources = pgTable(
+  "case_sources",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    kind: text("kind").notNull(),
+    config: jsonb("config").notNull().default(sql`'{}'::jsonb`),
+    pollIntervalMinutes: integer("poll_interval_minutes").notNull().default(5),
+    isActive: boolean("is_active").notNull().default(true),
+    cursor: text("cursor"),
+    lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    importedCaseCount: integer("imported_case_count").notNull().default(0),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("case_sources_org_idx").on(t.organisationId)],
 );
 
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -991,7 +944,6 @@ export const ssoLoginStates = pgTable("sso_login_states", {
 export type Organisation = typeof organisations.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type TwoFactor = typeof twoFactors.$inferSelect;
-export type Alert = typeof alerts.$inferSelect;
 export type Case = typeof cases.$inferSelect;
 export type CaseTask = typeof caseTasks.$inferSelect;
 export type Observable = typeof observables.$inferSelect;
@@ -1011,10 +963,9 @@ export type WebhookDelivery = typeof webhookDeliveries.$inferSelect;
 export type EnrichmentCacheRow = typeof enrichmentCache.$inferSelect;
 export type ResponseAction = typeof responseActions.$inferSelect;
 export type ResponseActionRun = typeof responseActionRuns.$inferSelect;
-export type SiemConnector = typeof siemConnectors.$inferSelect;
-export type SiemCursor = typeof siemCursors.$inferSelect;
 export type TiFeed = typeof tiFeeds.$inferSelect;
 export type TiIndicator = typeof tiIndicators.$inferSelect;
+export type CaseSource = typeof caseSources.$inferSelect;
 export type CustomFieldDefinition = typeof customFieldDefinitions.$inferSelect;
 export type CustomFieldValue = typeof customFieldValues.$inferSelect;
 export type CasePresence = typeof casePresence.$inferSelect;

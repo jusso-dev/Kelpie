@@ -1,27 +1,23 @@
 import crypto from "node:crypto";
 import http2 from "node:http2";
-import { and, eq, inArray, lte, ne } from "drizzle-orm";
+import { and, eq, inArray, lte } from "drizzle-orm";
 import { db } from "@/db";
 import {
   mobileDevices,
   mobileNotificationDeliveries,
-  users,
   type MobileDevice,
   type MobileNotificationDelivery,
 } from "@/db/schema";
 import { newId } from "@/lib/utils";
 
-export type MobilePushEvent =
-  | "critical_alert"
-  | "sla_breach"
-  | "comment_mention";
+export type MobilePushEvent = "sla_breach" | "comment_mention";
 
 export type MobilePushInput = {
   event: MobilePushEvent;
   sourceId: string;
   title: string;
   body: string;
-  destinationType: "alert" | "case";
+  destinationType: "case";
   destinationId: string;
 };
 
@@ -78,10 +74,7 @@ async function sendToApns(
       sound: "default",
       badge: 1,
       "thread-id": `${delivery.destinationType}:${delivery.destinationId}`,
-      category:
-        delivery.event === "critical_alert"
-          ? "KELPIE_CRITICAL_ALERT"
-          : "KELPIE_UPDATE",
+      category: "KELPIE_UPDATE",
     },
     event: delivery.event,
     destination_type: delivery.destinationType,
@@ -211,34 +204,6 @@ export async function queueMobilePushForUsers(
     .onConflictDoNothing()
     .returning({ id: mobileNotificationDeliveries.id });
   return inserted.length;
-}
-
-export async function queueCriticalAlertPush(input: {
-  organisationId: string;
-  alertId: string;
-}): Promise<number> {
-  const recipients = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(
-      and(
-        eq(users.organisationId, input.organisationId),
-        ne(users.role, "read_only"),
-        eq(users.banned, false),
-      ),
-    );
-  return queueMobilePushForUsers(
-    input.organisationId,
-    recipients.map((user) => user.id),
-    {
-      event: "critical_alert",
-      sourceId: input.alertId,
-      title: "Critical alert in Kelpie",
-      body: "A new critical alert needs triage.",
-      destinationType: "alert",
-      destinationId: input.alertId,
-    },
-  );
 }
 
 export async function dispatchPendingMobilePushes(limit = 100): Promise<{

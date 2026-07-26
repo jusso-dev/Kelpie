@@ -37,8 +37,8 @@ assert.ok(slack.blocks.length >= 2);
 const teams = JSON.parse(
   buildWebhookRequest({
     kind: "teams",
-    event: "alert.created",
-    payload: { alert_id: "alert_1", title: "Test alert" },
+    event: "case.closed",
+    payload: { case_id: "case_1", title: "Closed case" },
     secret: "unused",
     deliveryId: "delivery_3",
   }).body,

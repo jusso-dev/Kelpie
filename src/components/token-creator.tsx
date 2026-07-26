@@ -15,7 +15,7 @@ const EXPIRY_OPTIONS = [
 export default function TokenCreator() {
   const [issued, setIssued] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [scopes, setScopes] = useState<string[]>(["alerts:write"]);
+  const [scopes, setScopes] = useState<string[]>(["cases:read", "cases:write"]);
   const [expiresAt, setExpiresAt] = useState("90");
   const [pending, setPending] = useState(false);
   const router = useRouter();
@@ -54,7 +54,7 @@ export default function TokenCreator() {
               className="kelpie-input"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="splunk-prod"
+              placeholder="case-automation"
               required
             />
           </div>

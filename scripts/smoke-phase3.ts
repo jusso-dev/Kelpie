@@ -1,6 +1,6 @@
 /**
- * End-to-end smoke for Phase 3: SIEM connector framework, response actions,
- * threat-intelligence ingestion + lookup, custom fields, presence, and SSO
+ * End-to-end smoke for Phase 3: response actions, threat-intelligence
+ * ingestion + lookup, custom fields, presence, and SSO
  * provisioning / session signing. Exercises the real database logic.
  *
  * Run against a live DB:  DATABASE_URL=... tsx scripts/smoke-phase3.ts
@@ -17,7 +17,6 @@ import {
   cases,
   responseActions,
   responseActionRuns,
-  siemConnectors,
   tiFeeds,
   tiIndicators,
   sessions,
@@ -38,7 +37,6 @@ import {
 } from "../src/lib/custom-fields";
 import { customFieldDefinitions } from "../src/db/schema";
 import { runResponseAction, listAvailableActions } from "../src/lib/response-actions/core";
-import { pollConnector } from "../src/lib/connectors/core";
 import { heartbeat, getRoster } from "../src/lib/presence";
 import { provisionSsoUser } from "../src/lib/sso/jit";
 import { createSessionCookie } from "../src/lib/sso/session";
@@ -177,28 +175,7 @@ async function main() {
     .where(and(eq(timelineEvents.caseId, c.id), eq(timelineEvents.eventType, "response_action")));
   check("timeline records the action run", raEvents.length === 1);
 
-  console.log("\n[5] SIEM connector framework (credential error halts polling)");
-  const connId = newId("siem");
-  await db.insert(siemConnectors).values({
-    id: connId,
-    organisationId: orgId,
-    kind: "splunk",
-    name: "smoke-splunk",
-    config: { base_url: "http://127.0.0.1:1/", token: "x", saved_searches: "s1" },
-    mapping: {},
-    isActive: true,
-    createdBy: actorId,
-  });
-  const connResult = await pollConnector(connId);
-  check("connector poll failed gracefully", connResult.error !== null);
-  const [connRow] = await db
-    .select()
-    .from(siemConnectors)
-    .where(eq(siemConnectors.id, connId))
-    .limit(1);
-  check("last_error set on connector (halts future polls)", Boolean(connRow.lastError));
-
-  console.log("\n[6] Presence roster");
+  console.log("\n[5] Presence roster");
   await heartbeat({ caseId: c.id, userId: actorId, userName: admin.name, editingField: "severity" });
   const otherId = newId("user");
   await db.insert(users).values({
@@ -213,7 +190,7 @@ async function main() {
   check("roster excludes self, includes other", roster.length === 1 && roster[0].userId === otherId);
   check("typing flag surfaced", roster[0].typing === true);
 
-  console.log("\n[7] SSO JIT provisioning + session cookie signing");
+  console.log("\n[6] SSO JIT provisioning + session cookie signing");
   const { userId: ssoUserId } = await provisionSsoUser({
     organisationId: orgId,
     email: `sso-${newId("x")}@smoke.local`,
@@ -233,7 +210,6 @@ async function main() {
   // Cleanup the smoke case + side data.
   await db.delete(cases).where(eq(cases.id, c.id));
   await db.delete(tiFeeds).where(eq(tiFeeds.id, feedId));
-  await db.delete(siemConnectors).where(eq(siemConnectors.id, connId));
   await db.delete(users).where(eq(users.id, otherId));
   await db.delete(users).where(eq(users.id, ssoUserId));
 

@@ -5,11 +5,12 @@ import {
   tiFeeds,
   tiIndicators,
 } from "@/db/schema";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { newId } from "@/lib/utils";
 import { getFeedHandler } from "./registry";
 
 export type TiMatch = {
+  value?: string;
   feedId: string;
   feedName: string;
   type: string;
@@ -49,6 +50,41 @@ export async function lookupIndicators(
     confidence: r.confidence,
     tags: Array.isArray(r.tags) ? (r.tags as string[]) : [],
     lastSeen: r.lastSeen ? r.lastSeen.toISOString() : null,
+  }));
+}
+
+export async function lookupIndicatorValues(
+  organisationId: string,
+  values: string[],
+): Promise<Array<TiMatch & { value: string }>> {
+  const unique = [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+  if (unique.length === 0) return [];
+  const rows = await db
+    .select({
+      value: tiIndicators.value,
+      feedId: tiIndicators.feedId,
+      feedName: tiFeeds.name,
+      type: tiIndicators.type,
+      confidence: tiIndicators.confidence,
+      tags: tiIndicators.tags,
+      lastSeen: tiIndicators.lastSeen,
+    })
+    .from(tiIndicators)
+    .innerJoin(tiFeeds, eq(tiFeeds.id, tiIndicators.feedId))
+    .where(
+      and(
+        eq(tiIndicators.organisationId, organisationId),
+        inArray(tiIndicators.value, unique),
+      ),
+    );
+  return rows.map((row) => ({
+    value: row.value,
+    feedId: row.feedId,
+    feedName: row.feedName,
+    type: row.type,
+    confidence: row.confidence,
+    tags: Array.isArray(row.tags) ? (row.tags as string[]) : [],
+    lastSeen: row.lastSeen?.toISOString() ?? null,
   }));
 }
 

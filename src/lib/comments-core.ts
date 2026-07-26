@@ -48,6 +48,7 @@ export async function postCommentCore(
     id,
     caseId,
     authorId: actor?.id ?? null,
+    source: actor ? "user" : "api",
     body,
     mentions: mentionedUserIds,
   });

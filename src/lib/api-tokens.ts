@@ -79,7 +79,7 @@ export async function authenticateApiTokenWithScope(
   };
 }
 
-/** Legacy single-arg form retained for the existing alerts route. */
+/** Legacy single-arg form retained for older internal callers. */
 export async function authenticateApiToken(
   header: string | null,
 ): Promise<AuthenticatedToken | null> {

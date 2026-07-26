@@ -1,11 +1,10 @@
 import Observation
 import SwiftUI
 
-enum AppTab: Hashable { case cases, alerts, tasks, settings }
+enum AppTab: Hashable { case cases, tasks, settings }
 
 enum AppDestination: Hashable {
     case caseDetail(String)
-    case alertDetail(String)
 }
 
 @Observable
@@ -13,7 +12,6 @@ enum AppDestination: Hashable {
 final class AppRouter {
     var selectedTab: AppTab = .cases
     var casePath = NavigationPath()
-    var alertPath = NavigationPath()
 
     func navigate(to destination: AppDestination) {
         switch destination {
@@ -21,10 +19,6 @@ final class AppRouter {
             selectedTab = .cases
             casePath = NavigationPath()
             casePath.append(destination)
-        case .alertDetail:
-            selectedTab = .alerts
-            alertPath = NavigationPath()
-            alertPath.append(destination)
         }
     }
 }

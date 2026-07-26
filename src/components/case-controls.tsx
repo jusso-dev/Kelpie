@@ -125,7 +125,7 @@ export function CaseControls(props: Props) {
     <div className="kelpie-card p-5 space-y-3">
       <h2 className="text-sm font-medium text-slate-300">Case controls</h2>
       {conflict ? (
-        <div className="rounded border border-amber-700/60 bg-amber-950/30 p-3 text-xs text-amber-100 space-y-2">
+        <div className="kelpie-notice kelpie-notice-warning kelpie-notice-block space-y-2">
           <p role="alert">
             Another analyst changed <strong>{conflict.label}</strong> while you
             were editing.

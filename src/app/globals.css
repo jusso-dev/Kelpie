@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/*
+ * Hallmark · studied dashboard DNA · technical, austere · navy anchor
+ * Macrostructure: application shell with sectional forms
+ * Pre-emit critique: P5 H5 E4 S5 R5 V4 · contrast/mobile/slop: pass
+ */
+
 @theme {
   --color-navy-950: oklch(15% 0.035 260);
   --color-navy-900: oklch(20% 0.035 260);
@@ -24,24 +30,32 @@
     "Helvetica Neue", Arial, sans-serif;
 }
 
+:root {
+  color-scheme: dark;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --radius-control: 0.5rem;
+  --radius-panel: 0.75rem;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 html,
 body {
-  background:
-    radial-gradient(circle at 20% 8%, oklch(25% 0.065 255 / 0.55), transparent 30rem),
-    radial-gradient(circle at 86% 18%, oklch(28% 0.05 260 / 0.38), transparent 26rem),
-    linear-gradient(135deg, var(--color-navy-950), oklch(17% 0.036 260));
+  background: var(--color-navy-950);
   color: oklch(94% 0.012 255);
   font-family: var(--font-sans);
   min-height: 100%;
+  overflow-x: clip;
 }
 
 * {
   box-sizing: border-box;
   border-color: var(--color-navy-700);
-}
-
-:root {
-  color-scheme: dark;
 }
 
 a {
@@ -59,35 +73,51 @@ a {
 .kelpie-card {
   background: var(--color-navy-900);
   border: 1px solid var(--color-navy-700);
-  border-radius: 0.5rem;
-  box-shadow: 0 18px 60px oklch(13% 0.03 260 / 0.2);
+  border-radius: var(--radius-panel);
+  box-shadow: 0 1px 2px oklch(10% 0.025 260 / 0.3);
 }
 
 .kelpie-panel {
-  background: linear-gradient(180deg, oklch(23% 0.033 260), oklch(19% 0.035 260));
-  border: 1px solid oklch(36% 0.032 260);
-  border-radius: 0.5rem;
+  background: var(--color-navy-900);
+  border: 1px solid var(--color-navy-700);
+  border-radius: var(--radius-panel);
 }
 
 .kelpie-soft-panel {
-  background: oklch(24% 0.033 260 / 0.92);
-  border: 1px solid oklch(36% 0.032 260);
-  border-radius: 0.5rem;
+  background: var(--color-navy-800);
+  border: 1px solid var(--color-navy-700);
+  border-radius: var(--radius-panel);
   color: oklch(94% 0.012 255);
 }
 
 .kelpie-input {
-  background: var(--color-navy-900);
+  background: var(--color-navy-950);
   border: 1px solid var(--color-navy-700);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-control);
   padding: 0.5rem 0.75rem;
-  color: #f1f5f9;
+  color: oklch(94% 0.012 255);
   width: 100%;
   min-height: 2.75rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  transition:
+    border-color 160ms var(--ease-out),
+    background-color 160ms var(--ease-out);
+}
+.kelpie-input::placeholder {
+  color: oklch(60% 0.025 260);
+}
+.kelpie-input:hover:not(:disabled) {
+  border-color: var(--color-navy-600);
 }
 .kelpie-input:focus-visible {
-  outline: 2px solid var(--color-tan-500);
-  outline-offset: 2px;
+  border-color: var(--color-tan-400);
+  outline: 2px solid color-mix(in oklch, var(--color-tan-500) 55%, transparent);
+  outline-offset: 1px;
+}
+.kelpie-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .kelpie-btn {
@@ -95,14 +125,19 @@ a {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-control);
   min-height: 2.75rem;
-  padding: 0.625rem 0.875rem;
+  padding: 0.5rem 0.875rem;
   font-weight: 500;
   font-size: 0.875rem;
   border: 1px solid transparent;
   cursor: pointer;
-  transition: background-color 160ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms cubic-bezier(0.22, 1, 0.36, 1), transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+  white-space: nowrap;
+  transition:
+    background-color 160ms var(--ease-out),
+    border-color 160ms var(--ease-out),
+    color 160ms var(--ease-out),
+    transform 160ms var(--ease-out);
 }
 .kelpie-btn:focus-visible,
 a:focus-visible,
@@ -114,18 +149,21 @@ summary:focus-visible {
   opacity: 0.5;
   cursor: not-allowed;
 }
+.kelpie-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
 .kelpie-btn-primary {
   background: var(--color-tan-500);
   color: oklch(99% 0.006 255);
-  box-shadow: 0 10px 24px oklch(55% 0.18 255 / 0.26);
+  border-color: var(--color-tan-500);
 }
 .kelpie-btn-primary:hover {
   background: var(--color-tan-400);
-  transform: translateY(-1px);
+  border-color: var(--color-tan-400);
 }
 .kelpie-btn-secondary {
   background: var(--color-navy-800);
-  color: #e2e8f0;
+  color: oklch(90% 0.014 255);
   border-color: var(--color-navy-700);
 }
 .kelpie-btn-secondary:hover {
@@ -133,17 +171,24 @@ summary:focus-visible {
 }
 .kelpie-btn-ghost {
   background: transparent;
-  color: #e2e8f0;
+  color: oklch(90% 0.014 255);
 }
 .kelpie-btn-ghost:hover {
   background: var(--color-navy-800);
 }
 .kelpie-btn-danger {
-  background: #b91c1c;
-  color: #fef2f2;
+  background: oklch(50% 0.18 25);
+  color: oklch(96% 0.02 25);
+  border-color: oklch(58% 0.18 25);
 }
 .kelpie-btn-danger:hover {
-  background: #dc2626;
+  background: oklch(56% 0.19 25);
+}
+
+.kelpie-btn-sm {
+  min-height: 2.25rem;
+  padding: 0.375rem 0.625rem;
+  font-size: 0.75rem;
 }
 
 .kelpie-table {
@@ -154,16 +199,14 @@ summary:focus-visible {
   font-size: 0.875rem;
 }
 .kelpie-table th {
-  padding: 0.625rem 0.875rem;
+  padding: 0.75rem 1rem;
   font-weight: 600;
   color: oklch(71% 0.032 260);
   border-bottom: 1px solid var(--color-navy-700);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
 }
 .kelpie-table td {
-  padding: 0.75rem 0.875rem;
+  padding: 0.875rem 1rem;
   border-bottom: 1px solid var(--color-navy-800);
 }
 .kelpie-table tr:hover td {
@@ -173,9 +216,10 @@ summary:focus-visible {
 .kelpie-badge {
   display: inline-flex;
   align-items: center;
+  min-height: 1.5rem;
   border-radius: 9999px;
-  padding: 0.125rem 0.625rem;
-  font-size: 0.7rem;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -208,6 +252,138 @@ summary:focus-visible {
   width: 1rem;
   height: 1rem;
   accent-color: var(--color-tan-500);
+}
+
+.kelpie-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  width: 100%;
+}
+
+.kelpie-page > header h1 {
+  color: oklch(96% 0.01 255);
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 2rem;
+}
+
+.kelpie-page > header p {
+  margin-top: var(--space-1);
+  max-width: 70ch;
+  color: oklch(70% 0.025 260);
+  font-size: 0.875rem;
+  line-height: 1.5rem;
+}
+
+.kelpie-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  border: 1px solid var(--color-navy-700);
+  border-radius: var(--radius-panel);
+  background: var(--color-navy-900);
+  padding: var(--space-5);
+}
+
+.kelpie-section-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-navy-800);
+}
+
+.kelpie-section-header h2 {
+  color: oklch(92% 0.014 255);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  line-height: 1.25rem;
+}
+
+.kelpie-section-header p,
+.kelpie-help {
+  max-width: 70ch;
+  color: oklch(64% 0.025 260);
+  font-size: 0.75rem;
+  line-height: 1.125rem;
+}
+
+.kelpie-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kelpie-label {
+  color: oklch(78% 0.02 260);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1rem;
+}
+
+label[class~="uppercase"][class~="tracking-wider"] {
+  margin-bottom: var(--space-2);
+  color: oklch(78% 0.02 260);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1rem;
+  text-transform: none;
+}
+
+.kelpie-btn.text-xs {
+  min-height: 2.25rem;
+  padding: 0.375rem 0.625rem;
+}
+
+.kelpie-notice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-2);
+  border: 1px solid var(--color-navy-700);
+  border-radius: var(--radius-control);
+  background: var(--color-navy-950);
+  padding: var(--space-3);
+  color: oklch(84% 0.02 260);
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+}
+
+.kelpie-notice-block {
+  display: block;
+}
+
+.kelpie-notice-error {
+  border-color: oklch(44% 0.12 25);
+  color: oklch(79% 0.12 25);
+}
+
+.kelpie-notice-warning {
+  border-color: oklch(50% 0.11 75);
+  color: oklch(82% 0.12 75);
+}
+
+.kelpie-notice-success {
+  border-color: oklch(47% 0.1 155);
+  color: oklch(82% 0.1 155);
+}
+
+@media (min-width: 640px) {
+  .kelpie-section {
+    padding: var(--space-6);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 .kelpie-sr-only {

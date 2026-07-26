@@ -24,13 +24,6 @@ const tlpColours: Record<string, string> = {
   red: "text-red-400",
 };
 
-const alertStatusColours: Record<string, string> = {
-  new: "text-[color:var(--color-status-open)]",
-  triaged: "text-[color:var(--color-status-progress)]",
-  dismissed: "text-slate-400",
-  promoted: "text-[color:var(--color-status-recovered)]",
-};
-
 const taskStatusColours: Record<string, string> = {
   todo: "text-slate-300",
   in_progress: "text-yellow-400",
@@ -61,14 +54,6 @@ export function TlpBadge({ value }: { value: string }) {
       title="Traffic Light Protocol"
     >
       tlp:{value.replace("_", "+")}
-    </span>
-  );
-}
-
-export function AlertStatusBadge({ value }: { value: string }) {
-  return (
-    <span className={cn("kelpie-badge", alertStatusColours[value] ?? "text-slate-300")}>
-      {value}
     </span>
   );
 }

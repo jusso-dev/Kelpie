@@ -12,42 +12,10 @@ Errors return `{ "error": "..." }` with an appropriate HTTP status (`400` invali
 
 | Scope | Allows |
 | --- | --- |
-| `alerts:read` / `alerts:write` | List or push alerts |
 | `cases:read` / `cases:write` | Read or create/update cases |
 | `tasks:read` / `tasks:write` | Read or create/update tasks |
 | `observables:read` / `observables:write` | Search or add observables |
 | `comments:read` / `comments:write` | Read or post comments |
-
-## Alerts
-
-### `POST /api/v1/alerts`
-```json
-{
-  "title": "Suspicious login from new geo",
-  "description": "Splunk saved search 'geo_anomaly'",
-  "severity": "high",
-  "source": "siem-splunk",
-  "externalRef": "splunk-12345",
-  "observables": [
-    { "type": "ip", "value": "203.0.113.4" },
-    { "type": "username", "value": "j.kim" }
-  ],
-  "rawPayload": {}
-}
-```
-Returns `201 { "id": "alert_...", "status": "new" }`.
-
-### `GET /api/v1/alerts`
-Returns the 100 most recent alerts for the organisation. Optional query: `status` (`open` means `new` or `triaged`), `severity`, `limit`.
-
-### `GET /api/v1/alerts/{id}`
-Returns one alert.
-
-### `PATCH /api/v1/alerts/{id}`
-```json
-{ "action": "acknowledge" }
-```
-`action` is `acknowledge`, `dismiss`, or `promote`. Promotion returns `caseId`. Requires `alerts:write`.
 
 ## Cases
 
@@ -138,6 +106,8 @@ The breach checker, webhook delivery, and enrichment runners are simple HTTP end
 POST /api/cron/sla
 POST /api/cron/webhooks
 POST /api/cron/enrichment
+POST /api/cron/ti
+POST /api/cron/case-sources
 POST /api/cron/mobile-push
 Authorization: Bearer ${CRON_SECRET}
 ```
@@ -172,4 +142,4 @@ Uploads the current APNs token. The app sends this on every APNs registration ca
 ```
 Disassociates the device during sign out.
 
-The push outbox routes `critical_alert`, `sla_breach`, and `comment_mention` events. Configure `APNS_TEAM_ID`, `APNS_KEY_ID`, `APNS_PRIVATE_KEY`, and the server-controlled `APNS_BUNDLE_ID`; the authenticated `/api/cron/mobile-push` worker delivers pending messages over APNs HTTP/2 and deactivates tokens rejected with HTTP 410.
+The push outbox routes `sla_breach` and `comment_mention` events. Configure `APNS_TEAM_ID`, `APNS_KEY_ID`, `APNS_PRIVATE_KEY`, and the server-controlled `APNS_BUNDLE_ID`; the authenticated `/api/cron/mobile-push` worker delivers pending messages over APNs HTTP/2 and deactivates tokens rejected with HTTP 410.

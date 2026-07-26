@@ -73,6 +73,24 @@ export default async function CaseOverviewPage({ params }: Props) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
       <div className="md:col-span-2 space-y-4">
+        {c.sourceSystem ? (
+          <div className="kelpie-notice kelpie-notice-block">
+            Imported from Microsoft Sentinel
+            {c.sourceUrl ? (
+              <>
+                {" · "}
+                <a
+                  href={c.sourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="kelpie-link"
+                >
+                  View source incident
+                </a>
+              </>
+            ) : null}
+          </div>
+        ) : null}
         <CaseSummaryEditor
           caseId={c.id}
           summary={c.summary}

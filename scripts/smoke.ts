@@ -1,13 +1,5 @@
 /**
- * Smoke test for the Phase 1 MVP.
- *
- * Exercises the key paths against a running Kelpie instance with seeded data:
- *   1. Create an API token via the administrator sign-in.
- *   2. Push an alert through POST /api/v1/alerts.
- *   3. Read it back through GET /api/v1/alerts.
- *
- * Run after `npm run db:migrate && npm run db:seed && npm run dev`:
- *   npm run smoke
+ * Basic case-management API smoke test against a running seeded Kelpie.
  */
 
 import { generateApiToken } from "../src/lib/api-tokens";
@@ -24,16 +16,14 @@ async function ensureSmokeToken() {
     .from(organisations)
     .where(eq(organisations.slug, "acme-soc"))
     .limit(1);
-  if (!org) {
-    throw new Error("Seed data missing: run npm run db:seed first.");
-  }
+  if (!org) throw new Error("Seed data missing: run npm run db:seed first.");
   const { plaintext, hash } = generateApiToken();
   await db.insert(apiTokens).values({
     id: newId("tok"),
     organisationId: org.id,
     name: "smoke-test",
     tokenHash: hash,
-    scopes: ["alerts:write", "alerts:read"],
+    scopes: ["cases:write", "cases:read"],
   });
   return plaintext;
 }
@@ -42,47 +32,39 @@ async function main() {
   console.log(`Smoke testing against ${BASE}`);
   const token = await ensureSmokeToken();
 
-  console.log("1) POST /api/v1/alerts");
-  const post = await fetch(`${BASE}/api/v1/alerts`, {
+  console.log("1) POST /api/v1/cases");
+  const post = await fetch(`${BASE}/api/v1/cases`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
-      title: "Smoke test alert",
-      description: "Posted by scripts/smoke.ts",
+      title: "Smoke test case",
+      summary: "Created by scripts/smoke.ts",
       severity: "low",
-      source: "smoke-test",
-      externalRef: `smoke-${Date.now()}`,
-      observables: [{ type: "ip", value: "192.0.2.123" }],
+      classification: "other",
+      tags: ["smoke-test"],
     }),
   });
-  if (!post.ok) {
-    const text = await post.text();
-    throw new Error(`POST failed ${post.status}: ${text}`);
-  }
-  const created = (await post.json()) as { id: string };
-  console.log(`   created alert ${created.id}`);
+  if (!post.ok) throw new Error(`POST failed ${post.status}: ${await post.text()}`);
+  const created = (await post.json()) as { id: string; caseNumber: string };
+  console.log(`   created ${created.caseNumber}`);
 
-  console.log("2) GET /api/v1/alerts");
-  const list = await fetch(`${BASE}/api/v1/alerts`, {
+  console.log("2) GET /api/v1/cases");
+  const list = await fetch(`${BASE}/api/v1/cases`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!list.ok) {
-    throw new Error(`GET failed ${list.status}`);
+  if (!list.ok) throw new Error(`GET failed ${list.status}`);
+  const { cases } = (await list.json()) as { cases: Array<{ id: string }> };
+  if (!cases.some((item) => item.id === created.id)) {
+    throw new Error("Created case not returned by GET");
   }
-  const { alerts: rows } = (await list.json()) as { alerts: Array<{ id: string }> };
-  if (!rows.some((r) => r.id === created.id)) {
-    throw new Error("Created alert not returned by GET");
-  }
-  console.log(`   listed ${rows.length} alerts, includes the new one ✓`);
-
+  console.log(`   listed ${cases.length} cases; created case present`);
   console.log("Smoke OK.");
-  process.exit(0);
 }
 
-main().catch((err) => {
-  console.error("Smoke FAILED:", err);
+main().catch((error) => {
+  console.error("Smoke FAILED:", error);
   process.exit(1);
 });

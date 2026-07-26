@@ -48,7 +48,7 @@ export default async function CaseLayout({ children, params }: Props) {
     <CaseCollaborationProvider caseId={id}>
       <div className="space-y-4">
       {isStrict ? (
-        <div className="rounded-md border border-red-700 bg-red-950/40 text-red-200 px-4 py-2 text-sm">
+        <div className="kelpie-notice kelpie-notice-error kelpie-notice-block">
           <strong className="font-semibold">TLP:{c.tlp.toUpperCase().replace("_", "+")}</strong>
           {" — restricted distribution. Share only with the named recipients per the TLP definition."}
         </div>

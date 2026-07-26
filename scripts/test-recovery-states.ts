@@ -26,7 +26,6 @@ async function main() {
 
     const missingRecords = [
       ["/cases/missing-case", "Case not found", "Return to case queue"],
-      ["/alerts/missing-alert", "Alert not found", "Return to alert queue"],
       ["/playbooks/missing-playbook", "Playbook not found", "Return to playbooks"],
     ] as const;
     for (const [path, heading, recoveryLink] of missingRecords) {

@@ -131,7 +131,6 @@ function notificationTitle(event: string): string {
     "case.created": "New Kelpie case",
     "case.status_changed": "Kelpie case status changed",
     "case.closed": "Kelpie case closed",
-    "alert.created": "New Kelpie alert",
   };
   return labels[event] ?? `Kelpie: ${event.replaceAll("_", " ")}`;
 }
@@ -153,9 +152,6 @@ function notificationLink(payload: Record<string, unknown>): string | null {
   if (!base) return null;
   if (typeof payload.case_id === "string") {
     return `${base}/cases/${encodeURIComponent(payload.case_id)}`;
-  }
-  if (typeof payload.alert_id === "string") {
-    return `${base}/alerts/${encodeURIComponent(payload.alert_id)}`;
   }
   return null;
 }

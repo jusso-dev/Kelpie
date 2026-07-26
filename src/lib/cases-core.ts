@@ -13,6 +13,7 @@ import { newId } from "./utils";
 import { nextCaseNumber } from "./case-number";
 import { writeTimelineEvent } from "./timeline";
 import { normalizeTags } from "./tags";
+import { enrichNewCaseWithThreatIntel } from "./ti/case-enrichment";
 
 const STATUS_VALUES = [
   "open",
@@ -74,48 +75,105 @@ async function loadCaseInOrg(caseId: string, organisationId: string) {
 export type CreateCaseInput = {
   title: string;
   summary?: string;
+  status?: CaseStatus;
   severity?: CaseSeverity;
   tlp?: CaseTlp;
   pap?: CasePap;
   classification?: CaseClassification;
   assigneeId?: string | null;
   reporterId?: string | null;
-  sourceAlertId?: string | null;
   tags?: string[];
   dataClassificationTags?: string[];
+  sourceSystem?: string | null;
+  sourceReference?: string | null;
+  sourceUrl?: string | null;
 };
 
 export async function createCaseCore(
   organisationId: string,
   actorId: string | null,
   input: CreateCaseInput,
-): Promise<{ id: string; caseNumber: string }> {
+): Promise<{ id: string; caseNumber: string; created: boolean }> {
   if (!input.title?.trim()) throw new Error("Title is required");
+  if (input.sourceSystem && input.sourceReference) {
+    const [existing] = await db
+      .select({ id: cases.id, caseNumber: cases.caseNumber })
+      .from(cases)
+      .where(
+        and(
+          eq(cases.organisationId, organisationId),
+          eq(cases.sourceSystem, input.sourceSystem),
+          eq(cases.sourceReference, input.sourceReference),
+        ),
+      )
+      .limit(1);
+    if (existing) return { ...existing, created: false };
+  }
   const id = newId("case");
   const caseNumber = await nextCaseNumber(organisationId);
-  await db.insert(cases).values({
-    id,
-    organisationId,
-    caseNumber,
-    title: input.title.trim(),
-    summary: input.summary?.trim() || null,
-    severity: input.severity ?? "medium",
-    tlp: input.tlp ?? "amber",
-    pap: input.pap ?? "amber",
-    classification: input.classification ?? "other",
-    assigneeId: input.assigneeId ?? actorId,
-    reporterId: input.reporterId ?? actorId,
-    sourceAlertId: input.sourceAlertId ?? null,
-    tags: normalizeTags(input.tags ?? []),
-    dataClassificationTags: normalizeTags(input.dataClassificationTags ?? []),
-  });
+  const [inserted] = await db
+    .insert(cases)
+    .values({
+      id,
+      organisationId,
+      caseNumber,
+      title: input.title.trim(),
+      summary: input.summary?.trim() || null,
+      status: input.status ?? "open",
+      severity: input.severity ?? "medium",
+      tlp: input.tlp ?? "amber",
+      pap: input.pap ?? "amber",
+      classification: input.classification ?? "other",
+      assigneeId: input.assigneeId ?? actorId,
+      reporterId: input.reporterId ?? actorId,
+      tags: normalizeTags(input.tags ?? []),
+      dataClassificationTags: normalizeTags(input.dataClassificationTags ?? []),
+      closedAt: input.status === "closed" ? new Date() : null,
+      resolvedAt: input.status === "closed" ? new Date() : null,
+      sourceSystem: input.sourceSystem ?? null,
+      sourceReference: input.sourceReference ?? null,
+      sourceUrl: input.sourceUrl ?? null,
+    })
+    .onConflictDoNothing()
+    .returning({ id: cases.id, caseNumber: cases.caseNumber });
+  if (!inserted) {
+    if (!input.sourceSystem || !input.sourceReference) {
+      throw new Error("Case could not be created");
+    }
+    const [existing] = await db
+      .select({ id: cases.id, caseNumber: cases.caseNumber })
+      .from(cases)
+      .where(
+        and(
+          eq(cases.organisationId, organisationId),
+          eq(cases.sourceSystem, input.sourceSystem),
+          eq(cases.sourceReference, input.sourceReference),
+        ),
+      )
+      .limit(1);
+    if (!existing) throw new Error("Case could not be created");
+    return { ...existing, created: false };
+  }
   await writeTimelineEvent({
-    caseId: id,
+    caseId: inserted.id,
     actorId,
     eventType: "case_created",
-    payload: { title: input.title, severity: input.severity ?? "medium" },
+    payload: {
+      title: input.title,
+      severity: input.severity ?? "medium",
+      source_system: input.sourceSystem ?? null,
+      source_reference: input.sourceReference ?? null,
+    },
   });
-  return { id, caseNumber };
+  await enrichNewCaseWithThreatIntel({
+    caseId: inserted.id,
+    organisationId,
+    title: input.title,
+    summary: input.summary,
+  }).catch(() => {
+    // Case creation must remain available if enrichment is temporarily unavailable.
+  });
+  return { ...inserted, created: true };
 }
 
 export async function setCaseStatusCore(

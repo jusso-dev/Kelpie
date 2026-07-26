@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { and, eq } from "drizzle-orm";
 import { db } from "../src/db";
 import {
-  alerts,
   apiTokens,
   cases,
   mobileNotificationDeliveries,
@@ -11,13 +10,11 @@ import {
   slaPolicies,
   users,
 } from "../src/db/schema";
-import { ingestAlert } from "../src/lib/alerts-core";
 import { postCommentCore } from "../src/lib/comments-core";
 import { issueMobileToken } from "../src/lib/mobile-auth";
 import { registerMobileDevice } from "../src/lib/mobile-push";
 import { newId } from "../src/lib/utils";
 import { hashApiToken } from "../src/lib/api-tokens";
-import { PATCH as patchAlert } from "../src/app/api/v1/alerts/[id]/route";
 import { POST as runSla } from "../src/app/api/cron/sla/route";
 import { POST as mobileSignIn } from "../src/app/api/mobile/auth/sign-in/route";
 
@@ -82,42 +79,6 @@ async function main() {
       }),
     ]);
 
-    const critical = await ingestAlert(organisationId, {
-      source: "mobile-test",
-      externalRef: newId("critical"),
-      title: "Critical mobile routing test",
-      severity: "critical",
-    });
-    assert.equal(critical.created, true);
-    const criticalPushes = await db
-      .select()
-      .from(mobileNotificationDeliveries)
-      .where(eq(mobileNotificationDeliveries.event, "critical_alert"));
-    const routedCritical = criticalPushes.filter(
-      (delivery) => delivery.destinationId === critical.alert.id,
-    );
-    assert.deepEqual(
-      new Set(routedCritical.map((delivery) => delivery.userId)),
-      new Set([adminId, analystId]),
-      "critical alerts route to mobile analysts, never read-only users",
-    );
-
-    const { token: analystToken } = await issueMobileToken(analystId);
-    const acknowledgeResponse = await patchAlert(
-      new Request(`http://localhost/api/v1/alerts/${critical.alert.id}`, {
-        method: "PATCH",
-        headers: {
-          authorization: `Bearer ${analystToken}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ action: "acknowledge" }),
-      }),
-      { params: Promise.resolve({ id: critical.alert.id }) },
-    );
-    assert.equal(acknowledgeResponse.status, 200);
-    const acknowledgeBody = (await acknowledgeResponse.json()) as { status: string };
-    assert.equal(acknowledgeBody.status, "triaged");
-
     const caseId = newId("case");
     await db.insert(cases).values({
       id: caseId,
@@ -175,7 +136,6 @@ async function main() {
       .limit(1);
     assert.ok(readerToken);
     assert.deepEqual(readerToken.scopes, [
-      "alerts:read",
       "cases:read",
       "tasks:read",
       "observables:read",
@@ -197,7 +157,7 @@ async function main() {
     assert.equal(signInResponse.status, 200, "mobile sign-in uses the existing BetterAuth account");
     const signInBody = (await signInResponse.json()) as { token?: string; scopes?: string[] };
     assert.ok(signInBody.token?.startsWith("klp_"));
-    assert.ok(signInBody.scopes?.includes("alerts:write"));
+    assert.ok(signInBody.scopes?.includes("cases:write"));
     const browserSessionsAfter = await db.select({ id: sessions.id }).from(sessions);
     assert.equal(
       browserSessionsAfter.length,
@@ -207,7 +167,7 @@ async function main() {
     await db
       .delete(apiTokens)
       .where(eq(apiTokens.tokenHash, hashApiToken(signInBody.token!)));
-    console.log("Mobile sign-in, least privilege, alert triage, and all three push routes passed.");
+    console.log("Mobile sign-in, least privilege, and case notification routes passed.");
   } finally {
     await db.delete(organisations).where(eq(organisations.id, organisationId));
   }

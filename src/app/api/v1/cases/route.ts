@@ -15,7 +15,6 @@ const createSchema = z.object({
   pap: z.enum(CASE_ENUMS.pap).optional(),
   classification: z.enum(CASE_ENUMS.classification).optional(),
   assigneeId: z.string().nullable().optional(),
-  sourceAlertId: z.string().nullable().optional(),
   tags: z.array(z.string()).optional(),
   dataClassificationTags: z.array(z.string()).optional(),
 });

@@ -29,15 +29,6 @@ private struct MainTabView: View {
                         }
                 }
             }
-            Tab("Alerts", systemImage: "exclamationmark.triangle", value: AppTab.alerts) {
-                NavigationStack(path: $router.alertPath) {
-                    AlertListView()
-                        .navigationDestination(for: AppDestination.self) { destination in
-                            if case .alertDetail(let id) = destination { AlertDetailView(alertID: id) }
-                            if case .caseDetail(let id) = destination { CaseDetailView(caseID: id) }
-                        }
-                }
-            }
             Tab("Tasks", systemImage: "checklist", value: AppTab.tasks) {
                 NavigationStack { TaskListView() }
             }

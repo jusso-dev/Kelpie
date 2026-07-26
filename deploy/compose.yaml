@@ -81,7 +81,7 @@ services:
       - node
       - -e
       - |
-        const paths = ["sla", "webhooks", "enrichment", "connectors", "ti", "mobile-push"];
+        const paths = ["sla", "webhooks", "enrichment", "ti", "case-sources", "mobile-push"];
         const run = async () => {
           await Promise.all(paths.map(async (path) => {
             try {
