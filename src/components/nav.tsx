@@ -22,7 +22,7 @@ const links = [
   { href: "/observables", label: "Observables", icon: Database },
   { href: "/ti", label: "Threat intel", icon: Radar },
   { href: "/briefing", label: "Cyber brief", icon: Newspaper },
-  { href: "/war-room", label: "War room", icon: Globe2 },
+  { href: "/threat-landscape", label: "Threat landscape", icon: Globe2 },
   { href: "/playbooks", label: "Playbooks", icon: BookOpen },
   { href: "/settings", label: "Settings", icon: Settings },
   { href: "/account/security", label: "Security", icon: ShieldCheck },

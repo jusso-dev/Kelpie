@@ -20,6 +20,9 @@ Kelpie is a SOC case management tool built as a single Next.js application backe
 - Markdown comments with `@mention` email notifications.
 - Automatic threat-intelligence enrichment comment when a case is created.
 - Microsoft Sentinel incident import with source deduplication.
+- Searchable Cyber brief with source and watched-vendor filters, sorting, and pagination.
+- Organisation vendor watchlists backed by a 606-entry curated catalog with vendor icons and matched-report highlighting.
+- Threat landscape showing near-real-time Cloudflare Radar application-attack activity.
 - Local file attachments with SHA256.
 - Dashboard with open cases by severity, MTTA / MTTC / MTTR, top classifications.
 - Docker Compose deployment with Postgres, Redis, and a dedicated BullMQ worker.
@@ -138,6 +141,25 @@ A small TI store answers "is this IOC known bad?" as a sub-second indexed lookup
 - **Browse / search** the store from the **Threat intel** page: filter by value, type, feed, or tag. Each indicator's detail shows the feeds it came from (with confidence) and the cases it has appeared on.
 
 New feed handlers implement `TiFeedHandler` in `src/lib/ti/handlers/`.
+
+### Cyber brief and vendor watch
+
+The **Cyber brief** collects recent reporting from public cyber authorities. Users
+can search headlines and summaries, filter by source or watched vendor, change the
+sort order, and page through results.
+
+Administrators and analysts can open **Cyber brief → Manage vendor watch** and
+import from the bundled 606-entry vendor catalog. Kelpie uses each catalog
+vendor's verified website and brand-icon fallbacks, then highlights reporting
+whose headline or summary matches a watched vendor. A match is a lead for an
+analyst to verify; it does not claim the organisation is affected.
+
+### Threat landscape
+
+The **Threat landscape** presents rolling 24-hour Cloudflare Radar
+application-layer attack activity by observed origin, target, and route. Configure
+`CLOUDFLARE_RADAR_API_TOKEN` with **Account → Radar → Read** permission. Kelpie
+formats provider timestamps in the signed-in user's configured timezone.
 
 ### Custom field builder
 

@@ -213,7 +213,7 @@ export async function getCyberNews(): Promise<CyberNewsResult> {
       const bDate = b.publishedAt ? Date.parse(b.publishedAt) : 0;
       return bDate - aDate;
     })
-    .slice(0, 36);
+    .slice(0, 240);
 
   return { items, failedSources, refreshedAt: new Date().toISOString() };
 }

@@ -4,6 +4,14 @@ import { chromium } from "playwright";
 
 const baseUrl = process.env.APP_URL ?? "http://127.0.0.1:3000";
 const outputDir = process.env.VISUAL_OUTPUT_DIR ?? "/tmp/kelpie-visual-smoke";
+const routes = [
+  "/settings",
+  "/cases/new",
+  "/settings/integrations",
+  "/briefing",
+  "/briefing/vendors",
+  "/threat-landscape",
+];
 
 async function main() {
   await mkdir(outputDir, { recursive: true });
@@ -17,7 +25,7 @@ async function main() {
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.waitForURL("**/dashboard");
 
-  for (const route of ["/settings", "/cases/new", "/settings/integrations"]) {
+  for (const route of routes) {
     await page.goto(`${baseUrl}${route}`);
     await page.waitForLoadState("networkidle");
     const name = route.slice(1).replaceAll("/", "-");
@@ -33,7 +41,7 @@ async function main() {
   }
 
   await page.setViewportSize({ width: 390, height: 844 });
-  for (const route of ["/settings", "/cases/new", "/settings/integrations"]) {
+  for (const route of routes) {
     await page.goto(`${baseUrl}${route}`);
     await page.waitForLoadState("networkidle");
     const name = route.slice(1).replaceAll("/", "-");

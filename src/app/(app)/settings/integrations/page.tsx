@@ -112,7 +112,8 @@ export default async function IntegrationsSettingsPage() {
         <div className="kelpie-section-header">
           <h2>Global threat activity</h2>
           <p>
-            The war-room map uses Cloudflare Radar application-attack telemetry.
+            The threat landscape uses Cloudflare Radar application-attack
+            telemetry.
           </p>
         </div>
         <div className="flex flex-col gap-4 rounded-lg border border-[color:var(--color-navy-700)] p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -129,7 +130,7 @@ export default async function IntegrationsSettingsPage() {
               <p className="mt-1 text-xs leading-5 text-slate-500">
                 {process.env.CLOUDFLARE_RADAR_API_TOKEN
                   ? "Connected through the container environment."
-                  : "Set CLOUDFLARE_RADAR_API_TOKEN on the app container with User Details Read permission."}
+                  : "Set CLOUDFLARE_RADAR_API_TOKEN on the app container with Account Radar Read permission."}
               </p>
             </div>
           </div>

@@ -11,7 +11,7 @@ import isoCountries from "i18n-iso-countries";
 import type {
   AttackPair,
   CountryActivity,
-} from "@/lib/war-room";
+} from "@/lib/threat-landscape";
 
 type Mode = "target" | "origin";
 
@@ -29,7 +29,7 @@ function fillFor(value: number, maximum: number, mode: Mode): string {
     : `oklch(0.72 0.13 70 / ${alpha})`;
 }
 
-export default function WarRoomMap({
+export default function ThreatLandscapeMap({
   targets,
   origins,
   pairs,

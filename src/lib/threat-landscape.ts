@@ -12,7 +12,7 @@ export type CountryActivity = {
   percentage: number;
 };
 
-export type WarRoomData = {
+export type ThreatLandscapeData = {
   configured: boolean;
   error: string | null;
   lastUpdated: string | null;
@@ -66,7 +66,7 @@ function aggregate(
   return [...values.values()].sort((a, b) => b.percentage - a.percentage);
 }
 
-export async function getWarRoomData(): Promise<WarRoomData> {
+export async function getThreatLandscapeData(): Promise<ThreatLandscapeData> {
   const token = process.env.CLOUDFLARE_RADAR_API_TOKEN?.trim();
   if (!token) {
     return {
@@ -100,7 +100,7 @@ export async function getWarRoomData(): Promise<WarRoomData> {
     if (!response.ok) {
       throw new Error(
         response.status === 401 || response.status === 403
-          ? "The Cloudflare Radar token was rejected. Check its User Details Read permission."
+          ? "The Cloudflare Radar token was rejected. Check its Account Radar Read permission."
           : `Cloudflare Radar returned HTTP ${response.status}.`,
       );
     }

@@ -845,6 +845,39 @@ export const caseSources = pgTable(
 );
 
 /* ────────────────────────────────────────────────────────────────────────── */
+/* Vendor news watchlist                                                      */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+export const vendorWatchlist = pgTable(
+  "vendor_watchlist",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    catalogSlug: text("catalog_slug").notNull(),
+    displayName: text("display_name").notNull(),
+    legalName: text("legal_name").notNull(),
+    website: text("website").notNull(),
+    category: text("category").notNull(),
+    aliases: jsonb("aliases").notNull().default(sql`'[]'::jsonb`),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("vendor_watchlist_org_slug_idx").on(
+      t.organisationId,
+      t.catalogSlug,
+    ),
+    index("vendor_watchlist_org_idx").on(t.organisationId),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
 /* Phase 3: Custom field builder                                              */
 /* ────────────────────────────────────────────────────────────────────────── */
 
@@ -966,6 +999,7 @@ export type ResponseActionRun = typeof responseActionRuns.$inferSelect;
 export type TiFeed = typeof tiFeeds.$inferSelect;
 export type TiIndicator = typeof tiIndicators.$inferSelect;
 export type CaseSource = typeof caseSources.$inferSelect;
+export type VendorWatch = typeof vendorWatchlist.$inferSelect;
 export type CustomFieldDefinition = typeof customFieldDefinitions.$inferSelect;
 export type CustomFieldValue = typeof customFieldValues.$inferSelect;
 export type CasePresence = typeof casePresence.$inferSelect;
