@@ -216,15 +216,15 @@ async function callTool(
   }
   if (name === "list_watched_vendors") {
     noInput.parse(args);
-    return toolResult(
-      (await listWatchedVendors(organisationId)).map((vendor) => ({
+    return toolResult({
+      vendors: (await listWatchedVendors(organisationId)).map((vendor) => ({
         id: vendor.id,
         slug: vendor.catalogSlug,
         name: vendor.displayName,
         website: vendor.website,
         category: vendor.category,
       })),
-    );
+    });
   }
   throw new Error("Unknown tool");
 }
