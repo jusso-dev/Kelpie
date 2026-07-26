@@ -29,6 +29,12 @@ curl -fsS http://127.0.0.1:3000/api/health
 in `kelpie_postgres_data`, BullMQ state in `kelpie_redis_data`, and uploads in
 `kelpie_uploads_data`; do not remove these volumes during routine updates.
 
+Treat `.env` as the persistent secret store for this deployment. Set optional
+integration credentials such as `CLOUDFLARE_RADAR_API_TOKEN` there, not only in
+Portainer or on a running container: Compose recreates containers during an
+upgrade. Only copy `.env.example` during the first deployment; never overwrite
+an existing `.env` with it.
+
 The dedicated `jobs` service owns recurring work through BullMQ. It reconciles
 administrator-configured TI and case-source intervals within one minute and
 retries transient failures with exponential backoff.
@@ -95,8 +101,9 @@ chooses the events to send. Generic channels retain Kelpie's HMAC signature.
 ## Upgrade
 
 1. Change `KELPIE_IMAGE_REF` to tested immutable tag or image digest.
-2. Back up database and uploads.
-3. Pull and start:
+2. Keep the existing `.env`; do not replace it with `.env.example`.
+3. Back up database and uploads.
+4. Pull and start:
 
 ```sh
 docker compose --env-file .env -f compose.yaml pull
