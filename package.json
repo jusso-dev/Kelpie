@@ -27,6 +27,7 @@
     "test:notification-config": "tsx scripts/test-notification-config.ts",
     "test:case-intelligence": "tsx scripts/test-case-intelligence.ts",
     "test:vendor-news": "tsx scripts/test-vendor-news.ts",
+    "test:threat-landscape": "tsx scripts/test-threat-landscape.ts",
     "test:visual": "tsx scripts/visual-smoke.ts"
   },
   "dependencies": {

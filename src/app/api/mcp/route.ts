@@ -62,7 +62,7 @@ const tools = [
     name: "get_threat_landscape",
     title: "Get Threat landscape",
     description:
-      "Get current Cloudflare Radar application-layer attack origins, targets, routes, confidence, and update time.",
+      "Get current Cloudflare Radar attack locations, routes, mitigation products, request profile, targeted sectors, managed-rule signals, confidence, and update time.",
     scope: "threat_landscape:read" as ScopeValue,
     inputSchema: {
       type: "object",

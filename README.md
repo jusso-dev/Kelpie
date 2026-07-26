@@ -158,9 +158,12 @@ analyst to verify; it does not claim the organisation is affected.
 ### Threat landscape
 
 The **Threat landscape** presents rolling 24-hour Cloudflare Radar
-application-layer attack activity by observed origin, target, and route. Configure
-`CLOUDFLARE_RADAR_API_TOKEN` with **Account → Radar → Read** permission. Kelpie
-formats provider timestamps in the signed-in user's configured timezone.
+application-layer attack activity by observed origin, target, and route.
+Highlighted countries are selectable and reveal the underlying top routes.
+Radar enrichment also shows mitigation products, request protocol mix, targeted
+sectors, and managed-rule signals. Configure `CLOUDFLARE_RADAR_API_TOKEN` with
+**Account → Radar → Read** permission. Kelpie formats provider timestamps in
+the signed-in user's configured timezone.
 
 REST consumers use `/api/v1/threat-intelligence`, `/api/v1/threat-landscape`,
 and `/api/v1/briefing`. Agents can connect to the stateless Streamable HTTP MCP

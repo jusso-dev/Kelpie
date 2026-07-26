@@ -81,8 +81,10 @@ Returns matching indicators plus feed state. Optional query: `value`, `exact`,
 ### `GET /api/v1/threat-landscape`
 
 Returns Cloudflare Radar configuration state, update time, confidence, rolling
-window, observed origin/target totals, and top attack routes. Requires
-`CLOUDFLARE_RADAR_API_TOKEN` on the Kelpie app container.
+window, ranked origin/target locations, top attack routes, provider annotations,
+partial-enrichment warnings, and percentage breakdowns for mitigation products,
+HTTP methods and versions, IP versions, targeted sectors, and managed-rule
+signals. Requires `CLOUDFLARE_RADAR_API_TOKEN` on the Kelpie app container.
 
 ## Cyber brief
 
