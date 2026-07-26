@@ -98,6 +98,8 @@ services:
     pull_policy: always
     restart: unless-stopped
     init: true
+    healthcheck:
+      disable: true
     depends_on:
       migrate:
         condition: service_completed_successfully

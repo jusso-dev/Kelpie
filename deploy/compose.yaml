@@ -83,6 +83,8 @@ services:
     pull_policy: always
     restart: unless-stopped
     init: true
+    healthcheck:
+      disable: true
     env_file:
       - ${KELPIE_ENV_FILE:-.env}
     environment:
