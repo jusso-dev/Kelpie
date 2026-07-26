@@ -35,15 +35,15 @@ the homelab LAN address and proxies to that loopback listener. Its internal CA
 root is stored in the `kelpie_caddy_data` volume and must be trusted on every
 client before passkeys will work.
 
-For the included `https://homelab` deployment:
+For the included `https://kepie.homelab` deployment:
 
 ```dotenv
 KELPIE_BIND_ADDRESS=127.0.0.1
 KELPIE_HTTPS_BIND_ADDRESS=192.168.1.19
-BETTER_AUTH_URL=https://homelab
-APP_URL=https://homelab
-PASSKEY_RP_ID=homelab
-PASSKEY_ORIGIN=https://homelab
+BETTER_AUTH_URL=https://kepie.homelab
+APP_URL=https://kepie.homelab
+PASSKEY_RP_ID=kepie.homelab
+PASSKEY_ORIGIN=https://kepie.homelab
 ```
 
 After first start, export Caddy's root certificate:
@@ -64,7 +64,8 @@ sudo security add-trusted-cert -d -r trustRoot \
 Keep `BETTER_AUTH_TRUSTED_ORIGINS` to exact origins. Trusting an origin only
 permits authentication requests; it does not expose a listener or make one
 passkey valid across unrelated hostnames. WebAuthn requires HTTPS outside
-`localhost`, and passkeys created for RP ID `homelab` work only at that RP ID.
+`localhost`, and passkeys created for RP ID `kepie.homelab` work only at that
+RP ID.
 The Caddy site address comes from `PASSKEY_ORIGIN`, its listener from
 `KELPIE_HTTPS_BIND_ADDRESS`, and its upstream port from `KELPIE_PORT`; keep
 `BETTER_AUTH_URL`, `APP_URL`, and `PASSKEY_ORIGIN` identical.
