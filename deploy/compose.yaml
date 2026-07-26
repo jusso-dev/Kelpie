@@ -1,0 +1,103 @@
+name: kelpie
+
+services:
+  db:
+    image: postgres:16-alpine
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  migrate:
+    image: ${KELPIE_IMAGE_REF:?Set KELPIE_IMAGE_REF in .env}
+    pull_policy: always
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      NODE_ENV: production
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["node", "scripts/migrate.mjs"]
+
+  app:
+    image: ${KELPIE_IMAGE_REF:?Set KELPIE_IMAGE_REF in .env}
+    pull_policy: always
+    restart: unless-stopped
+    env_file:
+      - ${KELPIE_ENV_FILE:-.env}
+    environment:
+      APP_URL: ${APP_URL:?Set APP_URL in .env}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET in .env}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:?Set BETTER_AUTH_URL in .env}
+      CRON_SECRET: ${CRON_SECRET:?Set CRON_SECRET in .env}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      EMAIL_FROM: ${EMAIL_FROM:?Set EMAIL_FROM in .env}
+      NODE_ENV: production
+      STORAGE_DRIVER: local
+      STORAGE_LOCAL_DIR: /data/uploads
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "${KELPIE_BIND_ADDRESS:-127.0.0.1}:${KELPIE_PORT:-3000}:3000"
+    volumes:
+      - uploads_data:/data/uploads
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test:
+        ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  cron:
+    image: ${KELPIE_IMAGE_REF:?Set KELPIE_IMAGE_REF in .env}
+    pull_policy: always
+    restart: unless-stopped
+    env_file:
+      - ${KELPIE_ENV_FILE:-.env}
+    environment:
+      CRON_SECRET: ${CRON_SECRET:?Set CRON_SECRET in .env}
+    depends_on:
+      app:
+        condition: service_healthy
+    command:
+      - node
+      - -e
+      - |
+        const paths = ["sla", "webhooks", "enrichment", "connectors", "ti", "mobile-push"];
+        const run = async () => {
+          await Promise.all(paths.map(async (path) => {
+            try {
+              const response = await fetch("http://app:3000/api/cron/" + path, {
+                method: "POST",
+                headers: { authorization: "Bearer " + process.env.CRON_SECRET },
+              });
+              if (!response.ok) console.error("cron " + path + " failed: " + response.status);
+            } catch (error) {
+              console.error("cron " + path + " failed", error);
+            }
+          }));
+        };
+        run();
+        setInterval(run, 60_000);
+
+volumes:
+  postgres_data:
+    name: kelpie_postgres_data
+  uploads_data:
+    name: kelpie_uploads_data

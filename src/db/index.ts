@@ -6,7 +6,6 @@ const connectionString =
   process.env.DATABASE_URL ?? "postgres://kelpie:kelpie@localhost:5432/kelpie";
 
 declare global {
-  // eslint-disable-next-line no-var
   var __kelpie_pg: ReturnType<typeof postgres> | undefined;
 }
 

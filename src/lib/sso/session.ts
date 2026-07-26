@@ -7,12 +7,12 @@ import { AUTH_SECRET, AUTH_BASE_URL } from "@/lib/auth";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 const COOKIE_BASE = "better-auth.session_token";
 
-function useSecureCookies(): boolean {
+function shouldUseSecureCookies(): boolean {
   return AUTH_BASE_URL.startsWith("https://");
 }
 
 function cookieName(): string {
-  return useSecureCookies() ? `__Secure-${COOKIE_BASE}` : COOKIE_BASE;
+  return shouldUseSecureCookies() ? `__Secure-${COOKIE_BASE}` : COOKIE_BASE;
 }
 
 /**
@@ -54,6 +54,6 @@ export async function createSessionCookie(
     "SameSite=Lax",
     `Max-Age=${SESSION_TTL_SECONDS}`,
   ];
-  if (useSecureCookies()) parts.push("Secure");
+  if (shouldUseSecureCookies()) parts.push("Secure");
   return parts.join("; ");
 }

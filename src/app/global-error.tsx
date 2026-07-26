@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import Link from "next/link";
 
 export default function GlobalError({
   error,
@@ -40,13 +41,13 @@ export default function GlobalError({
               >
                 Retry Kelpie
               </button>
-              <a
+              <Link
                 className="kelpie-global-recovery"
                 href="/"
                 style={{ minHeight: "44px", display: "inline-flex", alignItems: "center", border: "1px solid #475569", borderRadius: "6px", color: "#e2e8f0", padding: "0 16px", textDecoration: "none", fontWeight: 600 }}
               >
                 Return to start
-              </a>
+              </Link>
             </div>
           </section>
         </main>

@@ -1,70 +1,114 @@
 services:
   db:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: kelpie
-      POSTGRES_PASSWORD: kelpie
-      POSTGRES_DB: kelpie
+      POSTGRES_USER: ${POSTGRES_USER:-kelpie}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-kelpie}
     volumes:
       - kelpie_pg:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U kelpie -d kelpie"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 12
+  migrate:
+    image: ${KELPIE_IMAGE:-ghcr.io/jusso-dev/kelpie:latest}
+    pull_policy: always
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-kelpie}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-kelpie}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["node", "scripts/migrate.mjs"]
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1001,gid=1001,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${KELPIE_IMAGE:-ghcr.io/jusso-dev/kelpie:latest}
+    pull_policy: always
+    restart: unless-stopped
+    init: true
     environment:
-      DATABASE_URL: postgres://kelpie:kelpie@db:5432/kelpie
-      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-dev_only_change_me_dev_only_change_me_dev_only_change_me}
-      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
-      APP_URL: ${APP_URL:-http://localhost:3000}
-      EMAIL_FROM: ${EMAIL_FROM:-kelpie@example.com}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-kelpie}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-kelpie}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET in .env}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:?Set BETTER_AUTH_URL in .env}
+      APP_URL: ${APP_URL:?Set APP_URL in .env}
+      EMAIL_FROM: ${EMAIL_FROM:?Set EMAIL_FROM in .env}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
-      CRON_SECRET: ${CRON_SECRET:-dev_only_change_me_cron_secret}
+      CRON_SECRET: ${CRON_SECRET:?Set CRON_SECRET in .env}
       VIRUSTOTAL_API_KEY: ${VIRUSTOTAL_API_KEY:-}
-      STORAGE_DRIVER: local
-      STORAGE_LOCAL_DIR: /data/uploads
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      STORAGE_LOCAL_DIR: ${STORAGE_LOCAL_DIR:-/data/uploads}
       KELPIE_ALLOW_PRIVATE_NETWORKS: ${KELPIE_ALLOW_PRIVATE_NETWORKS:-false}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
       APNS_TEAM_ID: ${APNS_TEAM_ID:-}
       APNS_KEY_ID: ${APNS_KEY_ID:-}
       APNS_PRIVATE_KEY: ${APNS_PRIVATE_KEY:-}
       APNS_BUNDLE_ID: ${APNS_BUNDLE_ID:-dev.kelpie.mobile}
       NODE_ENV: production
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     ports:
-      - "3000:3000"
+      - "${KELPIE_BIND_ADDRESS:-127.0.0.1}:3000:3000"
     volumes:
       - kelpie_uploads:/data/uploads
-    command: ["node", "server.js"]
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1001,gid=1001,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
   cron:
-    image: alpine:3.20
+    image: ${KELPIE_IMAGE:-ghcr.io/jusso-dev/kelpie:latest}
+    pull_policy: always
+    restart: unless-stopped
+    init: true
+    healthcheck:
+      disable: true
     depends_on:
       app:
-        condition: service_started
+        condition: service_healthy
     environment:
-      CRON_SECRET: ${CRON_SECRET:-dev_only_change_me_cron_secret}
+      CRON_SECRET: ${CRON_SECRET:?Set CRON_SECRET in .env}
     command:
-      - sh
-      - -c
-      - |
-        apk add --no-cache curl >/dev/null
-        echo "Kelpie cron sidecar ready"
-        while true; do
-          for path in sla webhooks enrichment connectors ti mobile-push; do
-            curl -sS -X POST -H "Authorization: Bearer $$CRON_SECRET" \
-              "http://app:3000/api/cron/$$path" >/dev/null || true
-          done
-          sleep 60
-        done
+      - node
+      - -e
+      - >-
+        const baseUrl = 'http://app:3000/api/cron/';
+        const paths = ['sla', 'webhooks', 'enrichment', 'connectors', 'ti', 'mobile-push'];
+        const tick = async () => {
+          await Promise.all(paths.map(async (path) => {
+            try {
+              const response = await fetch(baseUrl + path, { method: 'POST', headers: { Authorization: 'Bearer ' + process.env.CRON_SECRET } });
+              if (!response.ok) console.error('Cron ' + path + ' failed: ' + response.status);
+            } catch (error) {
+              console.error('Cron ' + path + ' failed', error);
+            }
+          }));
+        };
+        void (async () => { for (;;) { await tick(); await new Promise((resolve) => setTimeout(resolve, 60_000)); } })();
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1001,gid=1001,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
 volumes:
   kelpie_pg:

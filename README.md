@@ -219,15 +219,24 @@ Then visit http://localhost:3000 and sign in as `admin@acme.local` / `kelpieadmi
 
 ## Docker Compose (self-hosted)
 
+The production compose file pulls the multi-architecture image from GitHub Container Registry, applies migrations before starting Kelpie, keeps Postgres off the host network, and binds Kelpie to loopback for a local reverse proxy. It supports both `linux/amd64` and `linux/arm64` hosts.
+
 ```bash
 cp .env.example .env
-# Set BETTER_AUTH_SECRET to a long random string before exposing publicly.
-docker compose up -d --build
-# First-run only: apply migrations and seed
-docker compose exec app node -e "require('./src/db/migrate')" || npm run db:migrate
+# Set POSTGRES_PASSWORD, BETTER_AUTH_SECRET, CRON_SECRET, BETTER_AUTH_URL,
+# APP_URL, and EMAIL_FROM. Generate long random values for all three secrets.
+docker compose pull
+docker compose up -d
 ```
 
-The compose stack starts Postgres, the Kelpie app, and a small cron sidecar. Uploads land in the `kelpie_uploads` volume.
+The compose stack starts Postgres, an idempotent migration job, Kelpie, and a cron sidecar. Uploads land in the `kelpie_uploads` volume. Put TLS and public ingress at a reverse proxy (for example Caddy or Traefik) on the same host. Set `KELPIE_BIND_ADDRESS=0.0.0.0` only when direct network exposure is intentional.
+
+Images publish from `main` and `v*` tags to `ghcr.io/jusso-dev/kelpie`. First release requires changing package visibility to **Public** in GitHub package settings; homelab hosts can then pull without credentials. Pin deployments to a release tag or digest after validation instead of tracking `latest`:
+
+```bash
+KELPIE_IMAGE=ghcr.io/jusso-dev/kelpie:v1.0.0 docker compose pull
+KELPIE_IMAGE=ghcr.io/jusso-dev/kelpie:v1.0.0 docker compose up -d
+```
 
 ## Background jobs (cron)
 
