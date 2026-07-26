@@ -1,24 +1,46 @@
 import { db } from "@/db";
-import { caseTemplates } from "@/db/schema";
+import { cases, caseTemplates } from "@/db/schema";
 import { asc, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/session";
 import { createCase } from "@/actions/cases";
 import { applyCaseTemplate } from "@/actions/case-templates";
+import CreatableTagInput from "@/components/creatable-tag-input";
+import { DATA_CLASSIFICATION_SUGGESTIONS, normalizeTags } from "@/lib/tags";
 
 export default async function NewCasePage() {
   const user = await requireUser();
-  const templates = await db
-    .select({
-      id: caseTemplates.id,
-      name: caseTemplates.name,
-      classification: caseTemplates.classification,
-    })
-    .from(caseTemplates)
-    .where(eq(caseTemplates.organisationId, user.organisationId))
-    .orderBy(asc(caseTemplates.name));
+  const [templates, caseTagRows] = await Promise.all([
+    db
+      .select({
+        id: caseTemplates.id,
+        name: caseTemplates.name,
+        classification: caseTemplates.classification,
+      })
+      .from(caseTemplates)
+      .where(eq(caseTemplates.organisationId, user.organisationId))
+      .orderBy(asc(caseTemplates.name)),
+    db
+      .select({
+        tags: cases.tags,
+        dataClassificationTags: cases.dataClassificationTags,
+      })
+      .from(cases)
+      .where(eq(cases.organisationId, user.organisationId)),
+  ]);
+  const tagSuggestions = normalizeTags(
+    caseTagRows.flatMap((row) => (Array.isArray(row.tags) ? row.tags as string[] : [])),
+  );
+  const classificationTagSuggestions = normalizeTags([
+    ...DATA_CLASSIFICATION_SUGGESTIONS,
+    ...caseTagRows.flatMap((row) =>
+      Array.isArray(row.dataClassificationTags)
+        ? row.dataClassificationTags as string[]
+        : [],
+    ),
+  ]);
 
   return (
-    <div className="max-w-2xl mx-auto space-y-5">
+    <div className="mx-auto max-w-5xl space-y-6">
       <header>
         <h1 className="text-2xl font-semibold mb-1">Open a new case</h1>
         <p className="text-sm text-slate-400">
@@ -27,7 +49,7 @@ export default async function NewCasePage() {
       </header>
 
       {templates.length > 0 ? (
-        <form action={applyCaseTemplate} className="kelpie-card p-5 space-y-3">
+        <form action={applyCaseTemplate} className="kelpie-card space-y-4 p-6">
           <h2 className="text-sm font-medium text-slate-300">
             Start from a template
           </h2>
@@ -65,27 +87,40 @@ export default async function NewCasePage() {
         </form>
       ) : null}
 
-      <form action={createCase} className="kelpie-card p-6 space-y-4">
-        <h2 className="text-sm font-medium text-slate-300">Or fill in by hand</h2>
-        <Field label="Title" name="title" required />
-        <Field
-          label="Summary"
-          name="summary"
-          as="textarea"
-          rows={4}
-          help="What is happening? Stick to facts; the analyst can add detail later."
-        />
-        <Field
-          label="Tags"
-          name="tags"
-          help="Comma-separated labels such as ransomware, vip, watchlist."
-        />
-        <Field
-          label="Data classification tags"
-          name="dataClassificationTags"
-          help="Comma-separated labels such as pii, confidential, customer-data."
-        />
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <form action={createCase} className="kelpie-card space-y-6 p-6 md:p-8">
+        <div>
+          <h2 className="text-base font-medium text-slate-200">Case details</h2>
+          <p className="mt-1 text-xs text-slate-500">
+            Capture what is known now. Everything remains editable after creation.
+          </p>
+        </div>
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1.45fr)_minmax(18rem,.8fr)]">
+          <div className="space-y-5">
+            <Field label="Title" name="title" required />
+            <Field
+              label="Summary"
+              name="summary"
+              as="textarea"
+              rows={6}
+              help="What is happening? Stick to facts; the analyst can add detail later."
+            />
+          </div>
+          <div className="space-y-5">
+            <CreatableTagInput
+              label="Tags"
+              name="tags"
+              suggestions={tagSuggestions}
+              help="Choose an existing tag or type a new one and press Enter."
+            />
+            <CreatableTagInput
+              label="Data classification tags"
+              name="dataClassificationTags"
+              suggestions={classificationTagSuggestions}
+              help="Choose an existing classification tag or create a new one."
+            />
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-4 border-t border-[color:var(--color-navy-700)] pt-6 sm:grid-cols-2 lg:grid-cols-4">
           <Select
             label="Severity"
             name="severity"
@@ -119,7 +154,7 @@ export default async function NewCasePage() {
             defaultValue="amber"
           />
         </div>
-        <div className="flex justify-end">
+        <div className="flex justify-end border-t border-[color:var(--color-navy-700)] pt-5">
           <button className="kelpie-btn kelpie-btn-primary">Create case</button>
         </div>
       </form>

@@ -670,6 +670,7 @@ export const webhooks = pgTable("webhooks", {
     .notNull()
     .references(() => organisations.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
+  kind: text("kind").notNull().default("generic"),
   url: text("url").notNull(),
   secret: text("secret").notNull(),
   events: jsonb("events").notNull().default(sql`'[]'::jsonb`),

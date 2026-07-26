@@ -2,11 +2,15 @@ const IPV4 = /^(?:\d{1,3}\.){3}\d{1,3}$/;
 const HASH = /^[a-fA-F0-9]{32}$|^[a-fA-F0-9]{40}$|^[a-fA-F0-9]{64}$/;
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const DOMAIN = /^(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$/;
+const CIDR = /^(?:\d{1,3}\.){3}\d{1,3}\/(?:[0-9]|[12][0-9]|3[0-2])$/;
+const CVE = /^CVE-\d{4}-\d{4,}$/i;
 
 /** Best-effort observable type for a bare indicator value. */
 export function guessIndicatorType(value: string): string {
   const v = value.trim();
   if (IPV4.test(v)) return "ip";
+  if (CIDR.test(v)) return "cidr";
+  if (CVE.test(v)) return "cve";
   if (HASH.test(v)) return "file_hash";
   if (EMAIL.test(v)) return "email";
   if (/^https?:\/\//i.test(v)) return "url";
@@ -24,6 +28,12 @@ export function normaliseType(raw: string, value: string): string {
     case "ip-src":
     case "ipv4-addr":
       return "ip";
+    case "cidr":
+    case "network":
+      return "cidr";
+    case "cve":
+    case "vulnerability":
+      return "cve";
     case "domain":
     case "hostname":
     case "domain-name":

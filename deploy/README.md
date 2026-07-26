@@ -75,6 +75,18 @@ real DNS name and publicly or organisationally trusted TLS certificate. Only use
 `KELPIE_BIND_ADDRESS=0.0.0.0` behind an intentionally configured firewall and
 TLS terminator.
 
+## Email and chat notifications
+
+Set `EMAIL_PROVIDER` to `resend`, `ses`, or `azure`. All providers use
+`EMAIL_FROM`; provider-specific variables are documented in `.env.example`.
+SES uses the standard AWS credential chain. Azure requires its Communication
+Services Email connection string and a verified sender address. Leave
+`EMAIL_PROVIDER=console` when delivery is not configured.
+
+Slack and Microsoft Teams need no environment secrets. An administrator adds
+their incoming webhook URLs under **Settings → Notification channels** and
+chooses the events to send. Generic channels retain Kelpie's HMAC signature.
+
 ## Upgrade
 
 1. Change `KELPIE_IMAGE_REF` to tested immutable tag or image digest.

@@ -47,7 +47,7 @@ export default async function SettingsPage() {
   const isAdmin = user.role === "admin";
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="max-w-6xl space-y-6">
       <header>
         <h1 className="text-2xl font-semibold">Settings</h1>
         <p className="text-sm text-slate-400">
@@ -55,7 +55,7 @@ export default async function SettingsPage() {
         </p>
       </header>
 
-      <section className="kelpie-card p-5">
+      <section className="kelpie-card p-5 md:p-6">
         <h2 className="text-sm font-medium text-slate-300 mb-3">
           More configuration
         </h2>
@@ -81,7 +81,7 @@ export default async function SettingsPage() {
         </div>
       </section>
 
-      <section className="kelpie-card p-5">
+      <section className="kelpie-card p-5 md:p-6">
         <h2 className="text-sm font-medium text-slate-300 mb-3">Team</h2>
         <TeamManagement
           members={teamMembers.map((u) => ({
@@ -146,15 +146,18 @@ export default async function SettingsPage() {
       </section>
 
       <section className="kelpie-card p-5">
-        <h2 className="text-sm font-medium text-slate-300 mb-3">Outbound webhooks</h2>
+        <h2 className="text-sm font-medium text-slate-300 mb-3">
+          Notification channels
+        </h2>
         <p className="text-xs text-slate-500 mb-3">
-          POST a JSON event to your URL on case and alert activity. Signed with
-          HMAC-SHA256 in the <code>X-Kelpie-Signature</code> header.
+          Send case and alert activity to Slack, Microsoft Teams, or a generic
+          HMAC-signed webhook.
         </p>
         <WebhookSettings
           webhooks={webhookRows.map((w) => ({
             id: w.id,
             name: w.name,
+            kind: w.kind,
             url: w.url,
             events: (w.events as string[]) ?? [],
             isActive: w.isActive,

@@ -1,0 +1,1 @@
+ALTER TABLE "webhooks" ADD COLUMN "kind" text DEFAULT 'generic' NOT NULL;

@@ -6,8 +6,10 @@ import {
   clearFeedError,
   createFeed,
   deleteFeed,
+  importStarterFeeds,
   pollFeedNow,
   setFeedActive,
+  updateFeed,
 } from "@/actions/ti";
 
 type ConfigField = {
@@ -36,243 +38,377 @@ type FeedRow = {
   lastError: string | null;
   indicatorCount: number;
   pollIntervalMinutes: number;
+  config: Record<string, string>;
 };
 
 export default function TiFeedSettings({
   feeds,
   kinds,
-  isAdmin,
+  canManage,
 }: {
   feeds: FeedRow[];
   kinds: Kind[];
-  isAdmin: boolean;
+  canManage: boolean;
 }) {
   const router = useRouter();
   const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [kind, setKind] = useState(kinds[0]?.kind ?? "");
   const [pending, setPending] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const selected = kinds.find((k) => k.kind === kind);
+  const selected = kinds.find((item) => item.kind === kind);
+  const editingFeed = feeds.find((feed) => feed.id === editingId) ?? null;
 
-  async function onCreate(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  function startAdding() {
+    setEditingId(null);
+    setKind(kinds[0]?.kind ?? "");
+    setAdding(true);
+  }
+
+  function startEditing(feed: FeedRow) {
+    setAdding(false);
+    setEditingId(feed.id);
+    setKind(feed.kind);
+  }
+
+  function cancelForm() {
+    setAdding(false);
+    setEditingId(null);
+  }
+
+  async function onSave(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     setPending(true);
     try {
-      const fd = new FormData(e.currentTarget);
-      fd.set("kind", kind);
-      await createFeed(fd);
-      setAdding(false);
+      const formData = new FormData(event.currentTarget);
+      formData.set("kind", kind);
+      if (editingFeed) await updateFeed(editingFeed.id, formData);
+      else await createFeed(formData);
+      cancelForm();
       router.refresh();
-    } catch (err) {
-      alert((err as Error).message);
+    } catch (error) {
+      alert((error as Error).message);
     } finally {
       setPending(false);
     }
   }
 
-  return (
-    <div className="space-y-3">
-      <div className="kelpie-scroll-x" tabIndex={0}>
-        <table className="kelpie-table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Kind</th>
-              <th>Indicators</th>
-              <th>Last poll</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {feeds.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="text-center text-slate-500 py-6">
-                  No feeds configured.
-                </td>
-              </tr>
-            ) : (
-              feeds.map((f) => (
-                <tr key={f.id}>
-                  <td>{f.name}</td>
-                  <td className="text-xs uppercase text-slate-400">{f.kind}</td>
-                  <td>{f.indicatorCount}</td>
-                  <td className="text-xs text-slate-400">
-                    {f.lastPolledAt
-                      ? new Date(f.lastPolledAt).toLocaleString()
-                      : "never"}
-                    {f.lastError ? (
-                      <div className="text-red-400 mt-1 max-w-xs truncate">
-                        {f.lastError}
-                      </div>
-                    ) : null}
-                  </td>
-                  <td>
-                    <span
-                      className={
-                        "kelpie-badge " +
-                        (f.lastError
-                          ? "text-red-400"
-                          : f.isActive
-                            ? "text-green-400"
-                            : "text-slate-500")
-                      }
-                    >
-                      {f.lastError ? "halted" : f.isActive ? "active" : "off"}
-                    </span>
-                  </td>
-                  <td className="text-right">
-                    {isAdmin ? (
-                      <div className="flex justify-end gap-1">
-                        <button
-                          className="kelpie-btn kelpie-btn-ghost text-xs"
-                          disabled={busy === f.id}
-                          onClick={async () => {
-                            setBusy(f.id);
-                            const r = await pollFeedNow(f.id);
-                            setBusy(null);
-                            router.refresh();
-                            alert(
-                              r.error
-                                ? `Poll failed: ${r.error}`
-                                : `Ingested ${r.ingested} indicator(s)`,
-                            );
-                          }}
-                        >
-                          Poll now
-                        </button>
-                        {f.lastError ? (
-                          <button
-                            className="kelpie-btn kelpie-btn-ghost text-xs"
-                            onClick={async () => {
-                              await clearFeedError(f.id);
-                              router.refresh();
-                            }}
-                          >
-                            Clear error
-                          </button>
-                        ) : null}
-                        <button
-                          className="kelpie-btn kelpie-btn-ghost text-xs"
-                          onClick={async () => {
-                            await setFeedActive(f.id, !f.isActive);
-                            router.refresh();
-                          }}
-                        >
-                          {f.isActive ? "Disable" : "Enable"}
-                        </button>
-                        <button
-                          className="kelpie-btn kelpie-btn-ghost text-red-400 text-xs"
-                          onClick={async () => {
-                            if (!confirm(`Delete feed "${f.name}" and its indicators?`)) return;
-                            await deleteFeed(f.id);
-                            router.refresh();
-                          }}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    ) : null}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+  async function run(feedId: string, action: () => Promise<void>) {
+    setBusy(feedId);
+    try {
+      await action();
+      router.refresh();
+    } catch (error) {
+      alert((error as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
 
-      {isAdmin ? (
-        adding ? (
-          <form onSubmit={onCreate} className="kelpie-card p-4 space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-              <div>
-                <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
-                  Feed type
-                </label>
-                <select
-                  className="kelpie-input"
-                  value={kind}
-                  onChange={(e) => setKind(e.target.value)}
-                >
-                  {kinds.map((k) => (
-                    <option key={k.kind} value={k.kind}>
-                      {k.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
-                  Name
-                </label>
-                <input name="name" className="kelpie-input" required />
-              </div>
-              <div>
-                <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
-                  Poll interval (min)
-                </label>
-                <input
-                  name="pollIntervalMinutes"
-                  type="number"
-                  className="kelpie-input"
-                  defaultValue={60}
-                  min={5}
-                />
-              </div>
+  return (
+    <div className="space-y-4">
+      {feeds.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-[color:var(--color-navy-600)] p-6 text-center">
+          <h3 className="text-sm font-medium text-slate-200">
+            No feeds configured
+          </h3>
+          <p className="mx-auto mt-1 max-w-xl text-xs leading-5 text-slate-500">
+            Start empty, add one manually, or import the seven public OSINT
+            sources used by Tawny SOC. Imported feeds remain fully editable.
+          </p>
+          {canManage ? (
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              <button
+                className="kelpie-btn kelpie-btn-primary"
+                disabled={busy === "starter"}
+                onClick={() =>
+                  run("starter", async () => {
+                    const result = await importStarterFeeds();
+                    alert(`Imported ${result.imported} starter feed(s).`);
+                  })
+                }
+              >
+                {busy === "starter" ? "Importing…" : "Load starter feeds"}
+              </button>
+              <button
+                className="kelpie-btn kelpie-btn-secondary"
+                onClick={startAdding}
+              >
+                Add manually
+              </button>
             </div>
-            {selected ? (
-              <p className="text-xs text-slate-500">{selected.description}</p>
-            ) : null}
-            <div>
-              <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
-                Feed URL
-              </label>
-              <input
-                name="url"
-                className="kelpie-input"
-                placeholder="https://… (base URL for MISP, file URL for CSV)"
-              />
-            </div>
-            {selected?.configFields.map((f) => (
-              <div key={f.key}>
-                <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
-                  {f.label}
-                  {f.required ? " *" : ""}
-                </label>
-                <input
-                  name={`config.${f.key}`}
-                  type={f.type === "password" ? "password" : "text"}
-                  className="kelpie-input"
-                  placeholder={f.placeholder}
-                  required={f.required}
-                />
-                {f.help ? (
-                  <p className="text-xs text-slate-500 mt-1">{f.help}</p>
+          ) : null}
+        </div>
+      ) : (
+        <div className="divide-y divide-[color:var(--color-navy-700)] rounded-lg border border-[color:var(--color-navy-700)]">
+          {feeds.map((feed) => (
+            <article
+              key={feed.id}
+              className="grid gap-4 p-4 lg:grid-cols-[minmax(14rem,1.5fr)_minmax(8rem,.65fr)_minmax(9rem,.75fr)_auto] lg:items-center"
+            >
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="truncate text-sm font-medium text-slate-100">
+                    {feed.name}
+                  </h3>
+                  <span
+                    className={
+                      "kelpie-badge " +
+                      (feed.lastError
+                        ? "text-red-400"
+                        : feed.isActive
+                          ? "text-green-400"
+                          : "text-slate-500")
+                    }
+                  >
+                    {feed.lastError
+                      ? "halted"
+                      : feed.isActive
+                        ? "active"
+                        : "off"}
+                  </span>
+                </div>
+                <p className="mt-1 truncate text-xs text-slate-500">
+                  {feed.url ?? "No URL"}
+                </p>
+                {feed.lastError ? (
+                  <p className="mt-1 text-xs text-red-400">{feed.lastError}</p>
                 ) : null}
               </div>
-            ))}
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                className="kelpie-btn kelpie-btn-ghost"
-                onClick={() => setAdding(false)}
-              >
-                Cancel
-              </button>
-              <button className="kelpie-btn kelpie-btn-primary" disabled={pending}>
-                {pending ? "Saving..." : "Add feed"}
-              </button>
-            </div>
-          </form>
-        ) : (
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-slate-500">
+                  Type
+                </p>
+                <p className="mt-1 text-xs uppercase text-slate-300">
+                  {feed.kind.replaceAll("_", " ")}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-slate-500">
+                  Indicators · last poll
+                </p>
+                <p className="mt-1 text-xs text-slate-300">
+                  {feed.indicatorCount.toLocaleString()} ·{" "}
+                  {feed.lastPolledAt
+                    ? new Date(feed.lastPolledAt).toLocaleString()
+                    : "never"}
+                </p>
+              </div>
+              {canManage ? (
+                <details className="relative justify-self-start lg:justify-self-end">
+                  <summary className="kelpie-btn kelpie-btn-secondary cursor-pointer list-none text-xs">
+                    Manage
+                  </summary>
+                  <div className="z-20 mt-2 grid min-w-44 gap-1 rounded border border-[color:var(--color-navy-600)] bg-[color:var(--color-navy-800)] p-2 shadow-xl lg:absolute lg:right-0">
+                    <button
+                      className="kelpie-btn kelpie-btn-ghost justify-start text-xs"
+                      onClick={() => startEditing(feed)}
+                    >
+                      Edit feed
+                    </button>
+                    <button
+                      className="kelpie-btn kelpie-btn-ghost justify-start text-xs"
+                      disabled={busy === feed.id}
+                      onClick={() =>
+                        run(feed.id, async () => {
+                          const result = await pollFeedNow(feed.id);
+                          alert(
+                            result.error
+                              ? `Poll failed: ${result.error}`
+                              : `Ingested ${result.ingested} indicator(s)`,
+                          );
+                        })
+                      }
+                    >
+                      Poll now
+                    </button>
+                    {feed.lastError ? (
+                      <button
+                        className="kelpie-btn kelpie-btn-ghost justify-start text-xs"
+                        onClick={() =>
+                          run(feed.id, () => clearFeedError(feed.id))
+                        }
+                      >
+                        Clear error
+                      </button>
+                    ) : null}
+                    <button
+                      className="kelpie-btn kelpie-btn-ghost justify-start text-xs"
+                      onClick={() =>
+                        run(feed.id, () =>
+                          setFeedActive(feed.id, !feed.isActive),
+                        )
+                      }
+                    >
+                      {feed.isActive ? "Disable" : "Enable"}
+                    </button>
+                    <button
+                      className="kelpie-btn kelpie-btn-ghost justify-start text-xs text-red-400"
+                      onClick={() => {
+                        if (
+                          confirm(
+                            `Delete feed "${feed.name}" and its indicators?`,
+                          )
+                        ) {
+                          void run(feed.id, () => deleteFeed(feed.id));
+                        }
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </details>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      )}
+
+      {canManage && feeds.length > 0 && !adding && !editingFeed ? (
+        <div className="flex flex-wrap gap-2">
           <button
             className="kelpie-btn kelpie-btn-secondary"
-            onClick={() => setAdding(true)}
+            onClick={startAdding}
           >
             Add feed
           </button>
-        )
+          <button
+            className="kelpie-btn kelpie-btn-ghost"
+            disabled={busy === "starter"}
+            onClick={() =>
+              run("starter", async () => {
+                const result = await importStarterFeeds();
+                alert(
+                  result.imported
+                    ? `Imported ${result.imported} missing starter feed(s).`
+                    : "All starter feeds are already configured.",
+                );
+              })
+            }
+          >
+            Add missing starter feeds
+          </button>
+        </div>
+      ) : null}
+
+      {canManage && (adding || editingFeed) ? (
+        <form
+          key={editingFeed?.id ?? "new"}
+          onSubmit={onSave}
+          className="kelpie-card space-y-4 p-5"
+        >
+          <div>
+            <h3 className="text-sm font-medium text-slate-200">
+              {editingFeed ? `Edit ${editingFeed.name}` : "Add feed"}
+            </h3>
+            {selected ? (
+              <p className="mt-1 text-xs text-slate-500">
+                {selected.description}
+              </p>
+            ) : null}
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <Field label="Feed type">
+              <select
+                className="kelpie-input"
+                value={kind}
+                onChange={(event) => setKind(event.target.value)}
+              >
+                {kinds.map((item) => (
+                  <option key={item.kind} value={item.kind}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Name">
+              <input
+                name="name"
+                className="kelpie-input"
+                defaultValue={editingFeed?.name}
+                required
+              />
+            </Field>
+            <Field label="Poll interval (minutes)">
+              <input
+                name="pollIntervalMinutes"
+                type="number"
+                className="kelpie-input"
+                defaultValue={editingFeed?.pollIntervalMinutes ?? 60}
+                min={5}
+              />
+            </Field>
+          </div>
+          <Field label="Feed URL">
+            <input
+              name="url"
+              type="url"
+              className="kelpie-input"
+              defaultValue={editingFeed?.url ?? ""}
+              placeholder="https://…"
+            />
+          </Field>
+          {selected?.configFields.map((field) => (
+            <Field key={field.key} label={`${field.label}${field.required ? " *" : ""}`}>
+              <input
+                name={`config.${field.key}`}
+                type={field.type === "password" ? "password" : "text"}
+                className="kelpie-input"
+                placeholder={
+                  editingFeed && field.type === "password"
+                    ? "Leave blank to keep the current value"
+                    : field.placeholder
+                }
+                defaultValue={
+                  field.type === "password"
+                    ? ""
+                    : editingFeed?.config[field.key] ?? ""
+                }
+                required={field.required && !editingFeed}
+              />
+              {field.help ? (
+                <p className="mt-1 text-xs text-slate-500">{field.help}</p>
+              ) : null}
+            </Field>
+          ))}
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="kelpie-btn kelpie-btn-ghost"
+              onClick={cancelForm}
+            >
+              Cancel
+            </button>
+            <button
+              className="kelpie-btn kelpie-btn-primary"
+              disabled={pending}
+            >
+              {pending
+                ? "Saving…"
+                : editingFeed
+                  ? "Save changes"
+                  : "Add feed"}
+            </button>
+          </div>
+        </form>
       ) : null}
     </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs uppercase tracking-wider text-slate-400">
+        {label}
+      </span>
+      {children}
+    </label>
   );
 }

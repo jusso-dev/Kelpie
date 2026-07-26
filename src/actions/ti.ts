@@ -16,22 +16,31 @@ import {
   lookupIndicators,
   pollFeed,
 } from "@/lib/ti/core";
+import { seedStarterThreatFeeds } from "@/lib/ti/starter-feeds";
 
-function collectConfig(kind: string, formData: FormData): Record<string, string> {
+const FEED_MANAGER_ROLES = ["admin", "analyst"] as const;
+
+function collectConfig(
+  kind: string,
+  formData: FormData,
+  existing: Record<string, unknown> = {},
+): Record<string, unknown> {
   const handler = getFeedHandler(kind);
   if (!handler) throw new Error("Unknown feed kind");
-  const config: Record<string, string> = {};
+  const config: Record<string, unknown> = { ...existing };
   for (const field of handler.configFields) {
     const raw = formData.get(`config.${field.key}`);
     const value = typeof raw === "string" ? raw.trim() : "";
-    if (field.required && !value) throw new Error(`${field.label} is required`);
+    if (field.required && !value && !config[field.key]) {
+      throw new Error(`${field.label} is required`);
+    }
     if (value) config[field.key] = value;
   }
   return config;
 }
 
 export async function createFeed(formData: FormData) {
-  const user = await requireRole(["admin"]);
+  const user = await requireRole([...FEED_MANAGER_ROLES]);
   const name = String(formData.get("name") ?? "").trim();
   const kind = String(formData.get("kind") ?? "").trim();
   const url = String(formData.get("url") ?? "").trim() || null;
@@ -55,8 +64,58 @@ export async function createFeed(formData: FormData) {
   revalidatePath("/settings/integrations");
 }
 
+export async function updateFeed(id: string, formData: FormData) {
+  const user = await requireRole([...FEED_MANAGER_ROLES]);
+  const [existing] = await db
+    .select({ config: tiFeeds.config })
+    .from(tiFeeds)
+    .where(
+      and(eq(tiFeeds.id, id), eq(tiFeeds.organisationId, user.organisationId)),
+    )
+    .limit(1);
+  if (!existing) throw new Error("Feed not found");
+
+  const name = String(formData.get("name") ?? "").trim();
+  const kind = String(formData.get("kind") ?? "").trim();
+  const url = String(formData.get("url") ?? "").trim() || null;
+  const interval = Number(formData.get("pollIntervalMinutes") ?? 60);
+  if (!name) throw new Error("Name is required");
+  if (!getFeedHandler(kind)) throw new Error("Unknown feed kind");
+  if (url) await assertSafeOutboundUrl(url);
+
+  await db
+    .update(tiFeeds)
+    .set({
+      name,
+      kind,
+      url,
+      config: collectConfig(
+        kind,
+        formData,
+        (existing.config as Record<string, unknown>) ?? {},
+      ),
+      pollIntervalMinutes:
+        Number.isFinite(interval) && interval >= 5 ? interval : 60,
+      lastError: null,
+    })
+    .where(
+      and(eq(tiFeeds.id, id), eq(tiFeeds.organisationId, user.organisationId)),
+    );
+  revalidatePath("/ti");
+}
+
+export async function importStarterFeeds(): Promise<{ imported: number }> {
+  const user = await requireRole([...FEED_MANAGER_ROLES]);
+  const imported = await seedStarterThreatFeeds(
+    user.organisationId,
+    user.id,
+  );
+  revalidatePath("/ti");
+  return { imported };
+}
+
 export async function setFeedActive(id: string, active: boolean) {
-  const user = await requireRole(["admin"]);
+  const user = await requireRole([...FEED_MANAGER_ROLES]);
   await db
     .update(tiFeeds)
     .set({ isActive: active })
@@ -67,7 +126,7 @@ export async function setFeedActive(id: string, active: boolean) {
 }
 
 export async function clearFeedError(id: string) {
-  const user = await requireRole(["admin"]);
+  const user = await requireRole([...FEED_MANAGER_ROLES]);
   await db
     .update(tiFeeds)
     .set({ lastError: null })
@@ -78,7 +137,7 @@ export async function clearFeedError(id: string) {
 }
 
 export async function deleteFeed(id: string) {
-  const user = await requireRole(["admin"]);
+  const user = await requireRole([...FEED_MANAGER_ROLES]);
   await db
     .delete(tiFeeds)
     .where(
@@ -91,7 +150,7 @@ export async function pollFeedNow(id: string): Promise<{
   ingested: number;
   error: string | null;
 }> {
-  const user = await requireRole(["admin"]);
+  const user = await requireRole([...FEED_MANAGER_ROLES]);
   const [feed] = await db
     .select({ id: tiFeeds.id })
     .from(tiFeeds)

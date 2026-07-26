@@ -15,6 +15,151 @@ export function signPayload(body: string, secret: string): string {
   );
 }
 
+type NotificationKind = "generic" | "slack" | "teams";
+
+export function buildWebhookRequest(input: {
+  kind: string;
+  event: string;
+  payload: Record<string, unknown>;
+  secret: string;
+  deliveryId: string;
+}): { body: string; headers: Record<string, string> } {
+  const kind: NotificationKind =
+    input.kind === "slack" || input.kind === "teams"
+      ? input.kind
+      : "generic";
+  if (kind === "generic") {
+    const body = JSON.stringify({
+      event: input.event,
+      payload: input.payload,
+    });
+    return {
+      body,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Kelpie-Event": input.event,
+        "X-Kelpie-Signature": signPayload(body, input.secret),
+        "X-Kelpie-Delivery": input.deliveryId,
+      },
+    };
+  }
+
+  const title = notificationTitle(input.event);
+  const details = notificationDetails(input.payload);
+  const link = notificationLink(input.payload);
+  if (kind === "slack") {
+    return {
+      body: JSON.stringify({
+        text: `${title}${details ? ` — ${details}` : ""}`,
+        blocks: [
+          {
+            type: "header",
+            text: { type: "plain_text", text: title, emoji: true },
+          },
+          ...(details
+            ? [
+                {
+                  type: "section",
+                  text: { type: "mrkdwn", text: details },
+                },
+              ]
+            : []),
+          ...(link
+            ? [
+                {
+                  type: "actions",
+                  elements: [
+                    {
+                      type: "button",
+                      text: { type: "plain_text", text: "Open in Kelpie" },
+                      url: link,
+                    },
+                  ],
+                },
+              ]
+            : []),
+        ],
+      }),
+      headers: { "Content-Type": "application/json" },
+    };
+  }
+
+  return {
+    body: JSON.stringify({
+      type: "message",
+      attachments: [
+        {
+          contentType: "application/vnd.microsoft.card.adaptive",
+          contentUrl: null,
+          content: {
+            $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+            type: "AdaptiveCard",
+            version: "1.4",
+            body: [
+              {
+                type: "TextBlock",
+                size: "Medium",
+                weight: "Bolder",
+                text: title,
+                wrap: true,
+              },
+              ...(details
+                ? [{ type: "TextBlock", text: details, wrap: true }]
+                : []),
+            ],
+            ...(link
+              ? {
+                  actions: [
+                    {
+                      type: "Action.OpenUrl",
+                      title: "Open in Kelpie",
+                      url: link,
+                    },
+                  ],
+                }
+              : {}),
+          },
+        },
+      ],
+    }),
+    headers: { "Content-Type": "application/json" },
+  };
+}
+
+function notificationTitle(event: string): string {
+  const labels: Record<string, string> = {
+    "case.created": "New Kelpie case",
+    "case.status_changed": "Kelpie case status changed",
+    "case.closed": "Kelpie case closed",
+    "alert.created": "New Kelpie alert",
+  };
+  return labels[event] ?? `Kelpie: ${event.replaceAll("_", " ")}`;
+}
+
+function notificationDetails(payload: Record<string, unknown>): string {
+  const parts = [
+    payload.case_number,
+    payload.title,
+    payload.to ? `Status: ${payload.to}` : null,
+  ].filter(
+    (value): value is string | number =>
+      typeof value === "string" || typeof value === "number",
+  );
+  return parts.map(String).join(" · ");
+}
+
+function notificationLink(payload: Record<string, unknown>): string | null {
+  const base = process.env.APP_URL?.replace(/\/$/, "");
+  if (!base) return null;
+  if (typeof payload.case_id === "string") {
+    return `${base}/cases/${encodeURIComponent(payload.case_id)}`;
+  }
+  if (typeof payload.alert_id === "string") {
+    return `${base}/alerts/${encodeURIComponent(payload.alert_id)}`;
+  }
+  return null;
+}
+
 /** Enqueue a delivery for every active subscription that includes the event. */
 export async function fireWebhook(
   organisationId: string,
@@ -88,8 +233,13 @@ export async function processPendingDeliveries(limit = 25): Promise<{
       failed++;
       continue;
     }
-    const body = JSON.stringify({ event: d.event, payload: d.payload });
-    const signature = signPayload(body, sub.secret);
+    const request = buildWebhookRequest({
+      kind: sub.kind,
+      event: d.event,
+      payload: d.payload as Record<string, unknown>,
+      secret: sub.secret,
+      deliveryId: d.id,
+    });
     const attempt = d.attemptCount + 1;
     const started = Date.now();
     let responseCode: number | null = null;
@@ -98,13 +248,8 @@ export async function processPendingDeliveries(limit = 25): Promise<{
     try {
       const res = await safeFetch(sub.url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Kelpie-Event": d.event,
-          "X-Kelpie-Signature": signature,
-          "X-Kelpie-Delivery": d.id,
-        },
-        body,
+        headers: request.headers,
+        body: request.body,
         signal: AbortSignal.timeout(10000),
       });
       responseCode = res.status;

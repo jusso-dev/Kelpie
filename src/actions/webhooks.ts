@@ -10,6 +10,9 @@ import { newId } from "@/lib/utils";
 import { WEBHOOK_EVENTS, type WebhookEvent } from "@/lib/webhook-events";
 import { assertSafeOutboundUrl } from "@/lib/outbound-request";
 
+const WEBHOOK_KINDS = ["generic", "slack", "teams"] as const;
+type WebhookKind = (typeof WEBHOOK_KINDS)[number];
+
 function parseEvents(raw: FormDataEntryValue | null): WebhookEvent[] {
   if (typeof raw !== "string") return [];
   let parsed: unknown;
@@ -24,10 +27,16 @@ function parseEvents(raw: FormDataEntryValue | null): WebhookEvent[] {
   );
 }
 
-export async function createWebhook(formData: FormData): Promise<{ secret: string }> {
+export async function createWebhook(
+  formData: FormData,
+): Promise<{ secret: string | null }> {
   const user = await requireRole(["admin"]);
   const name = String(formData.get("name") ?? "").trim();
   const url = String(formData.get("url") ?? "").trim();
+  const rawKind = String(formData.get("kind") ?? "generic");
+  const kind: WebhookKind = WEBHOOK_KINDS.includes(rawKind as WebhookKind)
+    ? (rawKind as WebhookKind)
+    : "generic";
   const events = parseEvents(formData.get("events"));
   if (!name) throw new Error("Name required");
   if (!url) throw new Error("URL required");
@@ -38,6 +47,7 @@ export async function createWebhook(formData: FormData): Promise<{ secret: strin
     id: newId("wh"),
     organisationId: user.organisationId,
     name,
+    kind,
     url,
     secret,
     events,
@@ -45,7 +55,7 @@ export async function createWebhook(formData: FormData): Promise<{ secret: strin
     createdBy: user.id,
   });
   revalidatePath("/settings");
-  return { secret };
+  return { secret: kind === "generic" ? secret : null };
 }
 
 export async function setWebhookActive(id: string, active: boolean) {

@@ -8,7 +8,7 @@ import TiBrowser from "@/components/ti-browser";
 
 export default async function ThreatIntelPage() {
   const user = await requireUser();
-  const isAdmin = user.role === "admin";
+  const canManage = user.role === "admin" || user.role === "analyst";
   const [feeds, kinds] = await Promise.all([
     db
       .select()
@@ -50,9 +50,21 @@ export default async function ThreatIntelPage() {
             lastError: f.lastError,
             indicatorCount: f.indicatorCount,
             pollIntervalMinutes: f.pollIntervalMinutes,
+            config: Object.fromEntries(
+              (
+                kinds.find((kind) => kind.kind === f.kind)?.configFields ?? []
+              )
+                .filter((field) => field.type !== "password")
+                .map((field) => [
+                  field.key,
+                  String(
+                    (f.config as Record<string, unknown>)?.[field.key] ?? "",
+                  ),
+                ]),
+            ),
           }))}
           kinds={kinds}
-          isAdmin={isAdmin}
+          canManage={canManage}
         />
       </section>
     </div>

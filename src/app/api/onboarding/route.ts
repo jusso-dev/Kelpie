@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 import { newId, slugify } from "@/lib/utils";
 import { seedDefaultSlaPolicies } from "@/actions/sla";
 import { seedBaselineOrganisationData } from "@/lib/baseline-data";
+import { seedStarterThreatFeeds } from "@/lib/ti/starter-feeds";
 
 export async function POST(req: Request) {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -15,6 +16,7 @@ export async function POST(req: Request) {
   }
   const body = (await req.json().catch(() => ({}))) as {
     organisationName?: string;
+    loadStarterFeeds?: boolean;
   };
   if (!body.organisationName) {
     return NextResponse.json(
@@ -47,6 +49,9 @@ export async function POST(req: Request) {
     .where(eq(users.id, session.user.id));
   await seedDefaultSlaPolicies(orgId);
   await seedBaselineOrganisationData(orgId);
+  if (body.loadStarterFeeds !== false) {
+    await seedStarterThreatFeeds(orgId, session.user.id);
+  }
 
   return NextResponse.json({ organisationId: orgId });
 }
