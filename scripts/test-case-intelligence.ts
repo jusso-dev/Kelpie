@@ -9,11 +9,28 @@ const indicators = extractCaseIndicators(
 assert.deepEqual(indicators, [
   "https://evil.example.test/login",
   "evil.example.test",
-  "attacker@example.test",
   "203.0.113.9",
   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "CVE-2026-12345",
 ]);
+assert.equal(
+  indicators.includes("CVE-2026-12345"),
+  false,
+  "CVE text must never be treated as a TI indicator",
+);
+assert.equal(
+  indicators.includes("attacker@example.test"),
+  false,
+  "email addresses must never be treated as a TI indicator",
+);
+
+const cidrIndicators = extractCaseIndicators(
+  "Blocked 198.51.100.0/24 at the edge",
+);
+assert.equal(
+  cidrIndicators.includes("198.51.100.0/24"),
+  false,
+  "CIDR ranges must never be treated as a TI indicator",
+);
 
 const mapped = mapSentinelIncident(
   {

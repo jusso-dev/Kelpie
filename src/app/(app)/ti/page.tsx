@@ -49,6 +49,10 @@ export default async function ThreatIntelPage() {
             lastPolledAt: f.lastPolledAt ? f.lastPolledAt.toISOString() : null,
             lastError: f.lastError,
             indicatorCount: f.indicatorCount,
+            lastRunIngestedCount: f.lastRunIngestedCount,
+            lastRunSkippedCount: f.lastRunSkippedCount,
+            lastRunSkippedByType:
+              (f.lastRunSkippedByType as Record<string, number>) ?? {},
             pollIntervalMinutes: f.pollIntervalMinutes,
             config: Object.fromEntries(
               (

@@ -7,8 +7,8 @@ import {
 } from "@/db/schema";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { newId } from "@/lib/utils";
-import { getFeedHandler } from "./registry";
-import { normaliseIndicatorValue } from "./indicator-limits";
+import { getFeedHandler, retiredFeedKindReason } from "./registry";
+import { TI_INDICATOR_TYPES, totalSkipped, type TiSkipCounts } from "./indicator-types";
 
 export type TiMatch = {
   value?: string;
@@ -42,6 +42,9 @@ export async function lookupIndicators(
       and(
         eq(tiIndicators.organisationId, organisationId),
         eq(tiIndicators.value, value),
+        // Defence in depth: legacy rows outside the supported contract must
+        // never surface even if a migration hasn't retired them yet.
+        inArray(tiIndicators.type, [...TI_INDICATOR_TYPES]),
       ),
     );
   return rows.map((r) => ({
@@ -76,6 +79,7 @@ export async function lookupIndicatorValues(
       and(
         eq(tiIndicators.organisationId, organisationId),
         inArray(tiIndicators.value, unique),
+        inArray(tiIndicators.type, [...TI_INDICATOR_TYPES]),
       ),
     );
   return rows.map((row) => ({
@@ -125,6 +129,7 @@ export async function casesForValue(
 export async function pollFeed(feedId: string): Promise<{
   ingested: number;
   skipped: number;
+  skippedByType: TiSkipCounts;
   error: string | null;
 }> {
   const [feed] = await db
@@ -132,37 +137,43 @@ export async function pollFeed(feedId: string): Promise<{
     .from(tiFeeds)
     .where(eq(tiFeeds.id, feedId))
     .limit(1);
-  if (!feed) return { ingested: 0, skipped: 0, error: "feed not found" };
+  if (!feed) return { ingested: 0, skipped: 0, skippedByType: {}, error: "feed not found" };
+
+  const retiredReason = retiredFeedKindReason(feed.kind);
+  if (retiredReason) {
+    await db
+      .update(tiFeeds)
+      .set({ lastError: retiredReason, lastPolledAt: new Date(), isActive: false })
+      .where(eq(tiFeeds.id, feed.id));
+    return { ingested: 0, skipped: 0, skippedByType: {}, error: retiredReason };
+  }
+
   const handler = getFeedHandler(feed.kind);
   if (!handler) {
     await db
       .update(tiFeeds)
       .set({ lastError: `unknown feed kind: ${feed.kind}`, lastPolledAt: new Date() })
       .where(eq(tiFeeds.id, feed.id));
-    return { ingested: 0, skipped: 0, error: "unknown kind" };
+    return { ingested: 0, skipped: 0, skippedByType: {}, error: "unknown kind" };
   }
 
   try {
-    const indicators = await handler.fetchIndicators({
+    const { indicators, skippedByType } = await handler.fetchIndicators({
       url: feed.url,
       config: (feed.config as Record<string, unknown>) ?? {},
     });
     const now = new Date();
     let ingested = 0;
-    let skipped = 0;
     for (const ind of indicators) {
-      const value = normaliseIndicatorValue(ind.value);
-      if (!value) {
-        skipped++;
-        continue;
-      }
+      // The handler's collector has already resolved `ind.type` against the
+      // strict allowlist and trimmed `ind.value`; nothing left to validate.
       await db
         .insert(tiIndicators)
         .values({
           id: newId("tii"),
           organisationId: feed.organisationId,
           feedId: feed.id,
-          value,
+          value: ind.value,
           type: ind.type,
           confidence: ind.confidence ?? 50,
           firstSeen: now,
@@ -181,6 +192,7 @@ export async function pollFeed(feedId: string): Promise<{
         });
       ingested++;
     }
+    const skipped = totalSkipped(skippedByType);
     const [{ count }] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(tiIndicators)
@@ -191,16 +203,19 @@ export async function pollFeed(feedId: string): Promise<{
         lastPolledAt: now,
         lastError: null,
         indicatorCount: count ?? 0,
+        lastRunIngestedCount: ingested,
+        lastRunSkippedCount: skipped,
+        lastRunSkippedByType: skippedByType,
       })
       .where(eq(tiFeeds.id, feed.id));
-    return { ingested, skipped, error: null };
+    return { ingested, skipped, skippedByType, error: null };
   } catch (e) {
     const error = conciseError(e);
     await db
       .update(tiFeeds)
       .set({ lastPolledAt: new Date(), lastError: error })
       .where(eq(tiFeeds.id, feed.id));
-    return { ingested: 0, skipped: 0, error };
+    return { ingested: 0, skipped: 0, skippedByType: {}, error };
   }
 }
 

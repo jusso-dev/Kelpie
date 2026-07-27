@@ -9,6 +9,7 @@ import {
   index,
   uniqueIndex,
   pgEnum,
+  check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -868,6 +869,14 @@ export const tiFeeds = pgTable(
     lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
     lastError: text("last_error"),
     indicatorCount: integer("indicator_count").notNull().default(0),
+    lastRunIngestedCount: integer("last_run_ingested_count")
+      .notNull()
+      .default(0),
+    lastRunSkippedCount: integer("last_run_skipped_count").notNull().default(0),
+    /** Skip tally from the last poll, keyed by rejected type or skip reason. */
+    lastRunSkippedByType: jsonb("last_run_skipped_by_type")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     createdBy: text("created_by").references(() => users.id, {
       onDelete: "set null",
     }),
@@ -911,6 +920,45 @@ export const tiIndicators = pgTable(
       t.organisationId,
       t.confidence,
     ),
+    // Database-level guarantee that only the four supported indicator types
+    // can ever be stored, independent of which code path writes the row.
+    // Kept literal so drizzle-kit can read it without path-alias resolution;
+    // `scripts/test-ti-indicator-types.ts` asserts it matches
+    // `TI_INDICATOR_TYPES` in `src/lib/ti/indicator-types.ts`.
+    check(
+      "ti_indicators_type_allowlist",
+      sql.raw(`"type" in ('ip', 'url', 'file_hash', 'domain')`),
+    ),
+  ],
+);
+
+/**
+ * Audit trail for indicators removed from the live store because their type is
+ * outside the supported contract. `feed_id` is intentionally an unconstrained
+ * text copy so the record survives deletion of the originating feed.
+ */
+export const tiRetiredIndicators = pgTable(
+  "ti_retired_indicators",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    feedId: text("feed_id").notNull(),
+    value: text("value").notNull(),
+    type: text("type").notNull(),
+    confidence: integer("confidence").notNull().default(50),
+    firstSeen: timestamp("first_seen", { withTimezone: true }),
+    lastSeen: timestamp("last_seen", { withTimezone: true }),
+    tags: jsonb("tags").notNull().default(sql`'[]'::jsonb`),
+    attributes: jsonb("attributes").notNull().default(sql`'{}'::jsonb`),
+    retiredReason: text("retired_reason").notNull(),
+    retiredAt: timestamp("retired_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("ti_retired_indicators_org_type_idx").on(t.organisationId, t.type),
   ],
 );
 

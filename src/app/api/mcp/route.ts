@@ -8,6 +8,7 @@ import {
 import type { ScopeValue } from "@/lib/scopes";
 import { tokenHasScope } from "@/lib/scopes";
 import { getThreatLandscapeData } from "@/lib/threat-landscape";
+import { TI_INDICATOR_TYPES } from "@/lib/ti/indicator-types";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,7 @@ const SUPPORTED_PROTOCOLS = new Set([
 const threatIntelInput = z.object({
   value: z.string().trim().min(1).max(2048).optional(),
   exact: z.boolean().optional(),
-  type: z.string().trim().min(1).max(64).optional(),
+  type: z.enum(TI_INDICATOR_TYPES).optional(),
   feed_id: z.string().trim().min(1).max(128).optional(),
   tag: z.string().trim().min(1).max(128).optional(),
   min_confidence: z.number().int().min(0).max(100).optional(),
@@ -45,14 +46,19 @@ const tools = [
     name: "search_threat_intelligence",
     title: "Search threat intelligence",
     description:
-      "Search this organisation's threat-intelligence indicators and inspect feed health.",
+      "Search this organisation's threat-intelligence indicators and inspect feed health. Kelpie threat intelligence covers IP, URL, file hash and domain indicators only (no CVE/vulnerability data).",
     scope: "threat_intelligence:read" as ScopeValue,
     inputSchema: {
       type: "object",
       properties: {
         value: { type: "string", description: "Indicator value or substring." },
         exact: { type: "boolean", description: "Use exact value matching." },
-        type: { type: "string", description: "Indicator type filter." },
+        type: {
+          type: "string",
+          enum: [...TI_INDICATOR_TYPES],
+          description:
+            "Indicator type filter. Kelpie stores network and file indicators only (IP, URL, file hash, domain).",
+        },
         feed_id: { type: "string", description: "Feed identifier filter." },
         tag: { type: "string", description: "Exact indicator tag filter." },
         min_confidence: {

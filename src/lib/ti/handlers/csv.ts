@@ -1,5 +1,5 @@
 import type { TiFeedHandler } from "../types";
-import { normaliseType } from "../normalise";
+import { createIndicatorCollector } from "../collect";
 import { safeFetch } from "@/lib/outbound-request";
 
 /**
@@ -9,14 +9,16 @@ import { safeFetch } from "@/lib/outbound-request";
 export const csvFeed: TiFeedHandler = {
   kind: "csv",
   label: "CSV / TXT feed",
-  description: "Poll a plain URL with one indicator per line (value or value,type).",
+  description:
+    "Poll a plain URL with one indicator per line (value or value,type). Only supported indicator types are ingested; other rows are skipped.",
   configFields: [
     {
       key: "default_type",
       label: "Default type",
       type: "string",
       required: false,
-      placeholder: "ip, domain, url, file_hash (blank = auto-detect)",
+      placeholder: "ip, url, file_hash, domain (blank = auto-detect)",
+      help: "Unsupported types such as CIDR ranges, CVEs and email addresses are skipped and counted in feed health.",
     },
     {
       key: "default_tags",
@@ -36,7 +38,7 @@ export const csvFeed: TiFeedHandler = {
     const res = await safeFetch(url, { signal: AbortSignal.timeout(30000) });
     if (!res.ok) throw new Error(`Feed HTTP ${res.status}`);
     const text = await res.text();
-    const out = [];
+    const collector = createIndicatorCollector();
     for (const line of text.split(/\r?\n/)) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith("#")) continue;
@@ -44,14 +46,13 @@ export const csvFeed: TiFeedHandler = {
       const parts = uncommented.split(",").map((p) => p.trim());
       const value = parts[0];
       if (!value) continue;
-      const rawType = parts[1] ?? defaultType;
-      out.push({
+      collector.add({
         value,
-        type: normaliseType(rawType, value),
+        rawType: parts[1] ?? defaultType,
         confidence: 50,
         tags: defaultTags,
       });
     }
-    return out;
+    return collector.result();
   },
 };

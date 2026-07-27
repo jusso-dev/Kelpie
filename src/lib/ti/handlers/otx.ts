@@ -1,5 +1,5 @@
 import type { TiFeedHandler } from "../types";
-import { normaliseType } from "../normalise";
+import { createIndicatorCollector } from "../collect";
 
 /** AlienVault OTX subscribed pulses. */
 export const otxFeed: TiFeedHandler = {
@@ -27,20 +27,18 @@ export const otxFeed: TiFeedHandler = {
         indicators?: Array<{ indicator?: string; type?: string }>;
       }>;
     };
-    const out = [];
+    const collector = createIndicatorCollector();
     for (const pulse of json.results ?? []) {
       for (const ind of pulse.indicators ?? []) {
-        const value = String(ind.indicator ?? "").trim();
-        if (!value) continue;
-        out.push({
-          value,
-          type: normaliseType(String(ind.type ?? ""), value),
+        collector.add({
+          value: String(ind.indicator ?? ""),
+          rawType: String(ind.type ?? ""),
           confidence: 65,
           tags: pulse.tags ?? [],
           attributes: { pulse: pulse.name },
         });
       }
     }
-    return out;
+    return collector.result();
   },
 };

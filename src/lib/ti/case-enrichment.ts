@@ -3,12 +3,12 @@ import { comments } from "@/db/schema";
 import { writeTimelineEvent } from "@/lib/timeline";
 import { newId } from "@/lib/utils";
 import { lookupIndicatorValues } from "./core";
+import { guessIndicatorType } from "./normalise";
 
 const URL_PATTERN = /https?:\/\/[^\s<>"']+/gi;
 const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const IPV4_PATTERN = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;
 const HASH_PATTERN = /\b(?:[a-f0-9]{64}|[a-f0-9]{40}|[a-f0-9]{32})\b/gi;
-const CVE_PATTERN = /\bCVE-\d{4}-\d{4,}\b/gi;
 const DOMAIN_PATTERN =
   /\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\b/gi;
 const MAX_VALUES = 50;
@@ -38,17 +38,18 @@ export function extractCaseIndicators(title: string, summary?: string | null): s
       // Regex is permissive; malformed URLs are ignored after exact-value lookup.
     }
   }
-  for (const value of emails) values.add(value);
+  // emails themselves are not TI indicators; the pattern is only used below
+  // to exclude an email's own domain part from the domain matches.
   for (const value of text.match(IPV4_PATTERN) ?? []) {
     if (validIpv4(value)) values.add(value);
   }
   for (const value of text.match(HASH_PATTERN) ?? []) values.add(value.toLowerCase());
-  for (const value of text.match(CVE_PATTERN) ?? []) values.add(value.toUpperCase());
   for (const value of text.match(DOMAIN_PATTERN) ?? []) {
     const lower = value.toLowerCase();
     if (!emails.some((email) => email.endsWith(`@${lower}`))) values.add(lower);
   }
-  return [...values].slice(0, MAX_VALUES);
+  // Only the four supported indicator types are ever checked against the TI store.
+  return [...values].filter((value) => guessIndicatorType(value) !== null).slice(0, MAX_VALUES);
 }
 
 function buildComment(

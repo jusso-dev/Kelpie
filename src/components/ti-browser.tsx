@@ -8,10 +8,11 @@ import {
   type IndicatorSearchRow,
 } from "@/actions/ti";
 import { feedbackError } from "@/components/confirm-dialog";
+import { TI_INDICATOR_TYPES } from "@/lib/ti/indicator-types";
 
 type Detail = Awaited<ReturnType<typeof indicatorDetail>>;
 
-const TYPES = ["", "ip", "domain", "url", "file_hash", "email", "other"];
+const TYPES = ["", ...TI_INDICATOR_TYPES];
 const CONFIDENCE_THRESHOLDS = ["", "25", "50", "75", "90"] as const;
 
 export default function TiBrowser({
