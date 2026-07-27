@@ -945,6 +945,50 @@ export const caseSources = pgTable(
 );
 
 /* ────────────────────────────────────────────────────────────────────────── */
+/* Inbound push source delivery health                                        */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Delivery health for push producers (such as Tawny) that create cases through
+ * `POST /api/v1/cases`. Polled connectors keep the equivalent state on their
+ * own `case_sources` row; push producers have no such row, so health is tracked
+ * per (organisation, source system).
+ */
+export const inboundSourceStatus = pgTable(
+  "inbound_source_status",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    sourceSystem: text("source_system").notNull(),
+    lastDeliveryAt: timestamp("last_delivery_at", { withTimezone: true }),
+    lastCaseCreatedAt: timestamp("last_case_created_at", {
+      withTimezone: true,
+    }),
+    lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+    lastErrorMessage: text("last_error_message"),
+    lastErrorStatus: integer("last_error_status"),
+    deliveryCount: integer("delivery_count").notNull().default(0),
+    createdCaseCount: integer("created_case_count").notNull().default(0),
+    duplicateCount: integer("duplicate_count").notNull().default(0),
+    errorCount: integer("error_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("inbound_source_status_org_system_idx").on(
+      t.organisationId,
+      t.sourceSystem,
+    ),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
 /* Vendor news watchlist                                                      */
 /* ────────────────────────────────────────────────────────────────────────── */
 
@@ -1099,6 +1143,7 @@ export type ResponseActionRun = typeof responseActionRuns.$inferSelect;
 export type TiFeed = typeof tiFeeds.$inferSelect;
 export type TiIndicator = typeof tiIndicators.$inferSelect;
 export type CaseSource = typeof caseSources.$inferSelect;
+export type InboundSourceStatus = typeof inboundSourceStatus.$inferSelect;
 export type VendorWatch = typeof vendorWatchlist.$inferSelect;
 export type CustomFieldDefinition = typeof customFieldDefinitions.$inferSelect;
 export type CustomFieldValue = typeof customFieldValues.$inferSelect;

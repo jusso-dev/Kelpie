@@ -1,7 +1,14 @@
 import Link from "next/link";
 import { db } from "@/db";
-import { caseSources, responseActions, tiFeeds, webhooks } from "@/db/schema";
-import { desc, eq } from "drizzle-orm";
+import {
+  caseSources,
+  cases,
+  inboundSourceStatus,
+  responseActions,
+  tiFeeds,
+  webhooks,
+} from "@/db/schema";
+import { and, count, desc, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/session";
 import { availableActionKinds } from "@/actions/response-actions";
 import ResponseActionSettings from "@/components/response-action-settings";
@@ -9,14 +16,24 @@ import CaseSourceSettings from "@/components/case-source-settings";
 import AutomationSchedules from "@/components/automation-schedules";
 import VirusTotalSettings from "@/components/virustotal-settings";
 import WebhookSettings from "@/components/webhook-settings";
+import TawnySettings from "@/components/tawny-settings";
 import { getVirusTotalConfiguration } from "@/lib/enrichment/providers/virustotal";
+import { TAWNY_SOURCE_SYSTEM } from "@/lib/case-source-identity";
 import { Globe2 } from "lucide-react";
 
 export default async function IntegrationsSettingsPage() {
   const user = await requireUser();
   const isAdmin = user.role === "admin";
-  const [sources, feeds, actions, actionKinds, webhookRows, virusTotal] =
-    await Promise.all([
+  const [
+    sources,
+    feeds,
+    actions,
+    actionKinds,
+    webhookRows,
+    virusTotal,
+    tawnyStatusRows,
+    tawnyCaseCountRows,
+  ] = await Promise.all([
     db
       .select({
         id: caseSources.id,
@@ -55,7 +72,37 @@ export default async function IntegrationsSettingsPage() {
       .where(eq(webhooks.organisationId, user.organisationId))
       .orderBy(desc(webhooks.createdAt)),
     getVirusTotalConfiguration(user.organisationId),
+    db
+      .select()
+      .from(inboundSourceStatus)
+      .where(
+        and(
+          eq(inboundSourceStatus.organisationId, user.organisationId),
+          eq(inboundSourceStatus.sourceSystem, TAWNY_SOURCE_SYSTEM),
+        ),
+      )
+      .limit(1),
+    db
+      .select({ total: count() })
+      .from(cases)
+      .where(
+        and(
+          eq(cases.organisationId, user.organisationId),
+          eq(cases.sourceSystem, TAWNY_SOURCE_SYSTEM),
+        ),
+      ),
   ]);
+  const tawnyStatus = tawnyStatusRows[0] ?? null;
+  const tawnyImportedCaseCount = Number(tawnyCaseCountRows[0]?.total ?? 0);
+  // No dedicated absolute-URL helper exists in the repo (grepped for
+  // `x-forwarded-proto` / `absoluteUrl`); other server code builds links from
+  // `process.env.APP_URL` (see src/lib/webhooks.ts, src/lib/sso/config.ts), so
+  // the Tawny endpoint follows the same established pattern.
+  const appOrigin = (process.env.APP_URL ?? "http://localhost:3000").replace(
+    /\/$/,
+    "",
+  );
+  const tawnyEndpoint = `${appOrigin}/api/v1/cases`;
 
   return (
     <div className="kelpie-page max-w-6xl">
@@ -82,6 +129,37 @@ export default async function IntegrationsSettingsPage() {
             ...source,
             lastPolledAt: source.lastPolledAt?.toISOString() ?? null,
           }))}
+          isAdmin={isAdmin}
+        />
+      </section>
+
+      <section className="kelpie-section">
+        <div className="kelpie-section-header">
+          <h2>Tawny</h2>
+          <p>
+            Tawny pushes alerts to Kelpie as cases rather than being polled.
+            Give it a <code className="text-xs">cases:write</code>-scoped
+            token and the endpoint below.
+          </p>
+        </div>
+        <TawnySettings
+          endpoint={tawnyEndpoint}
+          status={
+            tawnyStatus
+              ? {
+                  lastDeliveryAt: tawnyStatus.lastDeliveryAt,
+                  lastCaseCreatedAt: tawnyStatus.lastCaseCreatedAt,
+                  lastErrorAt: tawnyStatus.lastErrorAt,
+                  lastErrorMessage: tawnyStatus.lastErrorMessage,
+                  lastErrorStatus: tawnyStatus.lastErrorStatus,
+                  deliveryCount: tawnyStatus.deliveryCount,
+                  createdCaseCount: tawnyStatus.createdCaseCount,
+                  duplicateCount: tawnyStatus.duplicateCount,
+                  errorCount: tawnyStatus.errorCount,
+                }
+              : null
+          }
+          importedCaseCount={tawnyImportedCaseCount}
           isAdmin={isAdmin}
         />
       </section>

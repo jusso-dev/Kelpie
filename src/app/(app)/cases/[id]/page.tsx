@@ -25,6 +25,8 @@ import {
 } from "@/lib/response-actions/core";
 import { format } from "date-fns";
 import CaseSummaryEditor from "@/components/case-summary-editor";
+import { sourceSystemLabel } from "@/lib/case-source-identity";
+import { safeExternalUrl } from "@/lib/safe-url";
 
 type Props = { params: Promise<{ id: string }> };
 
@@ -73,23 +75,32 @@ export default async function CaseOverviewPage({ params }: Props) {
     listCaseResponseActionRuns(user.organisationId, c.id),
   ]);
   const canEdit = user.role === "admin" || user.role === "analyst";
+  const sourceLabel = sourceSystemLabel(c.sourceSystem);
+  // Re-validated at render time: a legacy row or a bypass of the public API's
+  // ingest validation could still hold a non-http(s) `source_url`.
+  const sourceHref = safeExternalUrl(c.sourceUrl);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
       <div className="md:col-span-2 space-y-4">
-        {c.sourceSystem ? (
+        {sourceLabel ? (
           <div className="kelpie-notice kelpie-notice-block">
-            Imported from{" "}
-            {c.sourceSystem?.startsWith("microsoft_defender_xdr:")
-              ? "Microsoft Defender XDR"
-              : "Microsoft Sentinel"}
-            {c.sourceUrl ? (
+            Imported from {sourceLabel}
+            {c.sourceReference ? (
+              <>
+                {" · Reference "}
+                <span className="font-mono text-xs text-slate-400">
+                  {c.sourceReference}
+                </span>
+              </>
+            ) : null}
+            {sourceHref ? (
               <>
                 {" · "}
                 <a
-                  href={c.sourceUrl}
+                  href={sourceHref}
                   target="_blank"
-                  rel="noreferrer"
+                  rel="noopener noreferrer"
                   className="kelpie-link"
                 >
                   View source incident

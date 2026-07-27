@@ -163,6 +163,7 @@ export async function createCaseCore(
       severity: input.severity ?? "medium",
       source_system: input.sourceSystem ?? null,
       source_reference: input.sourceReference ?? null,
+      source_url: input.sourceUrl ?? null,
     },
   });
   await enrichNewCaseWithThreatIntel({

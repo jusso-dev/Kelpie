@@ -6,6 +6,7 @@ import {
   desc,
   eq,
   ilike,
+  isNotNull,
   isNull,
   or,
   sql,
@@ -21,6 +22,10 @@ import {
   TagBadge,
   TlpBadge,
 } from "@/components/badges";
+import {
+  KNOWN_PUSH_SOURCE_SYSTEMS,
+  sourceSystemLabel,
+} from "@/lib/case-source-identity";
 
 const PAGE_SIZE = 50;
 const STATUSES = [
@@ -46,6 +51,7 @@ const SORTS = ["priority", "recent", "oldest", "severity"] as const;
 
 type RawSearchParams = Promise<Record<string, string | string[] | undefined>>;
 type TeamMember = { id: string; name: string };
+type SourceOption = { value: string; label: string };
 type QueueParams = {
   q?: string;
   status?: (typeof STATUSES)[number];
@@ -55,10 +61,16 @@ type QueueParams = {
   assignee?: string;
   tag?: string;
   dataTag?: string;
+  source?: string;
   sla?: "risk";
   sort: (typeof SORTS)[number];
   page: number;
 };
+
+// Bare push-producer slugs (e.g. `tawny`) and managed-connector namespaces
+// (e.g. `microsoft_sentinel:src_123`) are both valid; the colon is required
+// so connector rows stay filterable by their exact source.
+const SOURCE_PATTERN = /^[a-z0-9][a-z0-9_:-]*$/;
 
 function first(raw: string | string[] | undefined): string | undefined {
   return Array.isArray(raw) ? raw[0] : raw;
@@ -76,6 +88,11 @@ function pick<const T extends readonly string[]>(
 function cleanText(raw: string | undefined, max: number): string | undefined {
   const value = raw?.trim().slice(0, max);
   return value || undefined;
+}
+
+function normaliseSource(raw: string | undefined): string | undefined {
+  const value = raw?.trim().toLowerCase().slice(0, 64);
+  return value && SOURCE_PATTERN.test(value) ? value : undefined;
 }
 
 function normaliseParams(
@@ -99,6 +116,7 @@ function normaliseParams(
     assignee,
     tag: cleanText(first(raw.tag), 60),
     dataTag: cleanText(first(raw.dataTag), 60),
+    source: normaliseSource(first(raw.source)),
     sla: first(raw.sla) === "risk" ? "risk" : undefined,
     sort: pick(SORTS, first(raw.sort)) ?? "priority",
     page:
@@ -129,15 +147,39 @@ export default async function CasesPage({
   searchParams: RawSearchParams;
 }) {
   const user = await requireUser();
-  const [rawParams, team] = await Promise.all([
+  const [rawParams, team, sourceSystemRows] = await Promise.all([
     searchParams,
     db
       .select({ id: users.id, name: users.name })
       .from(users)
       .where(eq(users.organisationId, user.organisationId))
       .orderBy(asc(users.name)),
+    db
+      .selectDistinct({ sourceSystem: cases.sourceSystem })
+      .from(cases)
+      .where(
+        and(
+          eq(cases.organisationId, user.organisationId),
+          isNotNull(cases.sourceSystem),
+        ),
+      )
+      .orderBy(asc(cases.sourceSystem))
+      .limit(50),
   ]);
   const params = normaliseParams(rawParams, team);
+  // Known push producers (e.g. Tawny) are always offered even if this org has
+  // no cases yet; managed connectors are only offered once observed, since
+  // their identifiers are per-org connection ids.
+  const sourceSystemOptions: SourceOption[] = Array.from(
+    new Set([
+      ...KNOWN_PUSH_SOURCE_SYSTEMS,
+      ...sourceSystemRows
+        .map((row) => row.sourceSystem)
+        .filter((value): value is string => Boolean(value)),
+    ]),
+  )
+    .map((value) => ({ value, label: sourceSystemLabel(value) ?? value }))
+    .sort((a, b) => a.label.localeCompare(b.label));
   const filters = [eq(cases.organisationId, user.organisationId)];
 
   if (params.q) {
@@ -165,6 +207,7 @@ export default async function CasesPage({
   if (params.dataTag) {
     filters.push(sql`${cases.dataClassificationTags} ? ${params.dataTag}`);
   }
+  if (params.source) filters.push(eq(cases.sourceSystem, params.source));
 
   const slaRisk = sql<boolean>`(
     ${cases.status} <> 'closed'
@@ -237,6 +280,9 @@ export default async function CasesPage({
     .limit(PAGE_SIZE)
     .offset((page - 1) * PAGE_SIZE);
 
+  // Counts truthy filters for the "Clear N" affordance; the human-readable
+  // form of each value (e.g. "Source: Tawny") is what the corresponding
+  // <SelectFilter> shows as its selected option, via sourceSystemLabel.
   const activeFilters = [
     params.q,
     params.status,
@@ -246,6 +292,7 @@ export default async function CasesPage({
     params.assignee,
     params.tag,
     params.dataTag,
+    params.source,
     params.sla,
   ].filter(Boolean).length;
   const firstResult = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
@@ -281,7 +328,12 @@ export default async function CasesPage({
         </div>
       </header>
 
-      <QueueFilters params={params} team={team} activeFilters={activeFilters} />
+      <QueueFilters
+        params={params}
+        team={team}
+        sourceOptions={sourceSystemOptions}
+        activeFilters={activeFilters}
+      />
 
       <div className="flex flex-col gap-2 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between">
         <p aria-live="polite">
@@ -398,10 +450,12 @@ export default async function CasesPage({
 function QueueFilters({
   params,
   team,
+  sourceOptions,
   activeFilters,
 }: {
   params: QueueParams;
   team: TeamMember[];
+  sourceOptions: SourceOption[];
   activeFilters: number;
 }) {
   return (
@@ -470,6 +524,12 @@ function QueueFilters({
           <option value="unassigned">Unassigned</option>
           {team.map((member) => (
             <option key={member.id} value={member.id}>{member.name}</option>
+          ))}
+        </SelectFilter>
+        <SelectFilter label="Source" name="source" value={params.source}>
+          <option value="">All sources</option>
+          {sourceOptions.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
           ))}
         </SelectFilter>
         <SelectFilter label="SLA" name="sla" value={params.sla}>
