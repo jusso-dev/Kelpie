@@ -23,7 +23,7 @@ Errors return `{ "error": "..." }` with an appropriate HTTP status (`400` invali
 ## Cases
 
 ### `GET /api/v1/cases`
-Optional query: `status`, `severity`, `classification`, `tlp`, `assignee`, `openedSince`, `limit`. `status=active` returns every status except `closed`.
+Optional query: `status`, `severity`, `classification`, `tlp`, `assignee`, `openedSince`, `limit`, `source`. `status=active` returns every status except `closed`. `source` filters on the exact `source_system` value (e.g. `?source=tawny`) — it is an equality match, not a prefix or substring search.
 
 ### `POST /api/v1/cases`
 ```json
@@ -36,6 +36,51 @@ Optional query: `status`, `severity`, `classification`, `tlp`, `assignee`, `open
 }
 ```
 Returns `201 { "id": "case_...", "caseNumber": "KP-2026-0042" }`.
+
+Organisation is always derived from the bearer token; it can never be supplied in the request body.
+
+#### Source-tracked cases (push producers)
+
+Three optional fields let an external push producer — such as Tawny; see the [Tawny integration guide](./integrations/tawny.md) — attach provenance to a case it creates, and get safe-to-retry delivery for free:
+
+| Field | Type | Rules |
+| --- | --- | --- |
+| `sourceSystem` | string | 1–64 chars, lowercase slug matching `^[a-z0-9][a-z0-9_-]*$`. Reserved managed-connector namespaces (`microsoft_sentinel`, `microsoft_defender_xdr`) are rejected — those are owned by Kelpie's own pollers and always identify themselves as `<kind>:<id>`, which contains a colon and can never collide with a push producer's bare slug. |
+| `sourceReference` | string | 1–200 chars. The producer's stable alert/incident ID. Requires `sourceSystem` to also be present in the same request — sending `sourceReference` alone returns `400`. |
+| `sourceUrl` | string | ≤2048 chars. Must use the `http:` or `https:` scheme only; URLs carrying embedded credentials (`https://user:pass@host`) are rejected. Stored in normalised form. |
+
+**Idempotency.** When both `sourceSystem` and `sourceReference` are present, `(organisation, sourceSystem, sourceReference)` is enforced as unique by a partial unique index, so retried or concurrently delivered payloads for the same source reference converge on a single case rather than creating duplicates:
+
+- First delivery for a given `(sourceSystem, sourceReference)` → **`201`** with `"created": true`.
+- Any later delivery for the same `(sourceSystem, sourceReference)` in the same organisation → **`200`** with `"created": false`, returning the existing case's `id` and `caseNumber` unchanged.
+- Two deliveries racing at the same instant resolve safely to one case: whichever write loses the database conflict is read back as the existing row and answered with `200`, so no duplicate case is ever created.
+- The same `sourceReference` may exist independently in different organisations without colliding — the uniqueness is scoped per organisation, not global.
+- `sourceSystem` without `sourceReference` is accepted: the case records provenance, but there is no idempotency key, so repeated deliveries that omit `sourceReference` each create a new case.
+- Invalid or oversized source metadata returns `400 { "error": "Invalid payload", "details": { ... } }` (common causes: a reserved `sourceSystem`, `sourceReference` sent without `sourceSystem`, or a `sourceUrl` that is not `http(s)` or exceeds 2048 characters).
+
+Example request carrying source fields:
+```json
+{
+  "title": "Phishing wave against finance team",
+  "summary": "Lure with fake DocuSign link",
+  "severity": "high",
+  "classification": "phishing",
+  "tlp": "amber",
+  "sourceSystem": "tawny",
+  "sourceReference": "alert_9f2c1e",
+  "sourceUrl": "https://tawny.example.com/alerts/9f2c1e"
+}
+```
+
+First delivery — `201`:
+```json
+{ "id": "case_8k2n4qz", "caseNumber": "KP-2026-0042", "created": true }
+```
+
+Replay of the same `sourceSystem`/`sourceReference` — `200`:
+```json
+{ "id": "case_8k2n4qz", "caseNumber": "KP-2026-0042", "created": false }
+```
 
 ### `GET /api/v1/cases/{id}`
 Full case with embedded `observables`, `tasks`, and a `recent_timeline` slice (50 most recent events).
