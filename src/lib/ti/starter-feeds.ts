@@ -2,17 +2,27 @@ import { db } from "@/db";
 import { tiFeeds } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { newId } from "@/lib/utils";
+import type { TiIndicatorType } from "./indicator-types";
+
+export type StarterTiFeedConfig = {
+  default_type?: TiIndicatorType;
+  default_tags?: string;
+};
 
 export type StarterTiFeed = {
   name: string;
   kind: string;
   url: string;
-  config: Record<string, string>;
+  config: StarterTiFeedConfig;
   pollIntervalMinutes: number;
   isActive: boolean;
 };
 
 // Kept in step with the public starter sources used by jusso-dev/Tawny-SOC.
+// Only feeds whose records resolve to a supported indicator type (`ip`,
+// `url`, `file_hash`, `domain`) are shipped as starters. CISA KEV (CVE
+// records) and Spamhaus DROP (CIDR ranges) were removed rather than
+// relabelled, per the strict threat-intelligence contract.
 export const STARTER_TI_FEEDS: readonly StarterTiFeed[] = [
   {
     name: "Feodo Tracker Botnet C2 IPs",
@@ -20,22 +30,6 @@ export const STARTER_TI_FEEDS: readonly StarterTiFeed[] = [
     url: "https://feodotracker.abuse.ch/downloads/ipblocklist_recommended.txt",
     config: { default_type: "ip", default_tags: "botnet-c2,osint" },
     pollIntervalMinutes: 60,
-    isActive: true,
-  },
-  {
-    name: "Spamhaus DROP Rogue Networks",
-    kind: "csv",
-    url: "https://www.spamhaus.org/drop/drop.txt",
-    config: { default_type: "cidr", default_tags: "rogue-network,osint" },
-    pollIntervalMinutes: 360,
-    isActive: true,
-  },
-  {
-    name: "CISA Known Exploited Vulnerabilities",
-    kind: "cisa_kev",
-    url: "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
-    config: {},
-    pollIntervalMinutes: 360,
     isActive: true,
   },
   {

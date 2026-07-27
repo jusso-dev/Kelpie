@@ -162,9 +162,12 @@ New action handlers implement `ActionHandler` in `src/lib/response-actions/handl
 
 A small TI store answers "is this IOC known bad?" as a sub-second indexed lookup.
 
-- **Feeds** (generic CSV/TXT URL, MISP via API, OTX via API) are configured under the **Threat intel** page. Each feed has an administrator-controlled BullMQ schedule, tracks last-poll status and indicator count, and retries transient failures.
+Kelpie threat intelligence covers actionable network and file indicators only: `ip`, `url`, `file_hash`, and `domain`. Vulnerability catalogues (CVE), network ranges (CIDR), email addresses, and any other shape are rejected — never silently coerced — at ingestion, and are unrepresentable in the database via a `CHECK` constraint. Feed health reports how many records were skipped and why (`cidr`, `cve`, `email`, `unrecognised`, `invalid_value`).
+
+- **Feeds** (generic CSV/TXT URL, MISP via API, OTX via API) are configured under the **Threat intel** page. Each feed has an administrator-controlled BullMQ schedule, tracks last-poll status, indicator count, and last-run ingested/skipped counts, and retries transient failures.
 - **Automatic matching**: when an observable is created, Kelpie runs an indexed TI lookup and attaches matches to the observable's `enrichment.ti` immediately. The `ti` provider is also part of the enrichment registry, so later passes refresh it alongside reverse DNS, VirusTotal, etc.
-- **Browse / search** the store from the **Threat intel** page: filter by value, type, feed, or tag. Each indicator's detail shows the feeds it came from (with confidence) and the cases it has appeared on.
+- **Browse / search** the store from the **Threat intel** page: filter by value, type (`ip`, `url`, `file_hash`, `domain`), feed, or tag. Each indicator's detail shows the feeds it came from (with confidence) and the cases it has appeared on.
+- **Automated case enrichment** only extracts and checks values shaped like the four supported types from a case title/summary; CVE references and email addresses are ignored entirely and never reach the TI store.
 
 Administrators connect and test VirusTotal under **Settings → Integrations →
 Observable enrichment**. Kelpie checks IP, domain, URL, and file-hash

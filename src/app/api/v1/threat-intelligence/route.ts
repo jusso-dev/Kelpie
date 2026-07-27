@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
 import { queryThreatIntelligence } from "@/lib/machine-data";
+import { isTiIndicatorType, TI_INDICATOR_TYPES } from "@/lib/ti/indicator-types";
 
 export const dynamic = "force-dynamic";
 
@@ -31,10 +32,17 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
   const params = new URL(req.url).searchParams;
+  const type = params.get("type")?.trim() || undefined;
+  if (type !== undefined && !isTiIndicatorType(type)) {
+    return NextResponse.json(
+      { error: "Unsupported indicator type", supportedTypes: [...TI_INDICATOR_TYPES] },
+      { status: 400 },
+    );
+  }
   const data = await queryThreatIntelligence(auth.token.organisationId, {
     value: params.get("value")?.trim() || undefined,
     exact: params.get("exact") === "true",
-    type: params.get("type")?.trim() || undefined,
+    type,
     feedId: params.get("feedId")?.trim() || undefined,
     tag: params.get("tag")?.trim() || undefined,
     minConfidence: boundedInteger(params.get("minConfidence"), 0, 100),

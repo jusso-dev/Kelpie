@@ -121,6 +121,14 @@ Cross-case search. With `exact=true` does an equality match; otherwise substring
 Returns matching indicators plus feed state. Optional query: `value`, `exact`,
 `type`, `feedId`, `tag`, and `limit` (maximum 500).
 
+`type` must be one of `ip`, `url`, `file_hash`, `domain` — Kelpie threat
+intelligence covers actionable network and file indicators only. CVE and
+vulnerability data are out of scope; an unsupported `type` value returns
+`400` with the supported list. Feed state includes each feed's last-run
+ingested/skipped counts and a skip-reason breakdown (`cidr`, `cve`, `email`,
+`unrecognised`, `invalid_value`) so unsupported records are visible rather
+than silently dropped.
+
 ## Threat landscape
 
 ### `GET /api/v1/threat-landscape`

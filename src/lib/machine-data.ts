@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, ilike, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   tiFeeds,
@@ -7,6 +7,11 @@ import {
 } from "@/db/schema";
 import { getCyberNews } from "@/lib/cyber-news";
 import {
+  TI_INDICATOR_TYPES,
+  toSkipCounts,
+  type TiIndicatorType,
+} from "@/lib/ti/indicator-types";
+import {
   matchingVendors,
   type WatchedVendor,
 } from "@/lib/vendor-news";
@@ -14,7 +19,7 @@ import {
 export type ThreatIntelQuery = {
   value?: string;
   exact?: boolean;
-  type?: string;
+  type?: TiIndicatorType;
   feedId?: string;
   tag?: string;
   minConfidence?: number;
@@ -26,7 +31,12 @@ export async function queryThreatIntelligence(
   organisationId: string,
   query: ThreatIntelQuery,
 ) {
-  const filters = [eq(tiIndicators.organisationId, organisationId)];
+  // Defence in depth: exclude any legacy/unmigrated rows outside the allowlist
+  // even if they somehow still exist in the database.
+  const filters = [
+    eq(tiIndicators.organisationId, organisationId),
+    inArray(tiIndicators.type, [...TI_INDICATOR_TYPES]),
+  ];
   if (query.value) {
     filters.push(
       query.exact
@@ -79,6 +89,9 @@ export async function queryThreatIntelligence(
         indicatorCount: tiFeeds.indicatorCount,
         lastPolledAt: tiFeeds.lastPolledAt,
         lastError: tiFeeds.lastError,
+        lastRunIngestedCount: tiFeeds.lastRunIngestedCount,
+        lastRunSkippedCount: tiFeeds.lastRunSkippedCount,
+        lastRunSkippedByType: tiFeeds.lastRunSkippedByType,
       })
       .from(tiFeeds)
       .where(eq(tiFeeds.organisationId, organisationId))
@@ -99,6 +112,9 @@ export async function queryThreatIntelligence(
     feeds: feeds.map((feed) => ({
       ...feed,
       lastPolledAt: feed.lastPolledAt?.toISOString() ?? null,
+      // Untrusted jsonb column, narrowed to a safe numeric tally before it
+      // reaches API/MCP consumers.
+      lastRunSkippedByType: toSkipCounts(feed.lastRunSkippedByType),
     })),
     count: indicators.length,
     total,

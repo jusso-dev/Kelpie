@@ -16,6 +16,7 @@ import {
   setFeedActive,
   updateFeed,
 } from "@/actions/ti";
+import { formatSkipCounts } from "@/lib/ti/indicator-types";
 
 type ConfigField = {
   key: string;
@@ -42,6 +43,9 @@ type FeedRow = {
   lastPolledAt: string | null;
   lastError: string | null;
   indicatorCount: number;
+  lastRunIngestedCount: number;
+  lastRunSkippedCount: number;
+  lastRunSkippedByType: Record<string, number>;
   pollIntervalMinutes: number;
   config: Record<string, string>;
 };
@@ -215,6 +219,12 @@ export default function TiFeedSettings({
                     ? new Date(feed.lastPolledAt).toLocaleString()
                     : "never"}
                 </p>
+                {feed.lastRunSkippedCount > 0 ? (
+                  <p className="mt-1 text-xs text-slate-500">
+                    {feed.lastRunSkippedCount.toLocaleString()} skipped last run (
+                    {formatSkipCounts(feed.lastRunSkippedByType)})
+                  </p>
+                ) : null}
               </div>
               {canManage ? (
                 <details className="relative justify-self-start lg:justify-self-end">
@@ -239,8 +249,11 @@ export default function TiFeedSettings({
                               description: result.error,
                             });
                           } else {
+                            const breakdown = formatSkipCounts(
+                              result.skippedByType,
+                            );
                             toast.success("Feed poll completed", {
-                              description: `${result.ingested} indicator${result.ingested === 1 ? "" : "s"} ingested from ${feed.name}.${result.skipped > 0 ? ` ${result.skipped} oversized or empty ${result.skipped === 1 ? "entry was" : "entries were"} skipped.` : ""}`,
+                              description: `${result.ingested} indicator${result.ingested === 1 ? "" : "s"} ingested from ${feed.name}.${result.skipped > 0 ? ` ${result.skipped} ${result.skipped === 1 ? "entry was" : "entries were"} skipped (unsupported type, empty, or oversized).${breakdown ? ` (${breakdown})` : ""}` : ""}`,
                             });
                           }
                         })

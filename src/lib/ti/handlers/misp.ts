@@ -1,5 +1,5 @@
 import type { TiFeedHandler } from "../types";
-import { normaliseType } from "../normalise";
+import { createIndicatorCollector } from "../collect";
 import { safeFetch } from "@/lib/outbound-request";
 
 /** MISP attribute search via the REST API. */
@@ -38,24 +38,21 @@ export const mispFeed: TiFeedHandler = {
       response?: { Attribute?: Array<Record<string, unknown>> };
     };
     const attrs = json.response?.Attribute ?? [];
-    return attrs
-      .map((a) => {
-        const value = String(a.value ?? "").trim();
-        if (!value) return null;
-        const type = normaliseType(String(a.type ?? ""), value);
-        const tags = Array.isArray(a.Tag)
-          ? (a.Tag as Array<{ name?: string }>)
-              .map((t) => t.name)
-              .filter((n): n is string => Boolean(n))
-          : [];
-        return {
-          value,
-          type,
-          confidence: 70,
-          tags,
-          attributes: { category: a.category, event_id: a.event_id },
-        };
-      })
-      .filter((x): x is NonNullable<typeof x> => x !== null);
+    const collector = createIndicatorCollector();
+    for (const a of attrs) {
+      const tags = Array.isArray(a.Tag)
+        ? (a.Tag as Array<{ name?: string }>)
+            .map((t) => t.name)
+            .filter((n): n is string => Boolean(n))
+        : [];
+      collector.add({
+        value: String(a.value ?? ""),
+        rawType: String(a.type ?? ""),
+        confidence: 70,
+        tags,
+        attributes: { category: a.category, event_id: a.event_id },
+      });
+    }
+    return collector.result();
   },
 };

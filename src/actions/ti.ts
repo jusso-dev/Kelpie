@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { tiFeeds } from "@/db/schema";
-import { and, eq, gte } from "drizzle-orm";
+import { and, eq, gte, inArray } from "drizzle-orm";
 import { tiIndicators } from "@/db/schema";
 import { ilike, sql } from "drizzle-orm";
 import { requireRole, requireUser } from "@/lib/session";
@@ -17,6 +17,11 @@ import {
   pollFeed,
 } from "@/lib/ti/core";
 import { seedStarterThreatFeeds } from "@/lib/ti/starter-feeds";
+import {
+  TI_INDICATOR_TYPES,
+  parseTiIndicatorType,
+  type TiSkipCounts,
+} from "@/lib/ti/indicator-types";
 
 const FEED_MANAGER_ROLES = ["admin", "analyst"] as const;
 
@@ -183,6 +188,7 @@ export async function deleteFeed(id: string) {
 export async function pollFeedNow(id: string): Promise<{
   ingested: number;
   skipped: number;
+  skippedByType: TiSkipCounts;
   error: string | null;
 }> {
   const user = await requireRole([...FEED_MANAGER_ROLES]);
@@ -236,9 +242,15 @@ export async function searchIndicators(opts: {
 }): Promise<IndicatorSearchResult> {
   const user = await requireUser();
   const pageSize = 50;
-  const filters = [eq(tiIndicators.organisationId, user.organisationId)];
+  const filters = [
+    eq(tiIndicators.organisationId, user.organisationId),
+    // Defence in depth: legacy rows outside the supported contract must
+    // never surface even if a migration hasn't retired them yet.
+    inArray(tiIndicators.type, [...TI_INDICATOR_TYPES]),
+  ];
   if (opts.q?.trim()) filters.push(ilike(tiIndicators.value, `%${opts.q.trim()}%`));
-  if (opts.type?.trim()) filters.push(eq(tiIndicators.type, opts.type.trim()));
+  const requestedType = parseTiIndicatorType(opts.type);
+  if (requestedType) filters.push(eq(tiIndicators.type, requestedType));
   if (opts.feedId?.trim()) filters.push(eq(tiIndicators.feedId, opts.feedId.trim()));
   if (opts.tag?.trim()) {
     filters.push(sql`${tiIndicators.tags} ? ${opts.tag.trim()}`);

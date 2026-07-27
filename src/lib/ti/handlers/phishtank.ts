@@ -1,4 +1,5 @@
 import type { TiFeedHandler } from "../types";
+import { createIndicatorCollector } from "../collect";
 import { safeFetch } from "@/lib/outbound-request";
 
 function firstCsvField(line: string): string {
@@ -29,19 +30,27 @@ export const phishTankFeed: TiFeedHandler = {
     }
     if (!res.ok) throw new Error(`Feed HTTP ${res.status}`);
     const lines = (await res.text()).split(/\r?\n/).filter(Boolean);
-    if (lines.length === 0) return [];
+    const collector = createIndicatorCollector();
+    if (lines.length === 0) return collector.result();
     const headers = lines[0].split(",").map((field) => field.replaceAll('"', "").trim());
     const urlIndex = headers.indexOf("url");
     if (urlIndex < 0) throw new Error("PhishTank CSV has no URL column");
 
-    return lines.slice(1).flatMap((line) => {
+    for (const line of lines.slice(1)) {
       // The public feed currently places URL second. Parse the common fast path,
       // while retaining quoted URL support.
       const remainder = line.slice(line.indexOf(",") + 1);
       const value = urlIndex === 0 ? firstCsvField(line) : firstCsvField(remainder);
-      return value
-        ? [{ value, type: "url", confidence: 80, tags: ["phishing", "phishtank", "osint"] }]
-        : [];
-    });
+      if (!value) continue;
+      // Still routed through the collector so a non-URL row is skipped and
+      // counted rather than force-labelled `url`.
+      collector.add({
+        value,
+        rawType: "url",
+        confidence: 80,
+        tags: ["phishing", "phishtank", "osint"],
+      });
+    }
+    return collector.result();
   },
 };
