@@ -1,6 +1,6 @@
 # Kelpie
 
-<img src="public/brand/kelpie-logo.png" alt="Kelpie logo" width="360" />
+<img src="public/brand/kelpie-readme-banner.png" alt="Kelpie — Incidents. Managed. Closed." />
 
 Incident response and case management for small SOC teams. Open source, self-hosted.
 
