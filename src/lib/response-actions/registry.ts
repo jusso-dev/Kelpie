@@ -2,11 +2,13 @@ import type { ActionHandler } from "./types";
 import { cloudflareBlockIp } from "./handlers/cloudflare-block-ip";
 import { entraDisableUser } from "./handlers/entra-disable-user";
 import { crowdstrikeIsolateHost } from "./handlers/crowdstrike-isolate-host";
+import { defenderIsolateDevice } from "./handlers/defender-isolate-device";
 
 const HANDLERS: ActionHandler[] = [
   cloudflareBlockIp,
   entraDisableUser,
   crowdstrikeIsolateHost,
+  defenderIsolateDevice,
 ];
 
 export function listActionHandlers(): ActionHandler[] {

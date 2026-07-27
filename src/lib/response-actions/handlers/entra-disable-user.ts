@@ -41,6 +41,7 @@ export const entraDisableUser: ActionHandler = {
   label: "Disable user in Microsoft Entra",
   description:
     "Set accountEnabled=false for a compromised account via Microsoft Graph.",
+  approvalRequired: true,
   requiresObservableTypes: ["username", "email"],
   configFields: [
     { key: "tenant_id", label: "Tenant ID", type: "string", required: true },
@@ -67,6 +68,9 @@ export const entraDisableUser: ActionHandler = {
   validate(input) {
     if (!input.user?.trim()) return "A user is required";
     return null;
+  },
+  target(input) {
+    return input.user?.trim() || null;
   },
   async execute(ctx) {
     const tenant = String(ctx.config.tenant_id ?? "").trim();
@@ -133,6 +137,7 @@ export const entraDisableUser: ActionHandler = {
       target: user,
       summary: `Disabled ${user} in Entra (previous accountEnabled=${previousEnabled})`,
       data: { userId: readJson.id ?? null, previousEnabled },
+      providerExternalId: readJson.id,
     };
   },
 };

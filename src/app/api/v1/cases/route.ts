@@ -5,7 +5,6 @@ import { cases } from "@/db/schema";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
 import { CASE_ENUMS, createCaseCore } from "@/lib/cases-core";
-import { fireWebhook } from "@/lib/webhooks";
 
 const createSchema = z.object({
   title: z.string().min(1),
@@ -72,11 +71,6 @@ export async function POST(req: Request) {
     );
   }
   const created = await createCaseCore(auth.token.organisationId, null, parsed.data);
-  await fireWebhook(auth.token.organisationId, "case.created", {
-    case_id: created.id,
-    case_number: created.caseNumber,
-    title: parsed.data.title,
-  });
   return NextResponse.json(
     { id: created.id, caseNumber: created.caseNumber },
     { status: 201 },

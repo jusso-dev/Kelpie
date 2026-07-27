@@ -115,19 +115,44 @@ Screenshots below were captured from a seeded local demo workspace with fake use
 
 These shipped features turn Kelpie from a standalone case manager into something that plugs into a SOC's existing tooling. Everything below is multi-tenant: configuration lives per organisation.
 
-### SOAR-style response actions (Cloudflare, Entra, CrowdStrike)
+### Governed response actions (Microsoft Defender, Entra, Cloudflare, CrowdStrike)
 
 Kelpie is a case manager, not a SOAR, but a handful of well-bounded actions can be run straight from a case:
 
 - **Block IP on Cloudflare** — creates a WAF access rule on the configured zone(s) for an IP observable.
 - **Disable user in Microsoft Entra** — sets `accountEnabled=false` via Microsoft Graph for a username/email observable; records the previous state for manual rollback.
+- **Isolate device in Microsoft Defender for Endpoint** — verifies an immutable
+  Defender machine ID against a case hostname, then requests selective or full
+  network isolation.
 - **Isolate host in CrowdStrike** — resolves a hostname observable to a Falcon agent id and contains the device.
 
 Configure credentials under **Settings → Integrations → Response actions** (admin only, per action enable/disable). On a case, the **Response actions** panel only offers actions whose required observable type is present. Running an action requires the admin or analyst role, shows a confirm dialog, and writes a `response_action` timeline event with the actor, target, and result. Every run is stored in `response_action_runs` for audit. Rollback is documented but not automated: run the inverse action manually.
 
+All high-impact actions now use two-person approval. A request captures its
+exact target and expires after 15 minutes. A different administrator must
+approve it before Kelpie contacts the provider.
+
 ### External case sources
 
-Administrators can configure Microsoft Sentinel under **Settings → Integrations → Case sources**. Kelpie uses an Entra service principal to poll workspace incidents and creates cases directly, preserving the source link and reference. Repeated polls are idempotent. Closed incidents are excluded by default and can be enabled per source.
+Administrators can configure Microsoft Sentinel or Microsoft Defender XDR under
+**Settings → Integrations → Case sources**. Defender XDR uses Microsoft Graph
+Security with the read-only `SecurityIncident.Read.All` application permission.
+Kelpie creates cases directly, preserving the source link and reference.
+Repeated polls are idempotent. Closed/resolved incidents are excluded by
+default and can be enabled per source.
+
+### Bounded agent automations
+
+Administrators can connect case events to a thin Muster adapter under
+**Settings → Agent automations**. Rules intentionally support only fixed case
+triggers, allowlisted conditions, and one HMAC-signed
+`kelpie.agent-trigger.v1` handoff. Runs are durable, idempotent, retried by the
+worker, and written back to the case timeline. New rules start disabled.
+
+Kelpie does not call Muster's internal agent gateway and does not accept
+caller-selected Muster tenant or agent IDs. See
+[Production-readiness roadmap](docs/production-readiness-roadmap.md) for the
+adapter trust boundary and remaining release gates.
 
 Every newly created case is checked against the organisation's local threat-intelligence store. Kelpie writes the result as an automated case comment, including matching feeds, confidence, and tags.
 

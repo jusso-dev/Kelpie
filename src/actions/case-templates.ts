@@ -14,7 +14,6 @@ import {
   type CaseSeverity,
   type CaseTlp,
 } from "@/lib/cases-core";
-import { fireWebhook } from "@/lib/webhooks";
 import { writeTimelineEvent } from "@/lib/timeline";
 import { startPlaybookOnCase } from "./playbooks";
 import { parseTagsInput } from "@/lib/tags";
@@ -159,13 +158,6 @@ export async function applyCaseTemplate(formData: FormData) {
       ? (tpl.defaultDataClassificationTags as string[])
       : [],
   });
-  await fireWebhook(user.organisationId, "case.created", {
-    case_id: created.id,
-    case_number: created.caseNumber,
-    title,
-    template: tpl.name,
-  });
-
   // Add template tasks first (order 1..N), then optionally the playbook
   // which appends its own tasks at higher order indexes.
   const defaultTasks = Array.isArray(tpl.defaultTasks)

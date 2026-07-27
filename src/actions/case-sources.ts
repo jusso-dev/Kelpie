@@ -9,6 +9,10 @@ import {
   validateSentinelConfig,
   type SentinelConfig,
 } from "@/lib/case-sources/sentinel";
+import {
+  validateDefenderXdrConfig,
+  type DefenderXdrConfig,
+} from "@/lib/case-sources/defender-xdr";
 import { requireRole } from "@/lib/session";
 import { newId } from "@/lib/utils";
 
@@ -27,6 +31,19 @@ function sentinelConfig(formData: FormData): SentinelConfig {
   return config;
 }
 
+function defenderXdrConfig(formData: FormData): DefenderXdrConfig {
+  const value = (key: string) => String(formData.get(key) ?? "").trim();
+  const config: DefenderXdrConfig = {
+    tenant_id: value("tenant_id"),
+    client_id: value("client_id"),
+    client_secret: value("client_secret"),
+    include_resolved:
+      formData.get("include_resolved") === "on" ? "true" : "false",
+  };
+  validateDefenderXdrConfig(config);
+  return config;
+}
+
 export async function createCaseSource(formData: FormData) {
   const user = await requireRole(["admin"]);
   const name = String(formData.get("name") ?? "").trim();
@@ -35,12 +52,19 @@ export async function createCaseSource(formData: FormData) {
   if (!Number.isInteger(interval) || interval < 1 || interval > 10080) {
     throw new Error("Poll interval must be between 1 minute and 7 days.");
   }
+  const kind = String(formData.get("kind") ?? "microsoft_sentinel");
+  if (kind !== "microsoft_sentinel" && kind !== "microsoft_defender_xdr") {
+    throw new Error("Case source kind is invalid");
+  }
   await db.insert(caseSources).values({
     id: newId("src"),
     organisationId: user.organisationId,
     name,
-    kind: "microsoft_sentinel",
-    config: sentinelConfig(formData),
+    kind,
+    config:
+      kind === "microsoft_sentinel"
+        ? sentinelConfig(formData)
+        : defenderXdrConfig(formData),
     pollIntervalMinutes: interval,
     createdBy: user.id,
   });

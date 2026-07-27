@@ -15,7 +15,6 @@ import {
   patchCaseCore,
   setCaseStatusCore,
 } from "@/lib/cases-core";
-import { fireWebhook } from "@/lib/webhooks";
 import {
   customFieldsRecord,
   setCustomFieldsByKey,
@@ -104,13 +103,6 @@ export async function PATCH(
         workingVersion,
       );
       workingVersion = updated.version;
-      await fireWebhook(auth.token.organisationId, "case.status_changed", {
-        case_id: id,
-        to: parsed.data.status,
-      });
-      if (parsed.data.status === "closed") {
-        await fireWebhook(auth.token.organisationId, "case.closed", { case_id: id });
-      }
     }
 
     const { status, version, custom_fields, ...patch } = parsed.data;

@@ -19,7 +19,10 @@ import CustomFieldsPanel from "@/components/custom-fields-panel";
 import CaseActionRunner from "@/components/case-action-runner";
 import { evaluateSla, loadSlaPolicy } from "@/lib/sla";
 import { getCustomFieldsForEntity } from "@/lib/custom-fields";
-import { listAvailableActions } from "@/lib/response-actions/core";
+import {
+  listAvailableActions,
+  listCaseResponseActionRuns,
+} from "@/lib/response-actions/core";
 import { format } from "date-fns";
 import CaseSummaryEditor from "@/components/case-summary-editor";
 
@@ -64,9 +67,10 @@ export default async function CaseOverviewPage({ params }: Props) {
   const techniques = (c.mitreTechniques as string[]) ?? [];
   const slaPolicy = await loadSlaPolicy(user.organisationId, c.severity);
   const slaEvaluation = slaPolicy ? evaluateSla(c, slaPolicy) : null;
-  const [customFields, availableActions] = await Promise.all([
+  const [customFields, availableActions, responseActionRuns] = await Promise.all([
     getCustomFieldsForEntity(user.organisationId, c.id),
     listAvailableActions(user.organisationId, c.id),
+    listCaseResponseActionRuns(user.organisationId, c.id),
   ]);
   const canEdit = user.role === "admin" || user.role === "analyst";
 
@@ -75,7 +79,10 @@ export default async function CaseOverviewPage({ params }: Props) {
       <div className="md:col-span-2 space-y-4">
         {c.sourceSystem ? (
           <div className="kelpie-notice kelpie-notice-block">
-            Imported from Microsoft Sentinel
+            Imported from{" "}
+            {c.sourceSystem?.startsWith("microsoft_defender_xdr:")
+              ? "Microsoft Defender XDR"
+              : "Microsoft Sentinel"}
             {c.sourceUrl ? (
               <>
                 {" · "}
@@ -190,8 +197,12 @@ export default async function CaseOverviewPage({ params }: Props) {
             name: a.name,
             label: a.label,
             description: a.description,
+            approvalRequired: a.approvalRequired,
             inputFields: a.inputFields,
           }))}
+          runs={responseActionRuns}
+          currentUserId={user.id}
+          canApprove={user.role === "admin"}
         />
 
         <div className="kelpie-card p-5">

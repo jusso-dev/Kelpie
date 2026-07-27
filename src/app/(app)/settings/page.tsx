@@ -62,6 +62,12 @@ export default async function SettingsPage() {
             Integrations
           </Link>
           <Link
+            href="/settings/automations"
+            className="kelpie-btn kelpie-btn-secondary justify-center"
+          >
+            Agent automations
+          </Link>
+          <Link
             href="/settings/fields"
             className="kelpie-btn kelpie-btn-secondary justify-center"
           >

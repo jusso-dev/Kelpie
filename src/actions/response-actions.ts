@@ -7,7 +7,12 @@ import { and, eq } from "drizzle-orm";
 import { requireRole } from "@/lib/session";
 import { newId } from "@/lib/utils";
 import { getActionHandler, listActionHandlers } from "@/lib/response-actions/registry";
-import { runResponseAction } from "@/lib/response-actions/core";
+import {
+  approveResponseAction,
+  cancelResponseAction,
+  rejectResponseAction,
+  runResponseAction,
+} from "@/lib/response-actions/core";
 import { assertSafeOutboundUrl } from "@/lib/outbound-request";
 
 function collectConfig(kind: string, formData: FormData): Record<string, string> {
@@ -102,6 +107,7 @@ export async function deleteResponseAction(id: string) {
 export async function runCaseAction(formData: FormData): Promise<{
   ok: boolean;
   summary: string;
+  status: "awaiting_approval";
 }> {
   const user = await requireRole(["admin", "analyst"]);
   const actionId = String(formData.get("actionId") ?? "");
@@ -122,7 +128,32 @@ export async function runCaseAction(formData: FormData): Promise<{
   );
   revalidatePath(`/cases/${caseId}`);
   revalidatePath(`/cases/${caseId}/timeline`);
-  return { ok: result.ok, summary: result.summary };
+  return { ok: result.ok, summary: result.summary, status: result.status };
+}
+
+export async function approveCaseAction(runId: string): Promise<{
+  ok: boolean;
+  summary: string;
+}> {
+  const user = await requireRole(["admin"]);
+  if (!runId) throw new Error("Missing response action request");
+  const result = await approveResponseAction(user.organisationId, user.id, runId);
+  revalidatePath("/cases");
+  return result;
+}
+
+export async function rejectCaseAction(runId: string, reason?: string) {
+  const user = await requireRole(["admin"]);
+  if (!runId) throw new Error("Missing response action request");
+  await rejectResponseAction(user.organisationId, user.id, runId, reason);
+  revalidatePath("/cases");
+}
+
+export async function cancelCaseAction(runId: string) {
+  const user = await requireRole(["admin", "analyst"]);
+  if (!runId) throw new Error("Missing response action request");
+  await cancelResponseAction(user.organisationId, user.id, runId);
+  revalidatePath("/cases");
 }
 
 export async function availableActionKinds() {
@@ -130,6 +161,7 @@ export async function availableActionKinds() {
     kind: h.kind,
     label: h.label,
     description: h.description,
+    approvalRequired: h.approvalRequired,
     configFields: h.configFields,
   }));
 }

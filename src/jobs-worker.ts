@@ -37,6 +37,7 @@ async function processJob(job: Job<KelpieJobData, unknown, string>) {
       return enrichPendingCases();
     case "sla-check":
     case "deliver-webhooks":
+    case "deliver-automations":
     case "deliver-mobile-push":
     case "prune-presence":
       return jobHandlers[job.name]();

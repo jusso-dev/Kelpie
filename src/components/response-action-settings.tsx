@@ -26,6 +26,7 @@ type Kind = {
   kind: string;
   label: string;
   description: string;
+  approvalRequired: boolean;
   configFields: ConfigField[];
 };
 
@@ -83,6 +84,7 @@ export default function ResponseActionSettings({
             <tr>
               <th>Name</th>
               <th>Action</th>
+              <th>Approval</th>
               <th>Status</th>
               <th></th>
             </tr>
@@ -90,7 +92,7 @@ export default function ResponseActionSettings({
           <tbody>
             {actions.length === 0 ? (
               <tr>
-                <td colSpan={4} className="text-center text-slate-500 py-6">
+                <td colSpan={5} className="text-center text-slate-500 py-6">
                   No response actions configured.
                 </td>
               </tr>
@@ -100,6 +102,11 @@ export default function ResponseActionSettings({
                   <td>{a.name}</td>
                   <td className="text-xs text-slate-400">
                     {kinds.find((k) => k.kind === a.kind)?.label ?? a.kind}
+                  </td>
+                  <td className="text-xs text-amber-300">
+                    {kinds.find((k) => k.kind === a.kind)?.approvalRequired
+                      ? "Two-person"
+                      : "None"}
                   </td>
                   <td>
                     <span
@@ -175,7 +182,12 @@ export default function ResponseActionSettings({
               </div>
             </div>
             {selected ? (
-              <p className="text-xs text-slate-500">{selected.description}</p>
+              <p className="text-xs text-slate-500">
+                {selected.description}
+                {selected.approvalRequired
+                  ? " A different administrator must approve each request before execution."
+                  : ""}
+              </p>
             ) : null}
             {selected?.configFields.map((f) => (
               <div key={f.key}>

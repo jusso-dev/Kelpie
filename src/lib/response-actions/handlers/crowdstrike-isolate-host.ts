@@ -38,6 +38,7 @@ export const crowdstrikeIsolateHost: ActionHandler = {
   label: "Isolate host in CrowdStrike",
   description:
     "Network-contain a host through CrowdStrike Falcon. Resolves the hostname to an agent id server-side.",
+  approvalRequired: true,
   requiresObservableTypes: ["hostname"],
   configFields: [
     {
@@ -69,6 +70,9 @@ export const crowdstrikeIsolateHost: ActionHandler = {
   validate(input) {
     if (!input.hostname?.trim()) return "A hostname is required";
     return null;
+  },
+  target(input) {
+    return input.hostname?.trim() || null;
   },
   async execute(ctx) {
     const base = String(ctx.config.base_url ?? "https://api.crowdstrike.com").replace(/\/$/, "");
@@ -141,6 +145,7 @@ export const crowdstrikeIsolateHost: ActionHandler = {
       target: hostname,
       summary: `Isolated ${hostname} in CrowdStrike (agent ${agentId})`,
       data: { agentId, isolatedAt: new Date().toISOString() },
+      providerExternalId: agentId,
     };
   },
 };

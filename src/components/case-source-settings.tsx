@@ -22,6 +22,7 @@ type SourceRow = {
   lastPolledAt: string | null;
   lastError: string | null;
   importedCaseCount: number;
+  kind: string;
 };
 
 export default function CaseSourceSettings({
@@ -35,6 +36,8 @@ export default function CaseSourceSettings({
   const [adding, setAdding] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [kind, setKind] = useState("microsoft_sentinel");
+  const isSentinel = kind === "microsoft_sentinel";
 
   async function run(work: () => Promise<unknown>) {
     setPending(true);
@@ -59,7 +62,7 @@ export default function CaseSourceSettings({
     const form = event.currentTarget;
     await run(async () => {
       await createCaseSource(new FormData(form));
-      toast.success("Microsoft Sentinel source added", {
+      toast.success(`${isSentinel ? "Microsoft Sentinel" : "Microsoft Defender XDR"} source added`, {
         description: "Kelpie will import new incidents on the configured schedule.",
       });
       setAdding(false);
@@ -80,7 +83,7 @@ export default function CaseSourceSettings({
         <div className="rounded-lg border border-dashed border-slate-700 p-6 text-center">
           <p className="text-sm text-slate-300">No case sources configured.</p>
           <p className="mt-1 text-xs text-slate-500">
-            Add Microsoft Sentinel to import incidents as Kelpie cases.
+            Add Microsoft Sentinel or Defender XDR to import incidents as Kelpie cases.
           </p>
         </div>
       ) : (
@@ -103,7 +106,9 @@ export default function CaseSourceSettings({
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-slate-500">
-                    Microsoft Sentinel · every {source.pollIntervalMinutes} min ·{" "}
+                    {source.kind === "microsoft_defender_xdr"
+                      ? "Microsoft Defender XDR"
+                      : "Microsoft Sentinel"} · every {source.pollIntervalMinutes} min ·{" "}
                     {source.importedCaseCount} cases imported
                   </p>
                   <p className="mt-1 text-xs text-slate-500">
@@ -170,14 +175,29 @@ export default function CaseSourceSettings({
             className="space-y-6 rounded-lg border border-[color:var(--color-navy-800)] bg-[color:var(--color-navy-950)] p-5"
           >
             <div>
-              <h3 className="font-medium text-slate-100">Add Microsoft Sentinel</h3>
+              <h3 className="font-medium text-slate-100">
+                Add {isSentinel ? "Microsoft Sentinel" : "Microsoft Defender XDR"}
+              </h3>
               <p className="kelpie-help mt-1">
-                Uses an Entra service principal with access to the selected
-                Log Analytics workspace. Credentials stay server-side.
+                {isSentinel
+                  ? "Uses Entra app-only credentials with access to selected Log Analytics workspace. Credentials stay server-side."
+                  : "Uses Entra app-only credentials with SecurityIncident.Read.All application permission. Credentials stay server-side."}
               </p>
             </div>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <Field name="name" label="Display name" required />
+              <label className="block">
+                <span className="kelpie-label">Microsoft source</span>
+                <select
+                  name="kind"
+                  value={kind}
+                  onChange={(event) => setKind(event.target.value)}
+                  className="kelpie-input"
+                >
+                  <option value="microsoft_sentinel">Microsoft Sentinel</option>
+                  <option value="microsoft_defender_xdr">Microsoft Defender XDR</option>
+                </select>
+              </label>
               <Field
                 name="poll_interval_minutes"
                 label="Poll interval (minutes)"
@@ -193,18 +213,22 @@ export default function CaseSourceSettings({
                 type="password"
                 required
               />
-              <Field name="subscription_id" label="Subscription ID" required />
-              <Field name="resource_group" label="Resource group" required />
-              <Field name="workspace_name" label="Workspace name" required />
+              {isSentinel ? (
+                <>
+                  <Field name="subscription_id" label="Subscription ID" required />
+                  <Field name="resource_group" label="Resource group" required />
+                  <Field name="workspace_name" label="Workspace name" required />
+                </>
+              ) : null}
             </div>
             <label className="flex items-start gap-3 text-sm text-slate-300">
               <input
                 type="checkbox"
-                name="include_closed"
+                name={isSentinel ? "include_closed" : "include_resolved"}
                 className="mt-0.5 h-4 w-4 rounded border-slate-600"
               />
               <span>
-                Import closed incidents
+                Import {isSentinel ? "closed" : "resolved"} incidents
                 <span className="block text-xs text-slate-500">
                   Leave off to import active work only.
                 </span>
@@ -231,7 +255,7 @@ export default function CaseSourceSettings({
             className="kelpie-btn kelpie-btn-secondary"
             onClick={() => setAdding(true)}
           >
-            Add Microsoft Sentinel
+            Add case source
           </button>
         )
       ) : null}

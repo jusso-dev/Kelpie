@@ -728,6 +728,9 @@ export const responseActionRuns = pgTable(
   "response_action_runs",
   {
     id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
     actionId: text("action_id")
       .notNull()
       .references(() => responseActions.id, { onDelete: "cascade" }),
@@ -737,18 +740,111 @@ export const responseActionRuns = pgTable(
     requestedBy: text("requested_by").references(() => users.id, {
       onDelete: "set null",
     }),
-    status: text("status").notNull().default("pending"),
+    approvedBy: text("approved_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    rejectedBy: text("rejected_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    rejectedAt: timestamp("rejected_at", { withTimezone: true }),
+    rejectionReason: text("rejection_reason"),
+    status: text("status").notNull().default("awaiting_approval"),
+    idempotencyKey: text("idempotency_key").notNull(),
     target: text("target"),
     request: jsonb("request").notNull().default(sql`'{}'::jsonb`),
     response: jsonb("response").notNull().default(sql`'{}'::jsonb`),
     startedAt: timestamp("started_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
   },
   (t) => [
     index("response_action_runs_case_idx").on(t.caseId),
     index("response_action_runs_action_idx").on(t.actionId),
+    index("response_action_runs_org_status_idx").on(t.organisationId, t.status),
+    uniqueIndex("response_action_runs_idempotency_key_idx").on(t.idempotencyKey),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Governed event automations                                                 */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+export const automationRules = pgTable(
+  "automation_rules",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    triggerEvent: text("trigger_event").notNull(),
+    conditions: jsonb("conditions").notNull().default(sql`'[]'::jsonb`),
+    destinationUrl: text("destination_url").notNull(),
+    secret: text("secret").notNull(),
+    keyId: text("key_id").notNull(),
+    targetProfile: text("target_profile").notNull(),
+    revision: integer("revision").notNull().default(1),
+    isActive: boolean("is_active").notNull().default(false),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("automation_rules_org_trigger_idx").on(
+      t.organisationId,
+      t.triggerEvent,
+      t.isActive,
+    ),
+  ],
+);
+
+export const automationRuns = pgTable(
+  "automation_runs",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    ruleId: text("rule_id")
+      .notNull()
+      .references(() => automationRules.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    triggerEventId: text("trigger_event_id")
+      .notNull()
+      .references(() => timelineEvents.id, { onDelete: "cascade" }),
+    triggerEvent: text("trigger_event").notNull(),
+    traceId: text("trace_id").notNull(),
+    status: text("status").notNull().default("pending"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    request: jsonb("request").notNull(),
+    response: jsonb("response").notNull().default(sql`'{}'::jsonb`),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("automation_runs_rule_event_idx").on(
+      t.ruleId,
+      t.triggerEventId,
+    ),
+    index("automation_runs_pending_idx").on(t.status, t.nextAttemptAt),
+    index("automation_runs_case_idx").on(t.caseId, t.createdAt),
   ],
 );
 

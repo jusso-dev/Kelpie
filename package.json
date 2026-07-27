@@ -27,11 +27,15 @@
     "test:mobile": "tsx scripts/test-mobile.ts",
     "test:notification-config": "tsx scripts/test-notification-config.ts",
     "test:case-intelligence": "tsx scripts/test-case-intelligence.ts",
+    "test:case-sources": "tsx scripts/test-case-sources.ts",
     "test:team-tags": "tsx scripts/test-team-tags.ts",
     "test:cyber-news-sources": "tsx scripts/test-cyber-news-sources.ts",
     "test:vendor-news": "tsx scripts/test-vendor-news.ts",
     "test:threat-landscape": "tsx scripts/test-threat-landscape.ts",
     "test:virustotal": "tsx scripts/test-virustotal.ts",
+    "test:automation-domain": "tsx scripts/test-automation-domain.ts",
+    "test:automation-runtime": "tsx scripts/test-automation-runtime.ts",
+    "test:response-action-approval": "tsx scripts/test-response-action-approval.ts",
     "test:visual": "tsx scripts/visual-smoke.ts"
   },
   "dependencies": {

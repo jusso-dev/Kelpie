@@ -5,6 +5,13 @@ import type {
   CaseStatus,
   CreateCaseInput,
 } from "@/lib/cases-core";
+import {
+  compareSourceCursor,
+  isAfterSourceCursor,
+  parseSourceCursor,
+  serialiseSourceCursor,
+  type SourceCursor,
+} from "./cursor";
 
 const API_VERSION = "2025-09-01";
 const ARM_HOST = "management.azure.com";
@@ -86,7 +93,7 @@ async function getAccessToken(config: SentinelConfig): Promise<string> {
     client_id: config.client_id,
     client_secret: config.client_secret,
     grant_type: "client_credentials",
-    scope: "https://management.azure.com//.default",
+    scope: "https://management.azure.com/.default",
   });
   const response = await safeFetch(
     `https://login.microsoftonline.com/${encodeURIComponent(config.tenant_id)}/oauth2/v2.0/token`,
@@ -169,7 +176,9 @@ export function mapSentinelIncident(
   const properties = incident.properties;
   const title = properties?.title?.trim();
   const modifiedAt = properties?.lastModifiedTimeUtc;
-  if (!reference || !title || !modifiedAt) return null;
+  if (!reference || !title || !modifiedAt || Number.isNaN(Date.parse(modifiedAt))) {
+    return null;
+  }
   const description = properties.description?.trim() ?? "";
   const labels =
     properties.labels
@@ -199,6 +208,8 @@ export async function fetchSentinelCases(
   cursor: string | null,
 ): Promise<{ cases: SentinelCase[]; cursor: string | null }> {
   validateSentinelConfig(config);
+  const parsedCursor = parseSourceCursor(cursor);
+  if (cursor && !parsedCursor) throw new Error("Microsoft Sentinel cursor is invalid");
   const token = await getAccessToken(config);
   const path =
     `/subscriptions/${encodeURIComponent(config.subscription_id)}` +
@@ -212,9 +223,13 @@ export async function fetchSentinelCases(
   url.searchParams.set("$top", "1000");
   const found: SentinelCase[] = [];
   let nextUrl: URL | null = url;
-  let newest = cursor;
+  let newest: SourceCursor | null = parsedCursor;
   while (nextUrl) {
-    if (nextUrl.protocol !== "https:" || nextUrl.hostname !== ARM_HOST) {
+    if (
+      nextUrl.protocol !== "https:" ||
+      nextUrl.hostname !== ARM_HOST ||
+      (nextUrl.port && nextUrl.port !== "443")
+    ) {
       throw new Error("Microsoft Sentinel returned an invalid pagination URL");
     }
     const response = await safeFetch(nextUrl, {
@@ -225,15 +240,23 @@ export async function fetchSentinelCases(
       throw new Error(`Microsoft Sentinel request failed (${response.status})`);
     }
     const payload = (await response.json()) as SentinelIncidentList;
-    let reachedCursor = false;
+    let reachedOlderTimestamp = false;
     for (const incident of payload.value ?? []) {
       const mapped = mapSentinelIncident(incident, sourceSystem);
       if (!mapped) continue;
-      if (cursor && mapped.modifiedAt <= cursor) {
-        reachedCursor = true;
+      const itemCursor = { timestamp: mapped.modifiedAt, id: mapped.reference };
+      if (!isAfterSourceCursor(itemCursor, parsedCursor)) {
+        if (
+          parsedCursor &&
+          Date.parse(itemCursor.timestamp) < Date.parse(parsedCursor.timestamp)
+        ) {
+          reachedOlderTimestamp = true;
+        }
         continue;
       }
-      if (!newest || mapped.modifiedAt > newest) newest = mapped.modifiedAt;
+      if (!newest || compareSourceCursor(itemCursor, newest) > 0) {
+        newest = itemCursor;
+      }
       if (
         config.include_closed !== "true" &&
         mapped.input.status === "closed"
@@ -242,8 +265,8 @@ export async function fetchSentinelCases(
       }
       found.push(mapped);
     }
-    if (reachedCursor) break;
+    if (reachedOlderTimestamp) break;
     nextUrl = payload.nextLink ? new URL(payload.nextLink) : null;
   }
-  return { cases: found, cursor: newest };
+  return { cases: found, cursor: serialiseSourceCursor(newest) };
 }

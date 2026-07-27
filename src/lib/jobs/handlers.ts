@@ -8,6 +8,7 @@ import { purgeExpiredCache } from "@/lib/enrichment/cache";
 import { dispatchPendingMobilePushes } from "@/lib/mobile-push";
 import { pruneStalePresence } from "@/lib/presence";
 import { runSlaChecks } from "@/lib/sla-runner";
+import { processPendingAutomationRuns } from "@/lib/automations/dispatch";
 
 export async function pollThreatFeed(feedId: string) {
   const result = await pollFeed(feedId);
@@ -35,6 +36,7 @@ export async function enrichPendingCases() {
 export const jobHandlers = {
   "sla-check": runSlaChecks,
   "deliver-webhooks": processPendingDeliveries,
+  "deliver-automations": processPendingAutomationRuns,
   "enrich-cases": enrichPendingCases,
   "deliver-mobile-push": dispatchPendingMobilePushes,
   "prune-presence": pruneStalePresence,

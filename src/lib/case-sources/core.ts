@@ -3,6 +3,10 @@ import { db } from "@/db";
 import { caseSources } from "@/db/schema";
 import { createCaseCore } from "@/lib/cases-core";
 import { fetchSentinelCases, type SentinelConfig } from "./sentinel";
+import {
+  fetchDefenderXdrCases,
+  type DefenderXdrConfig,
+} from "./defender-xdr";
 
 export async function pollCaseSource(
   sourceId: string,
@@ -13,17 +17,27 @@ export async function pollCaseSource(
     .where(eq(caseSources.id, sourceId))
     .limit(1);
   if (!source) return { imported: 0, error: "Case source not found" };
-  if (source.kind !== "microsoft_sentinel") {
+  if (
+    source.kind !== "microsoft_sentinel" &&
+    source.kind !== "microsoft_defender_xdr"
+  ) {
     return { imported: 0, error: "Unknown case source kind" };
   }
 
   try {
-    const sourceSystem = `microsoft_sentinel:${source.id}`;
-    const result = await fetchSentinelCases(
-      source.config as SentinelConfig,
-      sourceSystem,
-      source.cursor,
-    );
+    const sourceSystem = `${source.kind}:${source.id}`;
+    const result =
+      source.kind === "microsoft_sentinel"
+        ? await fetchSentinelCases(
+            source.config as SentinelConfig,
+            sourceSystem,
+            source.cursor,
+          )
+        : await fetchDefenderXdrCases(
+            source.config as DefenderXdrConfig,
+            sourceSystem,
+            source.cursor,
+          );
     let imported = 0;
     for (const item of result.cases) {
       const created = await createCaseCore(source.organisationId, null, item.input);

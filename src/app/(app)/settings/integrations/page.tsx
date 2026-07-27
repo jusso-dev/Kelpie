@@ -21,6 +21,7 @@ export default async function IntegrationsSettingsPage() {
       .select({
         id: caseSources.id,
         name: caseSources.name,
+        kind: caseSources.kind,
         isActive: caseSources.isActive,
         pollIntervalMinutes: caseSources.pollIntervalMinutes,
         lastPolledAt: caseSources.lastPolledAt,
@@ -72,8 +73,8 @@ export default async function IntegrationsSettingsPage() {
         <div className="kelpie-section-header">
           <h2>Case sources</h2>
           <p>
-            Import Microsoft Sentinel incidents directly as Kelpie cases.
-            Source references prevent duplicates on later polls.
+            Import Microsoft Sentinel or Defender XDR incidents directly as
+            Kelpie cases. Source references prevent duplicates on later polls.
           </p>
         </div>
         <CaseSourceSettings

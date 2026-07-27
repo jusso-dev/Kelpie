@@ -11,6 +11,7 @@ export const cloudflareBlockIp: ActionHandler = {
   label: "Block IP on Cloudflare",
   description:
     "Create a Cloudflare WAF block rule for an IP observable on the configured zone(s).",
+  approvalRequired: true,
   requiresObservableTypes: ["ip"],
   configFields: [
     {
@@ -50,6 +51,9 @@ export const cloudflareBlockIp: ActionHandler = {
     const ip = input.ip?.trim();
     if (!ip) return "An IP is required";
     return null;
+  },
+  target(input) {
+    return input.ip?.trim() || null;
   },
   async execute(ctx) {
     const token = String(ctx.config.api_token ?? "").trim();
@@ -106,6 +110,7 @@ export const cloudflareBlockIp: ActionHandler = {
       target: ip,
       summary: `Blocked ${ip} on ${created.length} Cloudflare zone(s)`,
       data: { rules: created },
+      providerExternalId: created.map((rule) => rule.ruleId).join(","),
     };
   },
 };

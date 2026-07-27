@@ -20,7 +20,6 @@ import {
 export type CaseFieldResult =
   | { ok: true; version: number }
   | { ok: false; conflict: Record<string, unknown> };
-import { fireWebhook } from "@/lib/webhooks";
 import { parseTagsInput } from "@/lib/tags";
 
 function pickEnum<T extends readonly string[]>(
@@ -50,11 +49,6 @@ export async function createCase(formData: FormData) {
       String(formData.get("dataClassificationTags") ?? ""),
     ),
   });
-  await fireWebhook(user.organisationId, "case.created", {
-    case_id: result.id,
-    case_number: result.caseNumber,
-    title: String(formData.get("title") ?? ""),
-  });
   revalidatePath("/cases");
   redirect(`/cases/${result.id}`);
 }
@@ -79,13 +73,6 @@ export async function updateCaseStatus(
       return { ok: false, conflict: e.current };
     }
     throw e;
-  }
-  await fireWebhook(user.organisationId, "case.status_changed", {
-    case_id: caseId,
-    to: nextStatus,
-  });
-  if (nextStatus === "closed") {
-    await fireWebhook(user.organisationId, "case.closed", { case_id: caseId });
   }
   revalidatePath(`/cases/${caseId}`);
   revalidatePath("/cases");
@@ -200,15 +187,6 @@ export async function closeCase(formData: FormData) {
   const summary = String(formData.get("summary") ?? "");
   if (!caseId) throw new Error("caseId required");
   await closeCaseCore(user.organisationId, user.id, caseId, reason, summary);
-  await fireWebhook(user.organisationId, "case.status_changed", {
-    case_id: caseId,
-    to: "closed",
-    reason,
-  });
-  await fireWebhook(user.organisationId, "case.closed", {
-    case_id: caseId,
-    reason,
-  });
   revalidatePath(`/cases/${caseId}`);
   revalidatePath("/cases");
 }

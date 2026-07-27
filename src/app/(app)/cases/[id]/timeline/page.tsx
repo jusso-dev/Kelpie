@@ -19,6 +19,8 @@ const EVENT_LABELS: Record<string, string> = {
   file_uploaded: "File uploaded",
   playbook_started: "Playbook started",
   sla_breach: "SLA breach",
+  response_action: "Response action",
+  automation_run: "Agent automation",
   custom: "Update",
 };
 
@@ -123,7 +125,18 @@ function summarisePayload(
         <>
           {String(payload.source_system ?? "").startsWith("microsoft_sentinel:")
             ? "Imported from Microsoft Sentinel"
-            : "Manually opened"}
+            : String(payload.source_system ?? "").startsWith(
+                  "microsoft_defender_xdr:",
+                )
+              ? "Imported from Microsoft Defender XDR"
+              : "Manually opened"}
+        </>
+      );
+    case "automation_run":
+      return (
+        <>
+          Agent profile <code>{String(payload.targetProfile ?? "?")}</code>:{" "}
+          {String(payload.status ?? "unknown")}
         </>
       );
     default:

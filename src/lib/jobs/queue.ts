@@ -8,6 +8,7 @@ export type KelpieJobName =
   | "poll-case-source"
   | "sla-check"
   | "deliver-webhooks"
+  | "deliver-automations"
   | "enrich-cases"
   | "deliver-mobile-push"
   | "prune-presence";
