@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/session";
 import { createCase } from "@/actions/cases";
 import { applyCaseTemplate } from "@/actions/case-templates";
 import CreatableTagInput from "@/components/creatable-tag-input";
+import RelatedCaseSuggestions from "@/components/related-case-suggestions";
 import { DATA_CLASSIFICATION_SUGGESTIONS, normalizeTags } from "@/lib/tags";
 import { getTeamTags } from "@/lib/team-tags";
 
@@ -104,16 +105,18 @@ export default async function NewCasePage() {
           </p>
         </div>
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1.45fr)_minmax(18rem,.8fr)]">
-          <div className="space-y-5">
-            <Field label="Title" name="title" required />
-            <Field
-              label="Summary"
-              name="summary"
-              as="textarea"
-              rows={6}
-              help="What is happening? Stick to facts; the analyst can add detail later."
-            />
-          </div>
+          <RelatedCaseSuggestions>
+            <div className="space-y-5">
+              <Field label="Title" name="title" required />
+              <Field
+                label="Summary"
+                name="summary"
+                as="textarea"
+                rows={6}
+                help="What is happening? Stick to facts; the analyst can add detail later."
+              />
+            </div>
+          </RelatedCaseSuggestions>
           <div className="space-y-5">
             <CreatableTagInput
               label="Tags"

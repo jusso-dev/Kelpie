@@ -17,7 +17,12 @@ import SlaPanel from "@/components/sla-panel";
 import CasePresence from "@/components/case-presence";
 import CustomFieldsPanel from "@/components/custom-fields-panel";
 import CaseActionRunner from "@/components/case-action-runner";
+import CaseRelationshipsPanel from "@/components/case-relationships-panel";
 import { evaluateSla, loadSlaPolicy } from "@/lib/sla";
+import {
+  listRelationshipsCore,
+  listSuggestionsCore,
+} from "@/lib/case-relationships-core";
 import { getCustomFieldsForEntity } from "@/lib/custom-fields";
 import {
   listAvailableActions,
@@ -69,11 +74,14 @@ export default async function CaseOverviewPage({ params }: Props) {
   const techniques = (c.mitreTechniques as string[]) ?? [];
   const slaPolicy = await loadSlaPolicy(user.organisationId, c.severity);
   const slaEvaluation = slaPolicy ? evaluateSla(c, slaPolicy) : null;
-  const [customFields, availableActions, responseActionRuns] = await Promise.all([
-    getCustomFieldsForEntity(user.organisationId, c.id),
-    listAvailableActions(user.organisationId, c.id),
-    listCaseResponseActionRuns(user.organisationId, c.id),
-  ]);
+  const [customFields, availableActions, responseActionRuns, relationships, suggestions] =
+    await Promise.all([
+      getCustomFieldsForEntity(user.organisationId, c.id),
+      listAvailableActions(user.organisationId, c.id),
+      listCaseResponseActionRuns(user.organisationId, c.id),
+      listRelationshipsCore(user.organisationId, c.id),
+      listSuggestionsCore(user.organisationId, c.id),
+    ]);
   const canEdit = user.role === "admin" || user.role === "analyst";
   const sourceLabel = sourceSystemLabel(c.sourceSystem);
   // Re-validated at render time: a legacy row or a bypass of the public API's
@@ -214,6 +222,22 @@ export default async function CaseOverviewPage({ params }: Props) {
           runs={responseActionRuns}
           currentUserId={user.id}
           canApprove={user.role === "admin"}
+        />
+
+        <CaseRelationshipsPanel
+          caseId={c.id}
+          canEdit={canEdit}
+          relationships={relationships.map((r) => ({
+            id: r.id,
+            relationshipType: r.relationshipType,
+            direction: r.direction,
+            confidence: r.confidence,
+            origin: r.origin,
+            reason: r.reason,
+            createdAt: r.createdAt.toISOString(),
+            otherCase: r.otherCase,
+          }))}
+          suggestions={suggestions}
         />
 
         <div className="kelpie-card p-5">

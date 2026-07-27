@@ -74,6 +74,24 @@ export const classificationEnum = pgEnum("classification", [
   "other",
 ]);
 
+/**
+ * Canonical storage form only has three directional/symmetric shapes.
+ * `child_of` is a user-facing/API-facing spelling that is canonicalised to
+ * `parent_of` with source/target swapped before storage, so a parent/child
+ * pair can never be stored twice under two different type spellings.
+ */
+export const caseRelationshipTypeEnum = pgEnum("case_relationship_type", [
+  "duplicate_of",
+  "related_to",
+  "parent_of",
+]);
+
+export const caseRelationshipOriginEnum = pgEnum("case_relationship_origin", [
+  "analyst",
+  "provider",
+  "rule",
+]);
+
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Organisations + BetterAuth tables                                          */
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -391,6 +409,113 @@ export const observables = pgTable(
   (t) => [
     index("observables_value_idx").on(t.value),
     index("observables_case_idx").on(t.caseId),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Case relationships                                                        */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Confirmed, typed links between two cases in the same organisation.
+ * `organisationId` is denormalised onto the row (rather than inferred by
+ * joining through both `cases` rows) so every query can filter on a single
+ * indexed column and so cross-tenant leakage requires an explicit bug in the
+ * write path, not a missed join leg on read.
+ */
+export const caseRelationships = pgTable(
+  "case_relationships",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    sourceCaseId: text("source_case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    targetCaseId: text("target_case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    relationshipType: caseRelationshipTypeEnum("relationship_type").notNull(),
+    confidence: integer("confidence"),
+    origin: caseRelationshipOriginEnum("origin").notNull().default("analyst"),
+    ruleId: text("rule_id"),
+    ruleVersion: text("rule_version"),
+    reason: text("reason").notNull(),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("case_relationships_org_idx").on(t.organisationId),
+    index("case_relationships_source_idx").on(t.sourceCaseId),
+    index("case_relationships_target_idx").on(t.targetCaseId),
+    // A given directional edge can only be recorded once per type. Combined
+    // with canonicalisation at the application layer (child_of -> parent_of
+    // with swapped endpoints, related_to sorted by id), this also blocks the
+    // reverse-spelled duplicate for parent/child and symmetric edges.
+    uniqueIndex("case_relationships_unique_edge_idx").on(
+      t.organisationId,
+      t.sourceCaseId,
+      t.targetCaseId,
+      t.relationshipType,
+    ),
+    check(
+      "case_relationships_no_self_link",
+      sql.raw(`"source_case_id" <> "target_case_id"`),
+    ),
+    check(
+      "case_relationships_confidence_range",
+      sql.raw(
+        `"confidence" is null or ("confidence" >= 0 and "confidence" <= 100)`,
+      ),
+    ),
+  ],
+);
+
+/**
+ * Persisted "not a match" decisions for a candidate pairing. Suggestion
+ * scores themselves are always computed on demand from live case data (they
+ * would go stale if cached), so the only fact worth storing is that an
+ * analyst already looked at this pair and rejected it. Canonically ordered
+ * (`case_id_a < case_id_b`) so a dismissal recorded from either case's
+ * overview suppresses the suggestion on both sides.
+ */
+export const caseRelationshipDismissals = pgTable(
+  "case_relationship_dismissals",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseIdA: text("case_id_a")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    caseIdB: text("case_id_b")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    reason: text("reason").notNull(),
+    dismissedBy: text("dismissed_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    dismissedAt: timestamp("dismissed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("case_relationship_dismissals_pair_idx").on(
+      t.organisationId,
+      t.caseIdA,
+      t.caseIdB,
+    ),
+    index("case_relationship_dismissals_org_idx").on(t.organisationId),
+    check(
+      "case_relationship_dismissals_canonical_order",
+      sql.raw(`"case_id_a" < "case_id_b"`),
+    ),
   ],
 );
 
@@ -1172,6 +1297,9 @@ export type TwoFactor = typeof twoFactors.$inferSelect;
 export type Case = typeof cases.$inferSelect;
 export type CaseTask = typeof caseTasks.$inferSelect;
 export type Observable = typeof observables.$inferSelect;
+export type CaseRelationship = typeof caseRelationships.$inferSelect;
+export type CaseRelationshipDismissal =
+  typeof caseRelationshipDismissals.$inferSelect;
 export type TimelineEvent = typeof timelineEvents.$inferSelect;
 export type Comment = typeof comments.$inferSelect;
 export type Attachment = typeof attachments.$inferSelect;
