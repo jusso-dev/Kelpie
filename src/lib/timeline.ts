@@ -22,6 +22,9 @@ export type TimelineEventType =
   | "automation_run"
   | "ti_enrichment"
   | "custom_field_changed"
+  | "relationship_created"
+  | "relationship_removed"
+  | "relationship_suggestion_dismissed"
   | "custom";
 
 export async function writeTimelineEvent(opts: {

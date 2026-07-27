@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
 import {
+  listRelationshipsCore,
+  listSuggestionsCore,
+} from "@/lib/case-relationships-core";
+import {
   listWatchedVendors,
   queryCyberBriefing,
   queryThreatIntelligence,
@@ -40,6 +44,15 @@ const briefingInput = z.object({
 });
 
 const noInput = z.object({});
+
+const caseRelationshipsListInput = z.object({
+  caseId: z.string().trim().min(1).max(128),
+});
+
+const caseRelationshipSuggestionsListInput = z.object({
+  caseId: z.string().trim().min(1).max(128),
+  limit: z.number().int().min(1).max(50).optional(),
+});
 
 const tools = [
   {
@@ -121,6 +134,43 @@ const tools = [
     inputSchema: {
       type: "object",
       properties: {},
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "case_relationships_list",
+    title: "List case relationships",
+    description:
+      "List confirmed relationships (duplicate_of, related_to, parent_of, child_of) for a case, including confidence, origin, and reason.",
+    scope: "case_relationships:read" as ScopeValue,
+    inputSchema: {
+      type: "object",
+      properties: {
+        caseId: { type: "string", description: "Case identifier." },
+      },
+      required: ["caseId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "case_relationship_suggestions_list",
+    title: "List case relationship suggestions",
+    description:
+      "List possible duplicate/related case suggestions for a case, with match score and matched signals (title similarity, shared observables/tags/vendors).",
+    scope: "case_relationships:read" as ScopeValue,
+    inputSchema: {
+      type: "object",
+      properties: {
+        caseId: { type: "string", description: "Case identifier." },
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: 50,
+          default: 10,
+          description: "Maximum number of suggestions to return.",
+        },
+      },
+      required: ["caseId"],
       additionalProperties: false,
     },
   },
@@ -242,6 +292,18 @@ async function callTool(
         category: vendor.category,
       })),
     });
+  }
+  if (name === "case_relationships_list") {
+    const input = caseRelationshipsListInput.parse(args);
+    return toolResult(
+      await listRelationshipsCore(organisationId, input.caseId),
+    );
+  }
+  if (name === "case_relationship_suggestions_list") {
+    const input = caseRelationshipSuggestionsListInput.parse(args);
+    return toolResult(
+      await listSuggestionsCore(organisationId, input.caseId, input.limit),
+    );
   }
   throw new Error("Unknown tool");
 }

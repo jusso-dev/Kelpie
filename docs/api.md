@@ -19,6 +19,8 @@ Errors return `{ "error": "..." }` with an appropriate HTTP status (`400` invali
 | `threat_intelligence:read` | Search TI indicators and inspect feed state |
 | `threat_landscape:read` | Read current Cloudflare Radar Threat landscape data |
 | `briefing:read` | Read Cyber brief, watched vendors, and vendor matches |
+| `case_relationships:read` | Read case relationships and duplicate/related suggestions |
+| `case_relationships:write` | Link, unlink, and dismiss case relationships |
 
 ## Cases
 
@@ -113,6 +115,114 @@ Adding an observable kicks off enrichment.
 
 ### `GET /api/v1/observables?value=&exact=`
 Cross-case search. With `exact=true` does an equality match; otherwise substring.
+
+## Case relationships
+
+Typed, confirmed links between two cases (`duplicate_of`, `related_to`, `parent_of`/`child_of`), plus a scored duplicate/related-case suggestion feed. A relationship is always visible from both cases it connects — `GET` on either side returns it, oriented to that case's point of view. `parent_of` and `child_of` are the same stored edge viewed from opposite ends: linking with `child_of` (or reading it from the child case) is just the inverse presentation of a `parent_of` row, not a second edge. `related_to` is symmetric. All six endpoints below are gated on `case_relationships:read` (reads and suggestions) or `case_relationships:write` (link, unlink, dismiss); no separate `cases:*` scope is required.
+
+A case in any status — including `closed` — can be linked or unlinked; doing so never changes the case's status.
+
+### `GET /api/v1/cases/{id}/relationships`
+Returns every confirmed relationship touching the case, most recent first.
+
+```json
+{
+  "relationships": [
+    {
+      "id": "caserel_8k2n4qz",
+      "relationshipType": "child_of",
+      "direction": "incoming",
+      "confidence": 100,
+      "origin": "analyst",
+      "ruleId": null,
+      "ruleVersion": null,
+      "reason": "Same campaign, this case tracks the broader wave",
+      "createdBy": "user_9f2c1e",
+      "createdAt": "2026-07-28T02:14:00Z",
+      "otherCase": {
+        "id": "case_3ecfe70",
+        "caseNumber": "KP-2026-0041",
+        "title": "Parent incident: credential stuffing wave",
+        "status": "open",
+        "severity": "high"
+      }
+    }
+  ]
+}
+```
+
+`relationshipType` and `direction` are always expressed from the perspective of the case in the URL: a `parent_of` edge appears as `child_of`/`incoming` when read from the child case, and as `parent_of`/`outgoing` from the parent case. `related_to` always reports `direction: "symmetric"`. Returns `404` if the case does not exist in the caller's organisation.
+
+### `POST /api/v1/cases/{id}/relationships`
+```json
+{
+  "targetCaseId": "case_a1b2c3",
+  "relationshipType": "duplicate_of",
+  "reason": "Same phishing lure reported by two mailboxes",
+  "confidence": 90
+}
+```
+`relationshipType` is one of `duplicate_of`, `related_to`, `parent_of`, `child_of`. `reason` is required (non-empty after trimming). `confidence` (0–100), `origin` (`analyst`, `provider`, or `rule`; defaults to `analyst`), `ruleId`, and `ruleVersion` are optional — `origin: "analyst"` links default to `confidence: 100` when omitted. Returns `201` with the created relationship in the same shape as the `GET` list, oriented from the case in the URL:
+```json
+{ "relationship": { "id": "caserel_8k2n4qz", "relationshipType": "duplicate_of", "direction": "outgoing", "...": "..." } }
+```
+
+Status codes:
+- `400` — missing/empty `reason`, unknown `relationshipType`, out-of-range `confidence`, or the case linking to itself.
+- `403` — token lacks `case_relationships:write`.
+- `404` — either case does not exist in the caller's organisation (this includes cross-organisation link attempts, which never leak whether the target case exists elsewhere).
+- `409` — the exact edge already exists, or a conflicting reverse-direction edge already exists for a directional type (e.g. linking B `parent_of` A when A `parent_of` B is already recorded).
+
+### `DELETE /api/v1/cases/{id}/relationships/{relationshipId}`
+```json
+{ "reason": "No longer related after review" }
+```
+`reason` is required. Returns `200 { "ok": true }`. Writes a `relationship_removed` timeline event on both cases (the timeline is append-only — the earlier `relationship_created` event is never edited or deleted). Returns `400` for a missing/empty reason, `403` without `case_relationships:write`, `404` if the relationship does not exist on this case in the caller's organisation.
+
+### `GET /api/v1/cases/{id}/relationships/suggestions?limit=`
+Scores every other case in the organisation against this case (title similarity, shared observables, shared tags, shared vendor mentions) and returns likely duplicates/related cases that are not already linked or previously dismissed. `limit` is optional, 1–25, defaults to 10.
+
+```json
+{
+  "suggestions": [
+    {
+      "candidateCase": {
+        "id": "case_7f0a12",
+        "caseNumber": "KP-2026-0055",
+        "title": "Widespread phishing campaign targeting payroll department",
+        "status": "open",
+        "severity": "medium"
+      },
+      "score": 78,
+      "matchedSignals": {
+        "titleSimilarity": 0.82,
+        "sharedObservables": ["203.0.113.77", "198.51.100.44"],
+        "sharedTags": ["phishing", "payroll"],
+        "sharedVendors": []
+      },
+      "suggestedType": "duplicate_of"
+    }
+  ]
+}
+```
+`score` is 0–100. `suggestedType` is `duplicate_of` at score ≥ 70, otherwise `related_to`. Suggestions never cross organisations. Returns `404` if the case does not exist in the caller's organisation.
+
+### `POST /api/v1/cases/relationships/suggestions`
+Same scoring as above, but for a case that has not been created yet — used by the new-case form to surface likely duplicates before submit.
+```json
+{
+  "title": "Widespread phishing campaign targeting payroll staff",
+  "summary": "Lure with fake DocuSign link",
+  "tags": ["phishing", "payroll"]
+}
+```
+Returns `200` with the same `{ "suggestions": [...] }` shape as the per-case suggestions endpoint. `title` is required; `summary` and `tags` are optional.
+
+### `POST /api/v1/cases/{id}/relationships/suggestions/dismiss`
+```json
+{ "candidateCaseId": "case_7f0a12", "reason": "Reviewed — unrelated despite the overlap" }
+```
+Records that an analyst reviewed and rejected this pairing so it stops appearing in either case's suggestions. `reason` is required. Returns `200 { "ok": true }`. Returns `400` for a missing/empty reason or a candidate equal to the case itself, `403` without `case_relationships:write`, `404` if either case does not exist in the caller's organisation.
 
 ## Threat intelligence
 

@@ -66,6 +66,39 @@ export function TaskStatusBadge({ value }: { value: string }) {
   );
 }
 
+const relationshipTypeColours: Record<string, string> = {
+  duplicate_of: "text-red-400",
+  related_to: "text-slate-300",
+  parent_of: "text-[color:var(--color-tan-300)]",
+  child_of: "text-[color:var(--color-tan-300)]",
+};
+
+const relationshipTypeLabels: Record<string, string> = {
+  duplicate_of: "Duplicate",
+  related_to: "Related",
+  parent_of: "Parent",
+  child_of: "Child",
+};
+
+export function RelationshipTypeBadge({ value }: { value: string }) {
+  return (
+    <span className={cn("kelpie-badge", relationshipTypeColours[value] ?? "text-slate-300")}>
+      {relationshipTypeLabels[value] ?? value.replace(/_/g, " ")}
+    </span>
+  );
+}
+
+export function ConfidenceBadge({ value }: { value: number | null }) {
+  if (value === null) return null;
+  const tone =
+    value >= 80 ? "text-green-400" : value >= 50 ? "text-amber-400" : "text-slate-300";
+  return (
+    <span className={cn("kelpie-badge", tone)} title="Confidence">
+      {Math.round(value)}% confidence
+    </span>
+  );
+}
+
 export function TagBadge({
   value,
   tone = "neutral",

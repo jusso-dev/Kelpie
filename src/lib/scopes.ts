@@ -10,6 +10,14 @@ export const KNOWN_SCOPES = [
   { value: "threat_intelligence:read", label: "Read threat intelligence" },
   { value: "threat_landscape:read", label: "Read Threat landscape data" },
   { value: "briefing:read", label: "Read Cyber brief and vendor matches" },
+  {
+    value: "case_relationships:read",
+    label: "Read case relationships and duplicate/related suggestions",
+  },
+  {
+    value: "case_relationships:write",
+    label: "Link, unlink, and dismiss case relationships",
+  },
 ] as const;
 
 export type ScopeValue = (typeof KNOWN_SCOPES)[number]["value"];
