@@ -82,6 +82,14 @@ export const KNOWN_SCOPES = [
     label:
       "Evaluate rules, accept/reject suggestions, move/merge/split alerts, and reverse merges",
   },
+  {
+    value: "asset_context:read",
+    label: "Read asset/identity context records and case priority scores",
+  },
+  {
+    value: "asset_context:write",
+    label: "Create/update asset context, import inventories, and set priority overrides",
+  },
 ] as const;
 
 export type ScopeValue = (typeof KNOWN_SCOPES)[number]["value"];

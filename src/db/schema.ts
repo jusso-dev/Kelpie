@@ -157,6 +157,72 @@ export const attackStoryProvenanceEnum = pgEnum("attack_story_provenance", [
   "provider",
 ]);
 
+export const assetContextKindEnum = pgEnum("asset_context_kind", [
+  "asset",
+  "identity",
+  "application",
+  "business_service",
+]);
+
+export const privilegeLevelEnum = pgEnum("privilege_level", [
+  "none",
+  "standard",
+  "elevated",
+  "privileged",
+  "admin",
+  "domain_admin",
+]);
+
+export const recoveryPriorityEnum = pgEnum("recovery_priority", [
+  "p1",
+  "p2",
+  "p3",
+  "p4",
+  "none",
+]);
+
+export const contextSyncStatusEnum = pgEnum("context_sync_status", [
+  "ok",
+  "stale",
+  "failed",
+  "never_synced",
+]);
+
+export const contextImportSourceEnum = pgEnum("context_import_source", [
+  "csv",
+  "rest",
+  "entra",
+  "defender",
+  "cmdb",
+  "manual",
+]);
+
+export const contextImportRunStatusEnum = pgEnum("context_import_run_status", [
+  "dry_run",
+  "completed",
+  "failed",
+  "partial",
+]);
+
+export const priorityScoreBandEnum = pgEnum("priority_score_band", [
+  "low",
+  "medium",
+  "high",
+  "critical",
+]);
+
+export const staleContextPolicyEnum = pgEnum("stale_context_policy", [
+  "discount",
+  "exclude",
+  "include",
+]);
+
+export const entityMatchReviewStatusEnum = pgEnum("entity_match_review_status", [
+  "pending",
+  "linked",
+  "dismissed",
+]);
+
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Investigation data model: alerts, entities, evidence items (issue #55)    */
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -3804,6 +3870,286 @@ export const caseContentBlockLinks = pgTable(
 );
 
 export type Organisation = typeof organisations.$inferSelect;
+
+/* Asset / identity context records (issue #59)                               */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Organisation-scoped business context for an asset, identity, application,
+ * or business service. Provider-owned fields (`criticality`, `privilegeLevel`,
+ * …) are updated by imports; analyst override columns are never written by
+ * providers. Effective values are `coalesce(override, provider)`.
+ *
+ * Optionally linked to a normalised investigation `entities` row. Ambiguous
+ * matches go to `entity_context_match_reviews` rather than auto-linking.
+ */
+export const assetIdentityContexts = pgTable(
+  "asset_identity_contexts",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    kind: assetContextKindEnum("kind").notNull(),
+    entityId: text("entity_id").references(() => entities.id, {
+      onDelete: "set null",
+    }),
+    displayName: text("display_name").notNull(),
+    primaryIdentifierKind: entityIdentifierKindEnum(
+      "primary_identifier_kind",
+    ).notNull(),
+    primaryIdentifierValue: text("primary_identifier_value").notNull(),
+    // Provider-owned fields
+    criticality: criticalityLevelEnum("criticality").notNull().default("medium"),
+    privilegeLevel: privilegeLevelEnum("privilege_level")
+      .notNull()
+      .default("none"),
+    exposure: exposureLevelEnum("exposure").notNull().default("internal"),
+    environment: environmentKindEnum("environment")
+      .notNull()
+      .default("unknown"),
+    isCrownJewel: boolean("is_crown_jewel").notNull().default(false),
+    recoveryPriority: recoveryPriorityEnum("recovery_priority")
+      .notNull()
+      .default("none"),
+    // Analyst overrides — never silently overwritten by provider sync
+    criticalityOverride: criticalityLevelEnum("criticality_override"),
+    privilegeLevelOverride: privilegeLevelEnum("privilege_level_override"),
+    exposureOverride: exposureLevelEnum("exposure_override"),
+    isCrownJewelOverride: boolean("is_crown_jewel_override"),
+    recoveryPriorityOverride: recoveryPriorityEnum(
+      "recovery_priority_override",
+    ),
+    ownerTeam: text("owner_team"),
+    ownerEmail: text("owner_email"),
+    businessService: text("business_service"),
+    applicationName: text("application_name"),
+    dataClassifications: jsonb("data_classifications")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    regulatoryScope: jsonb("regulatory_scope")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    attributes: jsonb("attributes").notNull().default(sql`'{}'::jsonb`),
+    providerSource: contextImportSourceEnum("provider_source")
+      .notNull()
+      .default("manual"),
+    providerExternalId: text("provider_external_id"),
+    providerUpdatedAt: timestamp("provider_updated_at", {
+      withTimezone: true,
+    }),
+    lastSyncAt: timestamp("last_sync_at", { withTimezone: true }),
+    lastSyncStatus: contextSyncStatusEnum("last_sync_status")
+      .notNull()
+      .default("never_synced"),
+    lastSyncError: text("last_sync_error"),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    updatedBy: text("updated_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("asset_contexts_org_kind_ident_idx").on(
+      t.organisationId,
+      t.kind,
+      t.primaryIdentifierKind,
+      t.primaryIdentifierValue,
+    ),
+    uniqueIndex("asset_contexts_org_provider_ext_idx")
+      .on(t.organisationId, t.providerSource, t.providerExternalId)
+      .where(sql`${t.providerExternalId} is not null`),
+    index("asset_contexts_org_entity_idx").on(t.organisationId, t.entityId),
+    index("asset_contexts_org_criticality_idx").on(
+      t.organisationId,
+      t.criticality,
+    ),
+    index("asset_contexts_org_crown_idx")
+      .on(t.organisationId)
+      .where(
+        sql`${t.isCrownJewel} = true or ${t.isCrownJewelOverride} = true`,
+      ),
+    index("asset_contexts_org_sync_idx").on(
+      t.organisationId,
+      t.lastSyncStatus,
+    ),
+  ],
+);
+
+/**
+ * Ambiguous entity matches held for analyst review instead of auto-link.
+ * `candidateEntityIds` is a jsonb string array of entity ids in this org.
+ */
+export const entityContextMatchReviews = pgTable(
+  "entity_context_match_reviews",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    contextId: text("context_id")
+      .notNull()
+      .references(() => assetIdentityContexts.id, { onDelete: "cascade" }),
+    status: entityMatchReviewStatusEnum("status").notNull().default("pending"),
+    candidateEntityIds: jsonb("candidate_entity_ids")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    matchReason: text("match_reason"),
+    resolvedEntityId: text("resolved_entity_id").references(() => entities.id, {
+      onDelete: "set null",
+    }),
+    resolvedBy: text("resolved_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("entity_match_reviews_org_status_idx").on(
+      t.organisationId,
+      t.status,
+    ),
+    index("entity_match_reviews_context_idx").on(t.contextId),
+  ],
+);
+
+/** One CSV / Entra / Defender / REST import attempt (including dry-runs). */
+export const contextImportRuns = pgTable(
+  "context_import_runs",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    source: contextImportSourceEnum("source").notNull(),
+    status: contextImportRunStatusEnum("status").notNull().default("dry_run"),
+    dryRun: boolean("dry_run").notNull().default(true),
+    rowCount: integer("row_count").notNull().default(0),
+    successCount: integer("success_count").notNull().default(0),
+    errorCount: integer("error_count").notNull().default(0),
+    createdCount: integer("created_count").notNull().default(0),
+    updatedCount: integer("updated_count").notNull().default(0),
+    skippedCount: integer("skipped_count").notNull().default(0),
+    /** Per-row errors: `[{ row, field?, message }]`. */
+    errors: jsonb("errors").notNull().default(sql`'[]'::jsonb`),
+    summary: jsonb("summary").notNull().default(sql`'{}'::jsonb`),
+    startedBy: text("started_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    startedAt: timestamp("started_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("context_import_runs_org_started_idx").on(
+      t.organisationId,
+      t.startedAt,
+    ),
+  ],
+);
+
+/**
+ * Explainable case priority score, kept separate from source `cases.severity`.
+ * Every calculation stores factors, weights, and a calculation version so
+ * analysts can see why a case ranks where it does.
+ *
+ * `analystOverrideScore` wins over `calculatedScore` for `effectiveScore`;
+ * recalculation never clears the override.
+ */
+export const casePriorityScores = pgTable(
+  "case_priority_scores",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    calculatedScore: integer("calculated_score").notNull(),
+    scoreBand: priorityScoreBandEnum("score_band").notNull(),
+    effectiveScore: integer("effective_score").notNull(),
+    calculationVersion: text("calculation_version").notNull(),
+    /** Array of factor objects: id, label, inputValue, normalisedScore, weight, contribution, detail, staleDiscountApplied. */
+    factors: jsonb("factors").notNull().default(sql`'[]'::jsonb`),
+    weightsUsed: jsonb("weights_used").notNull().default(sql`'{}'::jsonb`),
+    inputsSnapshot: jsonb("inputs_snapshot")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    scoringEnabled: boolean("scoring_enabled").notNull().default(true),
+    staleContextPolicy: staleContextPolicyEnum("stale_context_policy")
+      .notNull()
+      .default("discount"),
+    hasCriticalContext: boolean("has_critical_context").notNull().default(false),
+    hasCrownJewelContext: boolean("has_crown_jewel_context")
+      .notNull()
+      .default(false),
+    hasStaleContext: boolean("has_stale_context").notNull().default(false),
+    analystOverrideScore: integer("analyst_override_score"),
+    analystOverrideReason: text("analyst_override_reason"),
+    analystOverrideBy: text("analyst_override_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    analystOverrideAt: timestamp("analyst_override_at", {
+      withTimezone: true,
+    }),
+    calculatedAt: timestamp("calculated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("case_priority_scores_case_idx").on(t.caseId),
+    index("case_priority_scores_org_effective_idx").on(
+      t.organisationId,
+      t.effectiveScore,
+    ),
+    index("case_priority_scores_org_band_idx").on(
+      t.organisationId,
+      t.scoreBand,
+    ),
+    check(
+      "case_priority_scores_calc_range",
+      sql.raw(
+        `"calculated_score" >= 0 and "calculated_score" <= 100`,
+      ),
+    ),
+    check(
+      "case_priority_scores_eff_range",
+      sql.raw(`"effective_score" >= 0 and "effective_score" <= 100`),
+    ),
+    check(
+      "case_priority_scores_override_range",
+      sql.raw(
+        `"analyst_override_score" is null or ("analyst_override_score" >= 0 and "analyst_override_score" <= 100)`,
+      ),
+    ),
+  ],
+);
+
+export type Organisation = typeof organisations.$inferSelect;
+
+export type AssetIdentityContext = typeof assetIdentityContexts.$inferSelect;
+export type EntityContextMatchReview =
+  typeof entityContextMatchReviews.$inferSelect;
+export type ContextImportRun = typeof contextImportRuns.$inferSelect;
+export type CasePriorityScore = typeof casePriorityScores.$inferSelect;
+
 export type User = typeof users.$inferSelect;
 export type TwoFactor = typeof twoFactors.$inferSelect;
 export type Case = typeof cases.$inferSelect;

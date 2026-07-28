@@ -44,6 +44,15 @@ import { safeExternalUrl } from "@/lib/safe-url";
 import { listAdditionalAssigneesCore, listQueuesCore } from "@/lib/queues-core";
 import { listWatchersCore } from "@/lib/watchers-core";
 import { listHandoffsCore } from "@/lib/handoffs-core";
+import {
+  getCasePriorityCore,
+  listCriticalContextsForCase,
+  recalculateCasePriorityCore,
+} from "@/lib/asset-context/priority-core";
+import { serialiseContext } from "@/lib/asset-context/context-core";
+import { getPriorityScoringSettings } from "@/lib/asset-context/settings";
+import { effectiveContextFields } from "@/lib/asset-context/effective";
+import CasePriorityPanel from "@/components/case-priority-panel";
 
 type Props = { params: Promise<{ id: string }> };
 
@@ -104,6 +113,7 @@ export default async function CaseOverviewPage({ params }: Props) {
     handoffs,
     attackMappings,
     attackStory,
+    prioritySettings,
   ] = await Promise.all([
     getCustomFieldsForEntity(user.organisationId, c.id),
     listAvailableActions(user.organisationId, c.id),
@@ -116,7 +126,26 @@ export default async function CaseOverviewPage({ params }: Props) {
     listHandoffsCore(user.organisationId, c.id),
     listMappingsForCase(user.organisationId, c.id),
     listStoryCore(user.organisationId, c.id),
+    getPriorityScoringSettings(user.organisationId),
   ]);
+  let priority = await getCasePriorityCore(user.organisationId, c.id);
+  if (!priority) {
+    priority = await recalculateCasePriorityCore(user.organisationId, c.id);
+  }
+  const criticalContexts = (
+    await listCriticalContextsForCase(user.organisationId, c.id)
+  ).map((row) => {
+    const s = serialiseContext(row, {
+      staleAfterHours: prioritySettings.staleAfterHours,
+    });
+    return {
+      id: row.id,
+      displayName: row.displayName,
+      kind: row.kind,
+      isStale: s.isStale,
+      effective: effectiveContextFields(row),
+    };
+  });
   const canEdit = user.role === "admin" || user.role === "analyst";
   const sourceLabel = sourceSystemLabel(c.sourceSystem);
   // Re-validated at render time: a legacy row or a bypass of the public API's
@@ -157,6 +186,38 @@ export default async function CaseOverviewPage({ params }: Props) {
           summary={c.summary}
           version={c.version}
           canEdit={canEdit}
+        />
+
+        <CasePriorityPanel
+          caseId={c.id}
+          canEdit={canEdit}
+          criticalContexts={criticalContexts}
+          priority={
+            priority
+              ? {
+                  calculatedScore: priority.calculatedScore,
+                  effectiveScore: priority.effectiveScore,
+                  scoreBand: priority.scoreBand,
+                  calculationVersion: priority.calculationVersion,
+                  factors: (priority.factors as Array<{
+                    id: string;
+                    label: string;
+                    inputValue: string | number | boolean | null;
+                    normalisedScore: number;
+                    weight: number;
+                    contribution: number;
+                    detail: string;
+                    staleDiscountApplied?: boolean;
+                  }>) ?? [],
+                  scoringEnabled: priority.scoringEnabled,
+                  hasCriticalContext: priority.hasCriticalContext,
+                  hasCrownJewelContext: priority.hasCrownJewelContext,
+                  hasStaleContext: priority.hasStaleContext,
+                  analystOverrideScore: priority.analystOverrideScore,
+                  analystOverrideReason: priority.analystOverrideReason,
+                }
+              : null
+          }
         />
 
         <div className="kelpie-card p-5">

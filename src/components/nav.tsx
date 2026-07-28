@@ -35,6 +35,7 @@ const links = [
   { href: "/threat-landscape", label: "Threat landscape", icon: Globe2 },
   { href: "/playbooks", label: "Playbooks", icon: BookOpen },
   { href: "/attack-coverage", label: "ATT&CK coverage", icon: Crosshair },
+  { href: "/asset-context", label: "Assets & identities", icon: CircleUserRound },
   { href: "/guides", label: "Guides", icon: Library },
   { href: "/settings", label: "Settings", icon: Settings },
   { href: "/account/security", label: "Security", icon: ShieldCheck },

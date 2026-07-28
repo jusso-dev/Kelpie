@@ -112,6 +112,12 @@ export default async function SettingsPage() {
           >
             Closure policies
           </Link>
+          <Link
+            href="/settings/asset-context"
+            className="kelpie-btn kelpie-btn-secondary justify-center"
+          >
+            Asset & identity context
+          </Link>
         </div>
       </section>
 

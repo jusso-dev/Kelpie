@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { cases } from "@/db/schema";
+import { casePriorityScores, cases } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import Link from "next/link";
@@ -14,6 +14,7 @@ import {
   CaseCollaborationProvider,
   ConnectionStatusIndicator,
 } from "@/components/case-collaboration";
+import { cn } from "@/lib/utils";
 
 const tabs = [
   { key: "overview", label: "Overview", path: "" },
@@ -44,11 +45,34 @@ export default async function CaseLayout({ children, params }: Props) {
     .limit(1);
   if (!c) notFound();
 
+  const [priority] = await db
+    .select({
+      effectiveScore: casePriorityScores.effectiveScore,
+      scoreBand: casePriorityScores.scoreBand,
+      hasCrownJewelContext: casePriorityScores.hasCrownJewelContext,
+      hasCriticalContext: casePriorityScores.hasCriticalContext,
+    })
+    .from(casePriorityScores)
+    .where(
+      and(
+        eq(casePriorityScores.caseId, id),
+        eq(casePriorityScores.organisationId, user.organisationId),
+      ),
+    )
+    .limit(1);
+
   const isStrict = c.tlp === "amber_strict" || c.tlp === "red";
   const tags = Array.isArray(c.tags) ? (c.tags as string[]) : [];
   const dataTags = Array.isArray(c.dataClassificationTags)
     ? (c.dataClassificationTags as string[])
     : [];
+
+  const priorityTone: Record<string, string> = {
+    low: "text-[color:var(--color-sev-low)]",
+    medium: "text-[color:var(--color-sev-medium)]",
+    high: "text-[color:var(--color-sev-high)]",
+    critical: "text-[color:var(--color-sev-critical)]",
+  };
 
   return (
     <CaseCollaborationProvider caseId={id}>
@@ -78,6 +102,22 @@ export default async function CaseLayout({ children, params }: Props) {
             <StatusBadge value={c.status} />
             <SeverityBadge value={c.severity} />
             <TlpBadge value={c.tlp} />
+            {priority ? (
+              <span
+                className={cn(
+                  "kelpie-badge",
+                  priorityTone[priority.scoreBand] ?? "text-slate-300",
+                )}
+                title="Organisation priority score (separate from source severity)"
+              >
+                priority {priority.effectiveScore}
+              </span>
+            ) : null}
+            {priority?.hasCrownJewelContext ? (
+              <span className="kelpie-badge text-red-300">crown jewel</span>
+            ) : priority?.hasCriticalContext ? (
+              <span className="kelpie-badge text-amber-300">critical asset</span>
+            ) : null}
             <span className="text-xs text-slate-500 capitalize">
               {c.classification.replace(/_/g, " ")}
             </span>

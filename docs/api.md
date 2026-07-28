@@ -740,3 +740,66 @@ Uploads the current APNs token. The app sends this on every APNs registration ca
 Disassociates the device during sign out.
 
 The push outbox routes `sla_breach` and `comment_mention` events. Configure `APNS_TEAM_ID`, `APNS_KEY_ID`, `APNS_PRIVATE_KEY`, and the server-controlled `APNS_BUNDLE_ID`; the authenticated `/api/cron/mobile-push` worker delivers pending messages over APNs HTTP/2 and deactivates tokens rejected with HTTP 410.
+
+## Asset & identity context
+
+Organisation-scoped business context for assets, identities, applications, and business services. Used by explainable case priority scoring (separate from source severity). Provider updates never overwrite analyst override fields.
+
+### `GET /api/v1/asset-contexts`
+Optional query: `kind`, `criticalOnly=true`, `crownJewelOnly=true`, `limit`.
+
+### `POST /api/v1/asset-contexts`
+Upsert a context record (REST provider). Body includes `kind`, `displayName`, `primaryIdentifierKind`, `primaryIdentifierValue`, and optional criticality / privilege / exposure fields. Returns `201` when created, `200` when updated. Ambiguous entity matches return `matchReviewId` instead of auto-linking.
+
+### `GET /api/v1/asset-contexts/{id}`
+
+### `PATCH /api/v1/asset-contexts/{id}/overrides`
+Set or clear analyst overrides (`criticalityOverride`, `privilegeLevelOverride`, `exposureOverride`, `isCrownJewelOverride`, `recoveryPriorityOverride`). Pass `null` to clear an override.
+
+### `POST /api/v1/asset-contexts/import`
+CSV dry-run/import and provider batch import:
+
+```json
+{ "source": "csv", "dryRun": true, "csvText": "kind,display_name,..." }
+```
+
+```json
+{ "source": "entra", "dryRun": false, "users": [{ "id": "...", "userPrincipalName": "a@b.com", "displayName": "A" }] }
+```
+
+```json
+{ "source": "defender", "dryRun": false, "devices": [{ "id": "...", "deviceName": "wkstn-01" }] }
+```
+
+```json
+{ "source": "cmdb", "dryRun": true, "records": [{ "externalId": "1", "kind": "asset", "displayName": "db1", "identifierKind": "hostname", "identifierValue": "db1" }] }
+```
+
+CSV required columns: `kind`, `display_name`, `identifier_kind`, `identifier_value`. Optional: `criticality`, `privilege_level`, `exposure`, `environment`, `is_crown_jewel`, `recovery_priority`, `owner_team`, `owner_email`, `business_service`, `application_name`, `data_classifications`, `regulatory_scope`, `external_id`.
+
+### `GET /api/v1/asset-contexts/match-reviews`
+Pending ambiguous entity matches.
+
+### `POST /api/v1/asset-contexts/match-reviews`
+```json
+{ "reviewId": "mrev_...", "action": "link", "entityId": "ent_..." }
+```
+or `{ "reviewId": "mrev_...", "action": "dismiss" }`.
+
+### `GET /api/v1/cases/{id}/priority`
+Explainable priority score with factors, weights, calculation version, and linked critical contexts. Also accepts `cases:read`.
+
+### `POST /api/v1/cases/{id}/priority?recalculate=true`
+Recalculate. Analyst score overrides are preserved.
+
+### `POST /api/v1/cases/{id}/priority`
+```json
+{ "score": 90, "reason": "Crown jewel + active exfil" }
+```
+Pass `"score": null` to clear the override.
+
+### `GET /api/v1/priority-scoring` / `PATCH /api/v1/priority-scoring`
+Organisation scoring settings: `enabled`, bounded `weights`, `staleContextPolicy` (`discount` | `exclude` | `include`), `staleAfterHours`.
+
+**Empty scopes grant nothing.** A token whose `scopes` array is empty fails every scope check (`403`). Sensitive scopes (`alerts:raw_payload:read`, `evidence:override`, `audit:read`) are never implied. Migration `0026_empty_token_scopes` rewrites any pre-existing empty-scope tokens to an explicit non-sensitive set so ordinary integrations keep working without retaining those sensitive powers — re-issue tokens that intentionally need sensitive scopes from Settings after upgrading.
+
