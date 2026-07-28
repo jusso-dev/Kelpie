@@ -2898,6 +2898,56 @@ export const reportApprovalStatusEnum = pgEnum("report_approval_status", [
   "invalidated",
 ]);
 
+/* ── Post-incident review (issue #64) ───────────────────────────────────── */
+
+/** Lifecycle of a case post-incident review (independent of case status). */
+export const postIncidentReviewStatusEnum = pgEnum(
+  "post_incident_review_status",
+  [
+    "draft",
+    "in_progress",
+    "pending_approval",
+    "approved",
+    "published",
+    "cancelled",
+  ],
+);
+
+/** Follow-up actions spawned from a review — not case_tasks. */
+export const reviewFollowUpStatusEnum = pgEnum("review_follow_up_status", [
+  "open",
+  "in_progress",
+  "done",
+  "cancelled",
+  "deferred",
+]);
+
+export const reviewImprovementKindEnum = pgEnum("review_improvement_kind", [
+  "playbook_revision",
+  "detection_improvement",
+  "integration_backlog",
+  "control_gap",
+  "process_gap",
+  "communication_gap",
+  "other",
+]);
+
+export const reviewImprovementStatusEnum = pgEnum(
+  "review_improvement_status",
+  ["proposed", "accepted", "in_progress", "done", "rejected", "deferred"],
+);
+
+export const knowledgeArticleStatusEnum = pgEnum("knowledge_article_status", [
+  "draft",
+  "published",
+  "archived",
+]);
+
+export const reviewApprovalDecisionEnum = pgEnum("review_approval_decision", [
+  "approved",
+  "rejected",
+]);
+
 /**
  * Append-only organisation-wide audit trail. A `BEFORE UPDATE` trigger (see
  * migration 0020) rejects every update except the `actor_id -> NULL`
@@ -3227,6 +3277,365 @@ export const reportSchedules = pgTable(
   (t) => [
     index("report_schedules_org_active_idx").on(t.organisationId, t.isActive),
     index("report_schedules_next_run_idx").on(t.nextRunAt),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Post-incident review, lessons learned, knowledge (issue #64)               */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Admin-managed review template. Behaviour always resolves through an
+ * immutable `review_template_versions` row so historical reviews stay
+ * reproducible after later edits.
+ */
+export const reviewTemplates = pgTable(
+  "review_templates",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    isActive: boolean("is_active").notNull().default(true),
+    currentVersion: integer("current_version").notNull().default(1),
+    /**
+     * When non-empty, reviews using this template are required for cases
+     * whose severity is in this list (in addition to org policy).
+     */
+    requiredSeverities: jsonb("required_severities")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /**
+     * When non-empty, required for cases whose classification is in this list.
+     */
+    requiredClassifications: jsonb("required_classifications")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** Stable catalogue identity for baseline default. Null for custom. */
+    catalogueKey: text("catalogue_key"),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("review_templates_org_idx").on(t.organisationId),
+    uniqueIndex("review_templates_org_catalogue_key_idx").on(
+      t.organisationId,
+      t.catalogueKey,
+    ),
+  ],
+);
+
+/**
+ * Immutable snapshot of required/optional section keys for a review template.
+ * Editing the template inserts a new version and bumps currentVersion.
+ */
+export const reviewTemplateVersions = pgTable(
+  "review_template_versions",
+  {
+    id: text("id").primaryKey(),
+    templateId: text("template_id")
+      .notNull()
+      .references(() => reviewTemplates.id, { onDelete: "cascade" }),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    /**
+     * Ordered section config: [{ key, title?, required, order }].
+     * Validated in application code.
+     */
+    sections: jsonb("sections").notNull().default(sql`'[]'::jsonb`),
+    requireApproval: boolean("require_approval").notNull().default(true),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("review_template_versions_template_ver_idx").on(
+      t.templateId,
+      t.version,
+    ),
+    index("review_template_versions_org_idx").on(t.organisationId),
+  ],
+);
+
+/**
+ * One post-incident review for a case. Case may close operationally while
+ * this row stays draft/in_progress/pending_approval. Status is independent
+ * of case.status.
+ */
+export const casePostIncidentReviews = pgTable(
+  "case_post_incident_reviews",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    templateId: text("template_id").references(() => reviewTemplates.id, {
+      onDelete: "set null",
+    }),
+    templateVersionId: text("template_version_id").references(
+      () => reviewTemplateVersions.id,
+      { onDelete: "set null" },
+    ),
+    status: postIncidentReviewStatusEnum("status").notNull().default("draft"),
+    /** True when org/template policy required this review at creation time. */
+    requiredByPolicy: boolean("required_by_policy").notNull().default(false),
+    /** Human-readable reason policy fired (severity/classification/org/template). */
+    policyReason: text("policy_reason"),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    /** Points at the current working revision (may be unapproved). */
+    currentRevisionId: text("current_revision_id"),
+    /** Points at the latest approved revision, if any. */
+    approvedRevisionId: text("approved_revision_id"),
+    title: text("title").notNull(),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("case_post_incident_reviews_org_status_idx").on(
+      t.organisationId,
+      t.status,
+    ),
+    index("case_post_incident_reviews_case_idx").on(t.caseId),
+    index("case_post_incident_reviews_org_due_idx").on(
+      t.organisationId,
+      t.dueAt,
+    ),
+  ],
+);
+
+/**
+ * Immutable content snapshot for a review. Approval binds this exact row
+ * (id + contentFingerprint). Editing an approved review creates a new
+ * unapproved revision rather than mutating the approved content.
+ */
+export const reviewRevisions = pgTable(
+  "review_revisions",
+  {
+    id: text("id").primaryKey(),
+    reviewId: text("review_id")
+      .notNull()
+      .references(() => casePostIncidentReviews.id, { onDelete: "cascade" }),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull(),
+    /**
+     * Full structured review body. See ReviewContent in
+     * src/lib/post-incident-review/types.ts.
+     */
+    content: jsonb("content").notNull().default(sql`'{}'::jsonb`),
+    /** SHA-256 of canonicalised content JSON. Approval binds this. */
+    contentFingerprint: text("content_fingerprint").notNull(),
+    isApproved: boolean("is_approved").notNull().default(false),
+    approvalDecision: reviewApprovalDecisionEnum("approval_decision"),
+    approvedBy: text("approved_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    approvalNotes: text("approval_notes"),
+    /** Fingerprint that was bound at approval time (must match content). */
+    boundContentFingerprint: text("bound_content_fingerprint"),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("review_revisions_review_rev_idx").on(t.reviewId, t.revision),
+    index("review_revisions_org_idx").on(t.organisationId),
+    index("review_revisions_review_idx").on(t.reviewId),
+  ],
+);
+
+/**
+ * Follow-up actions from a post-incident review. Separate lifecycle from
+ * incident-response `case_tasks` (owners, due dates, reporting).
+ */
+export const reviewFollowUpActions = pgTable(
+  "review_follow_up_actions",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    reviewId: text("review_id")
+      .notNull()
+      .references(() => casePostIncidentReviews.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    description: text("description"),
+    status: reviewFollowUpStatusEnum("status").notNull().default("open"),
+    ownerId: text("owner_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    theme: text("theme"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    completedBy: text("completed_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    /**
+     * Optional external ticket reference (webhook/connector). Does not
+     * replace Kelpie audit history — source review/case remain authoritative.
+     */
+    externalTicketRef: text("external_ticket_ref"),
+    externalTicketUrl: text("external_ticket_url"),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("review_follow_up_actions_org_status_idx").on(
+      t.organisationId,
+      t.status,
+    ),
+    index("review_follow_up_actions_review_idx").on(t.reviewId),
+    index("review_follow_up_actions_case_idx").on(t.caseId),
+    index("review_follow_up_actions_owner_due_idx").on(t.ownerId, t.dueAt),
+  ],
+);
+
+/**
+ * Publishable knowledge article stub derived from a review. Summaries
+ * exclude sensitive evidence and restricted fields by default.
+ */
+export const knowledgeArticles = pgTable(
+  "knowledge_articles",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    sourceReviewId: text("source_review_id").references(
+      () => casePostIncidentReviews.id,
+      { onDelete: "set null" },
+    ),
+    sourceCaseId: text("source_case_id").references(() => cases.id, {
+      onDelete: "set null",
+    }),
+    sourceRevisionId: text("source_revision_id").references(
+      () => reviewRevisions.id,
+      { onDelete: "set null" },
+    ),
+    title: text("title").notNull(),
+    /** Redacted publishable summary — never raw sensitive evidence by default. */
+    summary: text("summary").notNull().default(""),
+    /** Structured safe body (themes, gaps without restricted notes). */
+    body: jsonb("body").notNull().default(sql`'{}'::jsonb`),
+    status: knowledgeArticleStatusEnum("status").notNull().default("draft"),
+    /** True when sensitive fields were intentionally included (requires view_sensitive). */
+    includesSensitive: boolean("includes_sensitive").notNull().default(false),
+    themes: jsonb("themes").notNull().default(sql`'[]'::jsonb`),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    publishedBy: text("published_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("knowledge_articles_org_status_idx").on(t.organisationId, t.status),
+    index("knowledge_articles_source_review_idx").on(t.sourceReviewId),
+    index("knowledge_articles_source_case_idx").on(t.sourceCaseId),
+  ],
+);
+
+/**
+ * Optional playbook / detection / control improvement proposals linked to a
+ * review. Does not auto-mutate playbooks; records the proposal for the
+ * improvement register.
+ */
+export const reviewImprovementProposals = pgTable(
+  "review_improvement_proposals",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    reviewId: text("review_id")
+      .notNull()
+      .references(() => casePostIncidentReviews.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    kind: reviewImprovementKindEnum("kind").notNull(),
+    title: text("title").notNull(),
+    description: text("description"),
+    status: reviewImprovementStatusEnum("status").notNull().default("proposed"),
+    /** Optional link to an existing playbook if kind is playbook_revision. */
+    linkedPlaybookId: text("linked_playbook_id").references(
+      () => playbooks.id,
+      { onDelete: "set null" },
+    ),
+    externalTicketRef: text("external_ticket_ref"),
+    externalTicketUrl: text("external_ticket_url"),
+    ownerId: text("owner_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("review_improvement_proposals_org_status_idx").on(
+      t.organisationId,
+      t.status,
+    ),
+    index("review_improvement_proposals_review_idx").on(t.reviewId),
+    index("review_improvement_proposals_kind_idx").on(
+      t.organisationId,
+      t.kind,
+    ),
   ],
 );
 
@@ -5109,6 +5518,14 @@ export type ReportTemplateVersion = typeof reportTemplateVersions.$inferSelect;
 export type ReportExport = typeof reportExports.$inferSelect;
 export type ReportExportApproval = typeof reportExportApprovals.$inferSelect;
 export type ReportSchedule = typeof reportSchedules.$inferSelect;
+export type ReviewTemplate = typeof reviewTemplates.$inferSelect;
+export type ReviewTemplateVersion = typeof reviewTemplateVersions.$inferSelect;
+export type CasePostIncidentReview = typeof casePostIncidentReviews.$inferSelect;
+export type ReviewRevision = typeof reviewRevisions.$inferSelect;
+export type ReviewFollowUpAction = typeof reviewFollowUpActions.$inferSelect;
+export type KnowledgeArticle = typeof knowledgeArticles.$inferSelect;
+export type ReviewImprovementProposal =
+  typeof reviewImprovementProposals.$inferSelect;
 export type TiFeed = typeof tiFeeds.$inferSelect;
 export type TiIndicator = typeof tiIndicators.$inferSelect;
 export type CaseSource = typeof caseSources.$inferSelect;

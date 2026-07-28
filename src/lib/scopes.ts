@@ -120,6 +120,21 @@ export const KNOWN_SCOPES = [
     label:
       "Create and version report templates and approve report release (sensitive; admin-issued tokens)",
   },
+  {
+    value: "reviews:read",
+    label:
+      "Read post-incident reviews, revisions, follow-ups, knowledge articles, and improvement proposals",
+  },
+  {
+    value: "reviews:write",
+    label:
+      "Create and edit post-incident reviews, follow-ups, knowledge articles, and improvement proposals",
+  },
+  {
+    value: "reviews:admin",
+    label:
+      "Manage review templates, org review policy, and approve reviews (sensitive; admin-issued tokens)",
+  },
 ] as const;
 
 export type ScopeValue = (typeof KNOWN_SCOPES)[number]["value"];
@@ -135,6 +150,7 @@ export const SENSITIVE_SCOPES = [
   "audit:read",
   "cases:override_closure",
   "reports:admin",
+  "reviews:admin",
 ] as const satisfies readonly ScopeValue[];
 
 export type SensitiveScopeValue = (typeof SENSITIVE_SCOPES)[number];
