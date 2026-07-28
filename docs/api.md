@@ -35,8 +35,11 @@ Errors return `{ "error": "..." }` with an appropriate HTTP status (`400` invali
 | `reports:read` | Read report templates, previews, export history, and download released reports |
 | `reports:write` | Generate case reports, request release approval, and manage report schedules |
 | `reports:admin` | Create/version report templates and approve report release (sensitive; admin-issued tokens) |
+| `reviews:read` | Read post-incident reviews, revisions, follow-ups, knowledge articles, and improvement proposals |
+| `reviews:write` | Create and edit post-incident reviews, follow-ups, knowledge articles, and improvement proposals |
+| `reviews:admin` | Manage review templates, org review policy, and approve reviews (sensitive; admin-issued tokens) |
 
-**Empty scopes grant nothing.** A token whose `scopes` array is empty fails every scope check (`403`). Sensitive scopes (`alerts:raw_payload:read`, `evidence:override`, `audit:read`, `cases:override_closure`, `reports:admin`) are never implied. Migration `0026_empty_token_scopes` rewrites any pre-existing empty-scope tokens to an explicit non-sensitive set so ordinary integrations keep working without retaining those sensitive powers — re-issue tokens that intentionally need sensitive scopes from Settings after upgrading.
+**Empty scopes grant nothing.** A token whose `scopes` array is empty fails every scope check (`403`). Sensitive scopes (`alerts:raw_payload:read`, `evidence:override`, `audit:read`, `cases:override_closure`, `reports:admin`, `reviews:admin`) are never implied. Migration `0026_empty_token_scopes` rewrites any pre-existing empty-scope tokens to an explicit non-sensitive set so ordinary integrations keep working without retaining those sensitive powers — re-issue tokens that intentionally need sensitive scopes from Settings after upgrading.
 
 ## Cases
 
@@ -800,6 +803,64 @@ Downloads the file when status is `completed` or `released`. Verifies SHA-256. H
 }
 ```
 Destination is always `{ "kind": "export_history" }` — arbitrary external destinations are out of scope. Worker job `run-report-schedules` re-checks template activity and case membership at execution time. Scope: `reports:write`.
+
+## Post-incident review (lessons learned + knowledge)
+
+Versioned post-incident review templates and case reviews with immutable revisions, approval that binds an exact revision fingerprint, follow-up actions (separate from incident-response `case_tasks`), knowledge article stubs, and playbook/detection improvement proposals.
+
+Operational case closure and review completion are independent: a case may close while a required review stays `draft` / `in_progress` / `pending_approval`. Org policy (severity / classification / require-all) and per-template required severities/classifications determine whether a review is required.
+
+Knowledge summaries exclude `sensitiveEvidenceNotes` and `restrictedNotes` by default. Including sensitive content requires case compartment `view_sensitive` (via `authorizeCase`) and an explicit `includeSensitive: true` opt-in.
+
+Scopes: `reviews:read`, `reviews:write`, `reviews:admin` (sensitive).
+
+### `GET /api/v1/review-policy` / `PUT /api/v1/review-policy`
+Read or replace organisation policy (`enabled`, `requireBySeverities`, `requireByClassifications`, `requireForAllCases`, `dueDaysAfterClose`). PUT requires `reviews:admin`.
+
+### `GET /api/v1/review-templates` / `POST /api/v1/review-templates`
+List (seeds baseline) or create templates. POST requires `reviews:admin`.
+
+### `GET /api/v1/review-templates/{id}` / `PATCH /api/v1/review-templates/{id}`
+Read or update. Section / approval changes insert a new immutable template version.
+
+### `GET /api/v1/cases/{caseId}/reviews` / `POST /api/v1/cases/{caseId}/reviews`
+List or create a review for a case. Create stamps `requiredByPolicy` + `dueAt` from policy evaluation. Scope: `reviews:read` / `reviews:write`.
+
+### `GET /api/v1/reviews` / `GET /api/v1/reviews/{id}`
+Org-wide list (`?status=&overdue=true&limit=`) or single review with current/approved revision metadata.
+
+### `PATCH /api/v1/reviews/{id}`
+```json
+{ "content": { "incidentSummary": "…", "knowledgeSummary": "…", "sensitiveEvidenceNotes": "…" } }
+```
+Saves content. If the current revision is approved (or review is approved/published/pending_approval), creates a **new unapproved revision** and moves status to `in_progress`.
+
+### `POST /api/v1/reviews/{id}/submit`
+Moves review to `pending_approval`. Scope: `reviews:write`.
+
+### `POST /api/v1/reviews/{id}/approve`
+```json
+{ "decision": "approved", "notes": "optional" }
+```
+or `"rejected"`. Approval binds `revision.id` + `contentFingerprint` on the revision row. Scope: `reviews:admin`.
+
+### `GET /api/v1/reviews/{id}/revisions`
+Immutable revision history including bound fingerprints and approval metadata.
+
+### `GET|POST /api/v1/reviews/{id}/follow-ups` / `PATCH /api/v1/follow-ups/{id}`
+Follow-up actions with owner, due date, theme, optional external ticket ref. Lifecycle is independent of `case_tasks`.
+
+### `POST /api/v1/reviews/{id}/knowledge`
+Publish a knowledge article stub from the approved (or current) revision. Default redacts sensitive fields. Body: `{ "title?", "includeSensitive?", "status?" }`.
+
+### `GET /api/v1/knowledge-articles` / `GET /api/v1/knowledge-articles/{id}`
+List or read knowledge articles. Sensitive body fields are stripped when the actor lacks `view_sensitive`.
+
+### `GET|POST /api/v1/reviews/{id}/improvements` / `PATCH /api/v1/improvements/{id}`
+Playbook revision / detection improvement / control gap proposals linked back to the source review and case. External tickets are references only — Kelpie audit history remains authoritative.
+
+### `GET /api/v1/reviews/reporting`
+Summary: overdue reviews, open required reviews, reviews still open after case close, overdue/open follow-ups, recurring themes, improvement counts by kind.
 
 ## Webhooks (outbound)
 
