@@ -9,6 +9,15 @@ import {
   useRef,
   useState,
 } from "react";
+import { useRouter } from "next/navigation";
+import {
+  foldActivity,
+  reconnectDelayMs,
+  type CaseActivityEnvelope,
+  type ConnectionStatus,
+} from "@/lib/case-activity-client";
+
+export type { ConnectionStatus } from "@/lib/case-activity-client";
 
 export type CollaborationEntry = {
   userId: string;
@@ -20,6 +29,7 @@ export type CollaborationEntry = {
 
 type CollaborationContextValue = {
   roster: CollaborationEntry[];
+  connectionStatus: ConnectionStatus;
   beginEditing: (field: string) => void;
   endEditing: (field: string) => void;
   setTyping: (typing: boolean) => void;
@@ -28,6 +38,11 @@ type CollaborationContextValue = {
 
 const CollaborationContext = createContext<CollaborationContextValue | null>(null);
 
+/** A blip shorter than this never surfaces as "reconnecting" in the UI. */
+const STALE_AFTER_MS = 8_000;
+/** Refreshing more often than this on a burst of events is just noise. */
+const REFRESH_THROTTLE_MS = 1_500;
+
 export function CaseCollaborationProvider({
   caseId,
   children,
@@ -35,9 +50,23 @@ export function CaseCollaborationProvider({
   caseId: string;
   children: React.ReactNode;
 }) {
+  const router = useRouter();
   const [roster, setRoster] = useState<CollaborationEntry[]>([]);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const editingField = useRef<string | null>(null);
   const typing = useRef(false);
+  const activityState = useRef<{ seenIds: Set<string>; cursor: string | null }>({
+    seenIds: new Set(),
+    cursor: null,
+  });
+  const refreshTimer = useRef<number | null>(null);
+  const requestRefresh = useCallback(() => {
+    if (refreshTimer.current !== null) return;
+    refreshTimer.current = window.setTimeout(() => {
+      refreshTimer.current = null;
+      router.refresh();
+    }, REFRESH_THROTTLE_MS);
+  }, [router]);
 
   const sendHeartbeat = useCallback(
     (overrides?: { editingField?: string | null; typing?: boolean }) => {
@@ -63,16 +92,80 @@ export function CaseCollaborationProvider({
     let cancelled = false;
     void sendHeartbeat();
     const heartbeat = window.setInterval(() => void sendHeartbeat(), 8_000);
-    const events = new EventSource(`/api/cases/${caseId}/presence`);
-    events.onmessage = (event) => {
-      if (cancelled) return;
-      try {
-        const data = JSON.parse(event.data) as { roster?: CollaborationEntry[] };
-        setRoster(data.roster ?? []);
-      } catch {
-        // Ignore malformed frames; EventSource continues with the next update.
+
+    let source: EventSource | null = null;
+    let reconnectAttempt = 0;
+    let hasConnectedBefore = false;
+    let reconnectTimer: number | null = null;
+    let staleTimer: number | null = null;
+
+    const clearStaleTimer = () => {
+      if (staleTimer !== null) {
+        window.clearTimeout(staleTimer);
+        staleTimer = null;
       }
     };
+
+    const connect = () => {
+      if (cancelled) return;
+      setConnectionStatus((prev) => (prev === "live" ? prev : "connecting"));
+      const es = new EventSource(`/api/cases/${caseId}/presence`);
+      source = es;
+
+      es.onopen = () => {
+        if (cancelled) return;
+        clearStaleTimer();
+        setConnectionStatus("live");
+        // A reconnect (as opposed to the very first connection) may have
+        // missed events while disconnected. Rather than trying to replay a
+        // gap, fetch authoritative state directly: a Next.js route refresh
+        // re-runs this route's server-side data loading, so the client
+        // converges on the database's current truth regardless of what the
+        // channel did or did not deliver in between.
+        if (hasConnectedBefore) {
+          router.refresh();
+        }
+        hasConnectedBefore = true;
+        reconnectAttempt = 0;
+      };
+
+      es.onmessage = (event) => {
+        if (cancelled) return;
+        try {
+          const data = JSON.parse(event.data) as {
+            roster?: CollaborationEntry[];
+            activity?: CaseActivityEnvelope[];
+          };
+          setRoster(data.roster ?? []);
+          if (data.activity && data.activity.length > 0) {
+            const folded = foldActivity(activityState.current, data.activity);
+            activityState.current = { seenIds: folded.seenIds, cursor: folded.cursor };
+            if (folded.fresh.length > 0) {
+              requestRefresh();
+            }
+          }
+        } catch {
+          // Ignore malformed frames; the channel continues with the next update.
+        }
+      };
+
+      es.onerror = () => {
+        if (cancelled) return;
+        es.close();
+        if (source === es) source = null;
+        setConnectionStatus("reconnecting");
+        if (staleTimer === null) {
+          staleTimer = window.setTimeout(() => {
+            if (!cancelled) setConnectionStatus("stale");
+          }, STALE_AFTER_MS);
+        }
+        const delay = reconnectDelayMs(reconnectAttempt);
+        reconnectAttempt += 1;
+        reconnectTimer = window.setTimeout(connect, delay);
+      };
+    };
+
+    connect();
 
     const leave = () => {
       navigator.sendBeacon?.(
@@ -85,14 +178,20 @@ export function CaseCollaborationProvider({
     return () => {
       cancelled = true;
       window.clearInterval(heartbeat);
-      events.close();
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      clearStaleTimer();
+      if (refreshTimer.current !== null) {
+        window.clearTimeout(refreshTimer.current);
+        refreshTimer.current = null;
+      }
+      source?.close();
       window.removeEventListener("pagehide", leave);
       void fetch(`/api/cases/${caseId}/presence`, {
         method: "DELETE",
         keepalive: true,
       }).catch(() => undefined);
     };
-  }, [caseId, sendHeartbeat]);
+  }, [caseId, requestRefresh, router, sendHeartbeat]);
 
   const beginEditing = useCallback(
     (field: string) => {
@@ -124,12 +223,13 @@ export function CaseCollaborationProvider({
   const value = useMemo<CollaborationContextValue>(
     () => ({
       roster,
+      connectionStatus,
       beginEditing,
       endEditing,
       setTyping: setTypingState,
       lockedBy,
     }),
-    [beginEditing, endEditing, lockedBy, roster, setTypingState],
+    [beginEditing, connectionStatus, endEditing, lockedBy, roster, setTypingState],
   );
 
   return (
@@ -145,6 +245,30 @@ export function useCaseCollaboration(): CollaborationContextValue {
     throw new Error("useCaseCollaboration must be used within CaseCollaborationProvider");
   }
   return value;
+}
+
+/**
+ * Subtle indicator of the realtime channel's health. Deliberately quiet:
+ * nothing is shown once live, since that is the expected steady state. A
+ * genuine outage shows a muted "Updates paused" label rather than an alarming
+ * error, since case data and every mutating action keep working from the
+ * database directly while the channel is down.
+ */
+export function ConnectionStatusIndicator() {
+  const { connectionStatus } = useCaseCollaboration();
+  if (connectionStatus === "live" || connectionStatus === "connecting") return null;
+  const label =
+    connectionStatus === "reconnecting" ? "Reconnecting…" : "Updates paused";
+  return (
+    <span
+      role="status"
+      className="inline-flex items-center gap-1.5 text-xs text-slate-400"
+      title="Live updates are temporarily unavailable. Case data still loads and saves normally."
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+      {label}
+    </span>
+  );
 }
 
 export function FieldLock({ field }: { field: string }) {
