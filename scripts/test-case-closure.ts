@@ -682,7 +682,8 @@ async function main() {
     assert.equal(richClose.evaluation.requirements.length, 14);
     console.log("ok: close succeeds when all requirement types pass");
 
-    // Two-person override gate
+    // Two-person override: nominating another admin is not dual-control.
+    // Override is refused until a real second-party approval handshake exists.
     await updateClosurePolicyCore(orgAId, adminAId, policyId, {
       name: "Strict IR",
       isDefault: true,
@@ -700,6 +701,14 @@ async function main() {
       isRequired: true,
       status: "todo",
     });
+    const adminA2 = `user_i57_admin2_${runId}`;
+    await db.insert(users).values({
+      id: adminA2,
+      name: "Admin A2",
+      email: `i57-admin2-${runId}@example.com`,
+      organisationId: orgAId,
+      role: "admin",
+    });
     await assert.rejects(
       () =>
         closeCaseCore(orgAId, adminAId, twoPersonCase, {
@@ -709,43 +718,44 @@ async function main() {
           overrideReason: "Need to close urgently for board",
           canOverride: true,
         }),
-      (e: unknown) => e instanceof ClosureOverrideError,
+      (e: unknown) =>
+        e instanceof ClosureOverrideError &&
+        /two-person override/i.test(e.message),
     );
-    console.log("ok: two-person override requires second approver");
-
     await assert.rejects(
       () =>
         closeCaseCore(orgAId, adminAId, twoPersonCase, {
           disposition: "risk_accepted",
-          conclusion: "override with non-admin",
+          conclusion: "override with nominated second admin",
           override: true,
           overrideReason: "Need to close urgently for board",
           canOverride: true,
-          approverId: analystAId,
+          approverId: adminA2,
         }),
-      (e: unknown) => e instanceof ClosureOverrideError,
+      (e: unknown) =>
+        e instanceof ClosureOverrideError &&
+        /nominated approver|two-person override/i.test(e.message),
     );
-    console.log("ok: two-person override rejects non-admin approver");
+    console.log("ok: two-person override refuses nomination-only dual-control");
 
-    const adminA2 = `user_i57_admin2_${runId}`;
-    await db.insert(users).values({
-      id: adminA2,
-      name: "Admin A2",
-      email: `i57-admin2-${runId}@example.com`,
-      organisationId: orgAId,
-      role: "admin",
+    // Single-person override (flag off) still audits via timeline.
+    await updateClosurePolicyCore(orgAId, adminAId, policyId, {
+      name: "Strict IR",
+      isDefault: true,
+      requirements: [
+        { type: "disposition" },
+        { type: "required_tasks_complete" },
+      ],
+      requireTwoPersonOverride: false,
     });
-    const twoPersonOk = await closeCaseCore(orgAId, adminAId, twoPersonCase, {
+    const audited = await closeCaseCore(orgAId, adminAId, twoPersonCase, {
       disposition: "risk_accepted",
-      conclusion: "override with second admin",
+      conclusion: "override with audit",
       override: true,
-      overrideReason: "Need to close urgently for board",
+      overrideReason: "Board accepted residual risk",
       canOverride: true,
-      approverId: adminA2,
     });
-    assert.equal(twoPersonOk.wasOverride, true);
-    console.log("ok: two-person override accepts second admin");
-
+    assert.equal(audited.wasOverride, true);
     const events = await db
       .select({
         eventType: timelineEvents.eventType,

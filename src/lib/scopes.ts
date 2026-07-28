@@ -86,6 +86,7 @@ export const SENSITIVE_SCOPES = [
   "alerts:raw_payload:read",
   "evidence:override",
   "audit:read",
+  "cases:override_closure",
 ] as const satisfies readonly ScopeValue[];
 
 export type SensitiveScopeValue = (typeof SENSITIVE_SCOPES)[number];

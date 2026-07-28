@@ -143,20 +143,14 @@ export async function closeCaseCore(
       );
     }
     if (evaluation.requireTwoPersonOverride) {
-      const approverId = input.approverId?.trim() ?? "";
-      if (!approverId || approverId === actorId) {
-        throw new ClosureOverrideError(
-          "This policy requires a second distinct approver for override close",
-          400,
-        );
-      }
-      const approver = await assertUserInOrg(organisationId, approverId);
-      if (!approver || approver.role !== "admin") {
-        throw new ClosureOverrideError(
-          "Two-person override approver must be an admin in this organisation",
-          400,
-        );
-      }
+      // Dual-control must not be satisfiable by nominating another admin id
+      // without that admin authenticating. Until a second-party approval
+      // handshake exists, refuse override on two-person policies — complete
+      // requirements or disable the flag.
+      throw new ClosureOverrideError(
+        "This policy requires two-person override, which is not available via a nominated approver alone. Complete all requirements, or disable two-person override on the policy until second-party approval is configured.",
+        400,
+      );
     }
     wasOverride = true;
     overrideReason = reason;
@@ -188,67 +182,79 @@ export async function closeCaseCore(
   const rootCause = input.rootCause?.trim() || null;
   const businessImpact = input.businessImpact?.trim() || null;
   const lessonsLearned = input.lessonsLearned?.trim() || null;
-  const approverId = input.approverId?.trim() || null;
+  // required_approver may record a nominated reviewer; that is not dual-control
+  // approval of an override (override path never sets approvedAt).
+  const approverId = wasOverride ? null : input.approverId?.trim() || null;
 
-  // Optimistic lock on the case row.
-  const [updated] = await db
-    .update(cases)
-    .set({
-      status: "closed",
-      closedAt: now,
-      resolvedAt: existing.resolvedAt ?? now,
-      closureReason: disposition,
-      closureSummary: conclusion,
-      closureDetermination: determination,
-      rootCause,
-      businessImpact,
-      lessonsLearned,
-      closedBy: actorId,
-      activeClosureSnapshotId: snapshotId,
-      version: nextVersion,
-    })
-    .where(
-      and(
-        eq(cases.id, caseId),
-        eq(cases.organisationId, organisationId),
-        input.expectedVersion !== undefined
-          ? eq(cases.version, input.expectedVersion)
-          : eq(cases.version, existing.version),
-      ),
-    )
-    .returning({ version: cases.version });
+  try {
+    await db.transaction(async (tx) => {
+      // Optimistic lock on the case row + snapshot in one txn so we never
+      // leave a closed case without a snapshot row.
+      const [updated] = await tx
+        .update(cases)
+        .set({
+          status: "closed",
+          closedAt: now,
+          resolvedAt: existing.resolvedAt ?? now,
+          closureReason: disposition,
+          closureSummary: conclusion,
+          closureDetermination: determination,
+          rootCause,
+          businessImpact,
+          lessonsLearned,
+          closedBy: actorId,
+          activeClosureSnapshotId: snapshotId,
+          version: nextVersion,
+        })
+        .where(
+          and(
+            eq(cases.id, caseId),
+            eq(cases.organisationId, organisationId),
+            input.expectedVersion !== undefined
+              ? eq(cases.version, input.expectedVersion)
+              : eq(cases.version, existing.version),
+          ),
+        )
+        .returning({ version: cases.version });
 
-  if (!updated) {
-    const current = await loadCaseInOrg(caseId, organisationId);
-    if (!current) throw new ClosurePathError("Case not found");
-    throw new CaseVersionConflictError(caseSnapshot(current));
+      if (!updated) {
+        throw new Error("__version_conflict__");
+      }
+
+      await tx.insert(caseClosureSnapshots).values({
+        id: snapshotId,
+        organisationId,
+        caseId,
+        policyId: evaluation.policyId,
+        policyVersionId: evaluation.policyVersionId,
+        policyVersion: evaluation.policyVersion,
+        disposition,
+        determination,
+        rootCause,
+        conclusion,
+        businessImpact,
+        lessonsLearned,
+        requirementsEvaluated: evaluation.requirements,
+        failedRequirements: evaluation.failed,
+        closedBy: actorId,
+        closedAt: now,
+        approverId,
+        approvedAt: null,
+        wasOverride,
+        overrideReason,
+        overrideActorId: wasOverride ? actorId : null,
+        overrideFailedSnapshot,
+        caseVersionAtClose: nextVersion,
+      });
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "__version_conflict__") {
+      const current = await loadCaseInOrg(caseId, organisationId);
+      if (!current) throw new ClosurePathError("Case not found");
+      throw new CaseVersionConflictError(caseSnapshot(current));
+    }
+    throw error;
   }
-
-  await db.insert(caseClosureSnapshots).values({
-    id: snapshotId,
-    organisationId,
-    caseId,
-    policyId: evaluation.policyId,
-    policyVersionId: evaluation.policyVersionId,
-    policyVersion: evaluation.policyVersion,
-    disposition,
-    determination,
-    rootCause,
-    conclusion,
-    businessImpact,
-    lessonsLearned,
-    requirementsEvaluated: evaluation.requirements,
-    failedRequirements: evaluation.failed,
-    closedBy: actorId,
-    closedAt: now,
-    approverId,
-    approvedAt: approverId ? now : null,
-    wasOverride,
-    overrideReason,
-    overrideActorId: wasOverride ? actorId : null,
-    overrideFailedSnapshot,
-    caseVersionAtClose: nextVersion,
-  });
 
   await writeTimelineEvent({
     caseId,
@@ -294,7 +300,7 @@ export async function closeCaseCore(
   }
 
   return {
-    version: updated.version,
+    version: nextVersion,
     snapshotId,
     evaluation,
     wasOverride,

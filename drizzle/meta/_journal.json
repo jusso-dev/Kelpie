@@ -204,6 +204,13 @@
       "when": 1785232650175,
       "tag": "0028_elite_skaar",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1785233574898,
+      "tag": "0029_fearless_grim_reaper",
+      "breakpoints": true
     }
   ]
 }

@@ -179,11 +179,20 @@ function evaluateOne(
       const keys = config.fieldKeys?.length
         ? new Set(config.fieldKeys)
         : null;
-      const targets = ctx.customFields.filter((f) =>
-        keys ? keys.has(f.key) : f.required,
-      );
-      for (const f of targets) {
-        if (!fieldPopulated(f.value)) missing.push(f.key);
+      if (keys) {
+        // Explicit keys must exist on the org; stale/typo keys fail closed.
+        for (const key of keys) {
+          const field = ctx.customFields.find((f) => f.key === key);
+          if (!field) {
+            missing.push(`${key} (unknown field)`);
+            continue;
+          }
+          if (!fieldPopulated(field.value)) missing.push(key);
+        }
+      } else {
+        for (const f of ctx.customFields.filter((x) => x.required)) {
+          if (!fieldPopulated(f.value)) missing.push(f.key);
+        }
       }
       detail =
         missing.length > 0
