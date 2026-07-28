@@ -4,7 +4,7 @@ import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
 import {
   ReviewError,
   decideReviewApprovalCore,
-  serializeReview,
+  serializeReviewForActor,
 } from "@/lib/post-incident-review";
 
 export const dynamic = "force-dynamic";
@@ -44,7 +44,13 @@ export async function POST(req: Request, context: Params) {
       parsed.data.notes,
     );
     return NextResponse.json(
-      { review: serializeReview(review) },
+      {
+        review: await serializeReviewForActor(
+          auth.token.organisationId,
+          review,
+          auth.token.createdBy,
+        ),
+      },
       { headers: { "cache-control": "private, no-store" } },
     );
   } catch (err) {

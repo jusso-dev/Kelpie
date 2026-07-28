@@ -24,10 +24,14 @@ export async function GET(req: Request) {
     }
     status = statusParam as KnowledgeStatus;
   }
-  const rows = await listKnowledgeArticlesCore(auth.token.organisationId, {
-    status,
-    limit: Number.isFinite(limit) ? limit : 50,
-  });
+  const rows = await listKnowledgeArticlesCore(
+    auth.token.organisationId,
+    auth.token.createdBy,
+    {
+      status,
+      limit: Number.isFinite(limit) ? limit : 50,
+    },
+  );
   const articles = await Promise.all(
     rows.map((a) =>
       toPublicKnowledgeArticle(

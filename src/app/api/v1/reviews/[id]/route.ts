@@ -5,7 +5,7 @@ import {
   ReviewError,
   getReviewCore,
   saveReviewContentCore,
-  serializeReview,
+  serializeReviewForActor,
 } from "@/lib/post-incident-review";
 
 export const dynamic = "force-dynamic";
@@ -22,12 +22,22 @@ export async function GET(req: Request, context: Params) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
   const { id } = await context.params;
-  const review = await getReviewCore(auth.token.organisationId, id);
+  const review = await getReviewCore(
+    auth.token.organisationId,
+    id,
+    auth.token.createdBy,
+  );
   if (!review) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
   return NextResponse.json(
-    { review: serializeReview(review) },
+    {
+      review: await serializeReviewForActor(
+        auth.token.organisationId,
+        review,
+        auth.token.createdBy,
+      ),
+    },
     { headers: { "cache-control": "private, no-store" } },
   );
 }
@@ -59,7 +69,13 @@ export async function PATCH(req: Request, context: Params) {
       parsed.data.content,
     );
     return NextResponse.json(
-      { review: serializeReview(review) },
+      {
+        review: await serializeReviewForActor(
+          auth.token.organisationId,
+          review,
+          auth.token.createdBy,
+        ),
+      },
       { headers: { "cache-control": "private, no-store" } },
     );
   } catch (err) {

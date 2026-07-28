@@ -9,7 +9,10 @@ export async function GET(req: Request) {
   if (!auth.ok) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
-  const summary = await reviewReportingSummaryCore(auth.token.organisationId);
+  const summary = await reviewReportingSummaryCore(
+    auth.token.organisationId,
+    auth.token.createdBy,
+  );
   return NextResponse.json(
     { summary },
     { headers: { "cache-control": "private, no-store" } },

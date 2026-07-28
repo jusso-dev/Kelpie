@@ -20,6 +20,10 @@ import {
   reviewFollowUpActions,
   users,
 } from "../src/db/schema";
+import {
+  setCaseVisibility,
+  type AccessActor,
+} from "../src/lib/access";
 import { newId } from "../src/lib/utils";
 import { tokenHasScope, SENSITIVE_SCOPES, legacyDefaultScopes } from "../src/lib/scopes";
 import {
@@ -33,14 +37,17 @@ import {
   DEFAULT_ORG_REVIEW_POLICY,
   evaluateReviewRequired,
   getReviewCore,
+  listOrgReviewsCore,
   listRevisionsCore,
   normaliseReviewContent,
   publishKnowledgeFromReviewCore,
   redactContentForKnowledge,
+  ReviewError,
   reviewOpenWhileCaseClosed,
   reviewReportingSummaryCore,
   saveReviewContentCore,
   seedBaselineReviewTemplates,
+  serializeReview,
   setOrgReviewPolicy,
   submitReviewCore,
   updateReviewTemplateCore,
@@ -50,10 +57,21 @@ const runId = newId("i64").slice("i64_".length).slice(0, 10);
 const orgAId = `org_i64a_${runId}`;
 const orgBId = `org_i64b_${runId}`;
 const userAId = `user_i64a_${runId}`;
+const userA2Id = `user_i64a2_${runId}`;
 const userBId = `user_i64b_${runId}`;
 let caseHigh = "";
 let caseLow = "";
+let caseRestricted = "";
 let caseB = "";
+
+function adminActor(userId: string): AccessActor {
+  return {
+    organisationId: orgAId,
+    userId,
+    role: "admin",
+    teamIds: [],
+  };
+}
 
 async function setup() {
   await db.insert(organisations).values([
@@ -69,6 +87,13 @@ async function setup() {
       role: "admin",
     },
     {
+      id: userA2Id,
+      name: "Analyst A2 non-member",
+      email: `i64a2-${runId}@example.com`,
+      organisationId: orgAId,
+      role: "analyst",
+    },
+    {
       id: userBId,
       name: "Analyst B",
       email: `i64b-${runId}@example.com`,
@@ -78,6 +103,7 @@ async function setup() {
   ]);
   caseHigh = newId("case");
   caseLow = newId("case");
+  caseRestricted = newId("case");
   caseB = newId("case");
   await db.insert(cases).values([
     {
@@ -97,6 +123,15 @@ async function setup() {
       title: "Low phishing",
       severity: "low",
       classification: "phishing",
+      status: "open",
+    },
+    {
+      id: caseRestricted,
+      organisationId: orgAId,
+      caseNumber: `I64R-${runId}`,
+      title: "Restricted insider case",
+      severity: "high",
+      classification: "policy_violation",
       status: "open",
     },
     {
@@ -236,6 +271,72 @@ async function cleanup() {
   const fp1 = contentFingerprint(content);
   const fp2 = contentFingerprint({ ...content, incidentSummary: "changed" });
   assert.notEqual(fp1, fp2);
+
+  // serializeReview must redact unless includeSensitive
+  const fakeView = {
+    content,
+  } as Parameters<typeof serializeReview>[0];
+  // Minimal stub for pure redaction check on content field only
+  const redactedDto = serializeReview(
+    {
+      id: "x",
+      organisationId: "o",
+      caseId: "c",
+      templateId: null,
+      templateVersionId: null,
+      status: "draft",
+      requiredByPolicy: false,
+      policyReason: null,
+      dueAt: null,
+      currentRevisionId: null,
+      approvedRevisionId: null,
+      title: "t",
+      createdBy: null,
+      submittedAt: null,
+      approvedAt: null,
+      publishedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      currentRevision: null,
+      approvedRevision: null,
+      content,
+    },
+    { includeSensitive: false },
+  );
+  assert.equal(
+    (redactedDto.content as { sensitiveEvidenceNotes?: string })
+      .sensitiveEvidenceNotes,
+    undefined,
+  );
+  assert.ok(!JSON.stringify(redactedDto).includes(secret));
+  const openDto = serializeReview(
+    {
+      id: "x",
+      organisationId: "o",
+      caseId: "c",
+      templateId: null,
+      templateVersionId: null,
+      status: "draft",
+      requiredByPolicy: false,
+      policyReason: null,
+      dueAt: null,
+      currentRevisionId: null,
+      approvedRevisionId: null,
+      title: "t",
+      createdBy: null,
+      submittedAt: null,
+      approvedAt: null,
+      publishedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      currentRevision: null,
+      approvedRevision: null,
+      content,
+    },
+    { includeSensitive: true },
+  );
+  assert.ok(JSON.stringify(openDto).includes(secret));
+  void fakeView;
   console.log("ok: knowledge redaction excludes sensitive by default");
 }
 
@@ -330,9 +431,17 @@ async function main() {
     assert.equal(forked.currentRevision!.isApproved, false);
     assert.equal(forked.status, "in_progress");
     assert.equal(forked.approvedRevisionId, rev1Id, "prior approved revision retained");
-    const revisions = await listRevisionsCore(orgAId, reviewHigh.id);
+    const revisions = await listRevisionsCore(orgAId, reviewHigh.id, userAId);
     assert.ok(revisions.length >= 2);
     assert.ok(revisions.some((r) => r.isApproved && r.id === rev1Id));
+    // Org-mode case: actor has view_sensitive so revision content retains notes.
+    assert.ok(
+      revisions.some(
+        (r) =>
+          typeof r.content.sensitiveEvidenceNotes === "string" &&
+          r.content.sensitiveEvidenceNotes.includes("KEYMATERIAL"),
+      ),
+    );
     console.log("ok: edit of approved review creates new unapproved revision");
 
     // Follow-ups separate from case_tasks
@@ -346,6 +455,17 @@ async function main() {
     assert.equal(fu.status, "open");
     assert.equal(fu.reviewId, reviewHigh.id);
     assert.equal(fu.caseId, caseHigh);
+    // Cross-org owner rejected
+    await assert.rejects(
+      () =>
+        createFollowUpCore(orgAId, reviewHigh.id, userAId, {
+          title: "Bad owner",
+          ownerId: userBId,
+        }),
+      (err: unknown) =>
+        err instanceof ReviewError &&
+        err.message.includes("Owner must belong"),
+    );
     // Ensure no case_task was created for this follow-up
     const tasks = await db
       .select()
@@ -370,6 +490,17 @@ async function main() {
     });
     assert.equal(imp.kind, "detection_improvement");
     assert.equal(imp.status, "proposed");
+    // Foreign playbook id rejected
+    await assert.rejects(
+      () =>
+        createImprovementCore(orgAId, reviewHigh.id, userAId, {
+          kind: "playbook_revision",
+          title: "Bad playbook",
+          linkedPlaybookId: "pb_does_not_exist_cross_org",
+        }),
+      (err: unknown) =>
+        err instanceof ReviewError && err.message.includes("Playbook not found"),
+    );
     console.log("ok: detection improvement proposal linked to review");
 
     // Knowledge redaction
@@ -390,7 +521,7 @@ async function main() {
     console.log("ok: knowledge excludes sensitive evidence by default");
 
     // Tenant isolation: org B cannot load org A review via get
-    const cross = await getReviewCore(orgBId, reviewHigh.id);
+    const cross = await getReviewCore(orgBId, reviewHigh.id, userBId);
     assert.equal(cross, null, "tenant isolation on getReviewCore");
 
     // Org B templates/reviews isolated
@@ -399,7 +530,7 @@ async function main() {
       content: { incidentSummary: "B only" },
     });
     assert.equal(bReview.organisationId, orgBId);
-    const aSeeB = await getReviewCore(orgAId, bReview.id);
+    const aSeeB = await getReviewCore(orgAId, bReview.id, userAId);
     assert.equal(aSeeB, null);
     console.log("ok: tenant isolation for reviews");
 
@@ -433,7 +564,7 @@ async function main() {
     console.log("ok: review template immutable versioning");
 
     // Reporting summary
-    const summary = await reviewReportingSummaryCore(orgAId);
+    const summary = await reviewReportingSummaryCore(orgAId, userAId);
     assert.ok(typeof summary.openRequiredReviews === "number");
     assert.ok(summary.openFollowUps >= 1);
     assert.ok(
@@ -460,6 +591,84 @@ async function main() {
     assert.equal(rejected.currentRevision!.approvalDecision, "rejected");
     assert.equal(rejected.currentRevision!.isApproved, false);
     console.log("ok: reject returns review to in_progress");
+
+    // Approve requires pending_approval (CAS guard)
+    await assert.rejects(
+      () =>
+        decideReviewApprovalCore(
+          orgAId,
+          toReject.id,
+          userAId,
+          "approved",
+        ),
+      (err: unknown) =>
+        err instanceof ReviewError &&
+        err.status === 409 &&
+        err.message.includes("not pending approval"),
+    );
+    console.log("ok: approve rejected when status is not pending_approval");
+
+    // ── Compartment: restricted case hides reviews from non-members ──
+    // Create review while case is still organisation-visible, then restrict.
+    const restrictedReview = await createReviewCore(
+      orgAId,
+      caseRestricted,
+      userAId,
+      {
+        content: {
+          incidentSummary: "Insider review",
+          knowledgeSummary: "Need-to-know only",
+          sensitiveEvidenceNotes: "RESTRICTED-SECRET-NOTES",
+          restrictedNotes: "VIP only notes",
+        },
+      },
+    );
+    await setCaseVisibility(orgAId, adminActor(userAId), caseRestricted, {
+      visibilityMode: "restricted",
+      reason: "PIR compartment test",
+    });
+
+    // Non-member analyst with reviews:read semantics cannot get the review.
+    const deniedGet = await getReviewCore(
+      orgAId,
+      restrictedReview.id,
+      userA2Id,
+    );
+    assert.equal(
+      deniedGet,
+      null,
+      "non-member must not load review on restricted case",
+    );
+
+    // Org-wide list drops unauthorized rows.
+    const listed = await listOrgReviewsCore(orgAId, userA2Id, { limit: 100 });
+    assert.ok(
+      !listed.some((r) => r.id === restrictedReview.id),
+      "org list must drop reviews on restricted cases for non-members",
+    );
+
+    // Creator still has no view_metadata as admin-only know_exists on restricted
+    // without grant — admin may administer but not auto-view. userAId is admin
+    // so know_exists yes, view_metadata no without grant.
+    const adminGet = await getReviewCore(
+      orgAId,
+      restrictedReview.id,
+      userAId,
+    );
+    assert.equal(
+      adminGet,
+      null,
+      "admin without compartment grant must not view_metadata review content",
+    );
+
+    // Revisions list also 404s for non-member
+    await assert.rejects(
+      () => listRevisionsCore(orgAId, restrictedReview.id, userA2Id),
+      (err: unknown) => err instanceof ReviewError && err.status === 404,
+    );
+    console.log(
+      "ok: compartment deny on restricted case for non-member reviews:read",
+    );
 
     console.log("\nAll post-incident review tests passed.");
   } finally {

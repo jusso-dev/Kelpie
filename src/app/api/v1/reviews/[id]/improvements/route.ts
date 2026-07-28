@@ -60,14 +60,22 @@ export async function GET(req: Request, context: Params) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
   const { id } = await context.params;
-  const improvements = await listImprovementsCore(
-    auth.token.organisationId,
-    id,
-  );
-  return NextResponse.json(
-    { improvements: improvements.map(serialize) },
-    { headers: { "cache-control": "private, no-store" } },
-  );
+  try {
+    const improvements = await listImprovementsCore(
+      auth.token.organisationId,
+      id,
+      auth.token.createdBy,
+    );
+    return NextResponse.json(
+      { improvements: improvements.map(serialize) },
+      { headers: { "cache-control": "private, no-store" } },
+    );
+  } catch (err) {
+    if (err instanceof ReviewError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
+    throw err;
+  }
 }
 
 export async function POST(req: Request, context: Params) {

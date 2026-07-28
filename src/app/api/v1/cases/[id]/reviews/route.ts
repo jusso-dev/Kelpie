@@ -5,7 +5,7 @@ import {
   ReviewError,
   createReviewCore,
   listReviewsForCaseCore,
-  serializeReview,
+  serializeReviewForActor,
 } from "@/lib/post-incident-review";
 
 export const dynamic = "force-dynamic";
@@ -25,9 +25,22 @@ export async function GET(req: Request, context: Params) {
   }
   const { id } = await context.params;
   try {
-    const reviews = await listReviewsForCaseCore(auth.token.organisationId, id);
+    const reviews = await listReviewsForCaseCore(
+      auth.token.organisationId,
+      id,
+      auth.token.createdBy,
+    );
+    const serialized = await Promise.all(
+      reviews.map((r) =>
+        serializeReviewForActor(
+          auth.token.organisationId,
+          r,
+          auth.token.createdBy,
+        ),
+      ),
+    );
     return NextResponse.json(
-      { reviews: reviews.map(serializeReview) },
+      { reviews: serialized },
       { headers: { "cache-control": "private, no-store" } },
     );
   } catch (err) {
@@ -66,7 +79,13 @@ export async function POST(req: Request, context: Params) {
       parsed.data,
     );
     return NextResponse.json(
-      { review: serializeReview(review) },
+      {
+        review: await serializeReviewForActor(
+          auth.token.organisationId,
+          review,
+          auth.token.createdBy,
+        ),
+      },
       { status: 201, headers: { "cache-control": "private, no-store" } },
     );
   } catch (err) {

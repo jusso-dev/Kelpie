@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
 import {
   ReviewError,
-  serializeReview,
+  serializeReviewForActor,
   submitReviewCore,
 } from "@/lib/post-incident-review";
 
@@ -23,7 +23,13 @@ export async function POST(req: Request, context: Params) {
       auth.token.createdBy,
     );
     return NextResponse.json(
-      { review: serializeReview(review) },
+      {
+        review: await serializeReviewForActor(
+          auth.token.organisationId,
+          review,
+          auth.token.createdBy,
+        ),
+      },
       { headers: { "cache-control": "private, no-store" } },
     );
   } catch (err) {

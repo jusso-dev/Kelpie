@@ -13,9 +13,11 @@ import {
   casePostIncidentReviews,
   cases,
   knowledgeArticles,
+  playbooks,
   reviewFollowUpActions,
   reviewImprovementProposals,
   reviewRevisions,
+  users,
   type CasePostIncidentReview,
   type KnowledgeArticle,
   type ReviewFollowUpAction,
@@ -24,8 +26,12 @@ import {
 } from "@/db/schema";
 import {
   authorizeCase,
+  evaluateCasePermissions,
+  hasPermission,
+  loadCaseAccessContexts,
   resolveUserActor,
   type AccessActor,
+  type AccessPermission,
 } from "@/lib/access";
 import { newId } from "@/lib/utils";
 import {
@@ -89,27 +95,93 @@ async function loadCaseInOrg(organisationId: string, caseId: string) {
   return row ?? null;
 }
 
-async function requireCaseView(
+async function resolveReviewActor(
   organisationId: string,
-  caseId: string,
   actorUserId: string | null,
-  permission: "view_metadata" | "view_sensitive" | "export" = "view_metadata",
-): Promise<void> {
-  let actor: AccessActor;
+): Promise<AccessActor> {
   if (actorUserId) {
     const resolved = await resolveUserActor(organisationId, actorUserId);
     if (!resolved) throw new ReviewError("Case not found", 404);
-    actor = resolved;
-  } else {
-    actor = {
-      organisationId,
-      userId: null,
-      role: "system",
-      teamIds: [],
-    };
+    return resolved;
   }
+  return {
+    organisationId,
+    userId: null,
+    role: "system",
+    teamIds: [],
+  };
+}
+
+/**
+ * Case-compartment gate. Missing case and unauthorized access both 404
+ * so callers cannot distinguish existence.
+ */
+async function requireCaseAccess(
+  organisationId: string,
+  caseId: string,
+  actorUserId: string | null,
+  permission: AccessPermission = "view_metadata",
+): Promise<{ actor: AccessActor; permissions: Set<AccessPermission> }> {
+  const actor = await resolveReviewActor(organisationId, actorUserId);
   const gate = await authorizeCase(organisationId, caseId, actor, permission);
   if (!gate.ok) throw new ReviewError("Case not found", 404);
+  return { actor, permissions: gate.permissions };
+}
+
+/** Batch case-compartment filter: keep only case ids with required permission. */
+async function caseIdsAuthorized(
+  organisationId: string,
+  actorUserId: string | null,
+  caseIds: string[],
+  required: AccessPermission = "view_metadata",
+): Promise<Set<string>> {
+  const unique = [...new Set(caseIds.filter(Boolean))];
+  if (unique.length === 0) return new Set();
+  const actor = await resolveReviewActor(organisationId, actorUserId);
+  const contexts = await loadCaseAccessContexts(organisationId, unique);
+  const out = new Set<string>();
+  for (const id of unique) {
+    const ctx = contexts.get(id);
+    if (!ctx) continue;
+    const perms = evaluateCasePermissions(ctx, actor);
+    if (hasPermission(perms, required)) out.add(id);
+  }
+  return out;
+}
+
+async function assertOwnerInOrg(
+  organisationId: string,
+  ownerId: string | null | undefined,
+): Promise<void> {
+  if (ownerId == null || ownerId === "") return;
+  const [row] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(
+      and(eq(users.id, ownerId), eq(users.organisationId, organisationId)),
+    )
+    .limit(1);
+  if (!row) {
+    throw new ReviewError("Owner must belong to the organisation", 400);
+  }
+}
+
+async function assertPlaybookInOrg(
+  organisationId: string,
+  playbookId: string | null | undefined,
+): Promise<void> {
+  if (playbookId == null || playbookId === "") return;
+  const [row] = await db
+    .select({ id: playbooks.id })
+    .from(playbooks)
+    .where(
+      and(
+        eq(playbooks.id, playbookId),
+        eq(playbooks.organisationId, organisationId),
+      ),
+    )
+    .limit(1);
+  if (!row) throw new ReviewError("Playbook not found", 404);
 }
 
 async function getRevision(
@@ -153,7 +225,8 @@ function toView(
   };
 }
 
-export async function getReviewCore(
+/** Org-scoped load without compartment check (internal). */
+async function loadReviewView(
   organisationId: string,
   reviewId: string,
 ): Promise<ReviewView | null> {
@@ -174,10 +247,36 @@ export async function getReviewCore(
   return toView(review, current, approved, caseRow?.status ?? null);
 }
 
+/**
+ * Load a review if the actor may view_metadata on its case.
+ * Unauthorized / missing both return null (no existence oracle).
+ */
+export async function getReviewCore(
+  organisationId: string,
+  reviewId: string,
+  actorUserId: string | null,
+): Promise<ReviewView | null> {
+  const view = await loadReviewView(organisationId, reviewId);
+  if (!view) return null;
+  try {
+    await requireCaseAccess(
+      organisationId,
+      view.caseId,
+      actorUserId,
+      "view_metadata",
+    );
+  } catch {
+    return null;
+  }
+  return view;
+}
+
 export async function listReviewsForCaseCore(
   organisationId: string,
   caseId: string,
+  actorUserId: string | null,
 ): Promise<ReviewView[]> {
+  await requireCaseAccess(organisationId, caseId, actorUserId, "view_metadata");
   const rows = await db
     .select()
     .from(casePostIncidentReviews)
@@ -203,6 +302,7 @@ export async function listReviewsForCaseCore(
 
 export async function listOrgReviewsCore(
   organisationId: string,
+  actorUserId: string | null,
   opts?: {
     status?: ReviewStatus;
     overdueOnly?: boolean;
@@ -222,14 +322,24 @@ export async function listOrgReviewsCore(
       ne(casePostIncidentReviews.status, "cancelled"),
     );
   }
+  // Over-fetch then drop unauthorized cases so restricted compartments
+  // never leak via org-wide list (pagination is best-effort).
+  const fetchLimit = Math.min(limit * 4, 400);
   const rows = await db
     .select()
     .from(casePostIncidentReviews)
     .where(and(...conditions))
     .orderBy(asc(casePostIncidentReviews.dueAt), desc(casePostIncidentReviews.createdAt))
-    .limit(limit);
+    .limit(fetchLimit);
+  const allowedCases = await caseIdsAuthorized(
+    organisationId,
+    actorUserId,
+    rows.map((r) => r.caseId),
+    "view_metadata",
+  );
   const out: ReviewView[] = [];
   for (const review of rows) {
+    if (!allowedCases.has(review.caseId)) continue;
     const current = await getRevision(organisationId, review.currentRevisionId);
     const approved = await getRevision(
       organisationId,
@@ -237,6 +347,7 @@ export async function listOrgReviewsCore(
     );
     const caseRow = await loadCaseInOrg(organisationId, review.caseId);
     out.push(toView(review, current, approved, caseRow?.status ?? null));
+    if (out.length >= limit) break;
   }
   return out;
 }
@@ -253,7 +364,7 @@ export async function createReviewCore(
   actorUserId: string | null,
   input: CreateReviewInput = {},
 ): Promise<ReviewView> {
-  await requireCaseView(organisationId, caseId, actorUserId, "view_metadata");
+  await requireCaseAccess(organisationId, caseId, actorUserId, "edit");
   const caseRow = await loadCaseInOrg(organisationId, caseId);
   if (!caseRow) throw new ReviewError("Case not found", 404);
 
@@ -357,7 +468,7 @@ export async function createReviewCore(
     createdBy: actorUserId,
   });
 
-  const view = await getReviewCore(organisationId, reviewId);
+  const view = await loadReviewView(organisationId, reviewId);
   if (!view) throw new ReviewError("Failed to create review", 500);
   return view;
 }
@@ -373,17 +484,17 @@ export async function saveReviewContentCore(
   actorUserId: string | null,
   rawContent: unknown,
 ): Promise<ReviewView> {
-  const existing = await getReviewCore(organisationId, reviewId);
+  const existing = await loadReviewView(organisationId, reviewId);
   if (!existing) throw new ReviewError("Review not found", 404);
   if (existing.status === "cancelled") {
     throw new ReviewError("Cannot edit a cancelled review");
   }
 
-  await requireCaseView(
+  await requireCaseAccess(
     organisationId,
     existing.caseId,
     actorUserId,
-    "view_metadata",
+    "edit",
   );
 
   let content: ReviewContent;
@@ -457,7 +568,7 @@ export async function saveReviewContentCore(
       );
   }
 
-  const view = await getReviewCore(organisationId, reviewId);
+  const view = await loadReviewView(organisationId, reviewId);
   if (!view) throw new ReviewError("Review not found", 404);
   return view;
 }
@@ -467,7 +578,7 @@ export async function submitReviewCore(
   reviewId: string,
   actorUserId: string | null,
 ): Promise<ReviewView> {
-  const existing = await getReviewCore(organisationId, reviewId);
+  const existing = await loadReviewView(organisationId, reviewId);
   if (!existing) throw new ReviewError("Review not found", 404);
   if (existing.status === "cancelled") {
     throw new ReviewError("Cannot submit a cancelled review");
@@ -475,11 +586,11 @@ export async function submitReviewCore(
   if (existing.status === "approved" || existing.status === "published") {
     throw new ReviewError("Review is already approved; edit to create a new revision first");
   }
-  await requireCaseView(
+  await requireCaseAccess(
     organisationId,
     existing.caseId,
     actorUserId,
-    "view_metadata",
+    "edit",
   );
   if (!existing.currentRevision) {
     throw new ReviewError("Review has no content revision");
@@ -504,13 +615,15 @@ export async function submitReviewCore(
       ),
     );
 
-  const view = await getReviewCore(organisationId, reviewId);
+  const view = await loadReviewView(organisationId, reviewId);
   if (!view) throw new ReviewError("Review not found", 404);
   return view;
 }
 
 /**
  * Approve binds the exact current revision id + contentFingerprint.
+ * Requires status == pending_approval; CAS on status + revision + fingerprint
+ * so concurrent edits cannot win approval races.
  * Reject leaves the revision unapproved and returns review to in_progress.
  */
 export async function decideReviewApprovalCore(
@@ -520,14 +633,18 @@ export async function decideReviewApprovalCore(
   decision: "approved" | "rejected",
   notes?: string | null,
 ): Promise<ReviewView> {
-  const existing = await getReviewCore(organisationId, reviewId);
+  const existing = await loadReviewView(organisationId, reviewId);
   if (!existing) throw new ReviewError("Review not found", 404);
-  await requireCaseView(
+  await requireCaseAccess(
     organisationId,
     existing.caseId,
     actorUserId,
     "view_metadata",
   );
+
+  if (existing.status !== "pending_approval") {
+    throw new ReviewError("Review is not pending approval", 409);
+  }
 
   const revision = existing.currentRevision;
   if (!revision) throw new ReviewError("Review has no revision to approve");
@@ -544,7 +661,7 @@ export async function decideReviewApprovalCore(
   }
 
   if (decision === "rejected") {
-    await db
+    const revUpdated = await db
       .update(reviewRevisions)
       .set({
         isApproved: false,
@@ -558,9 +675,17 @@ export async function decideReviewApprovalCore(
         and(
           eq(reviewRevisions.id, revision.id),
           eq(reviewRevisions.organisationId, organisationId),
+          eq(reviewRevisions.contentFingerprint, revision.contentFingerprint),
         ),
+      )
+      .returning({ id: reviewRevisions.id });
+    if (revUpdated.length === 0) {
+      throw new ReviewError(
+        "Revision changed during approval; reload and retry",
+        409,
       );
-    await db
+    }
+    const reviewUpdated = await db
       .update(casePostIncidentReviews)
       .set({
         status: "in_progress",
@@ -570,10 +695,19 @@ export async function decideReviewApprovalCore(
         and(
           eq(casePostIncidentReviews.id, reviewId),
           eq(casePostIncidentReviews.organisationId, organisationId),
+          eq(casePostIncidentReviews.status, "pending_approval"),
+          eq(casePostIncidentReviews.currentRevisionId, revision.id),
         ),
+      )
+      .returning({ id: casePostIncidentReviews.id });
+    if (reviewUpdated.length === 0) {
+      throw new ReviewError(
+        "Review is not pending approval or was modified",
+        409,
       );
+    }
   } else {
-    await db
+    const revUpdated = await db
       .update(reviewRevisions)
       .set({
         isApproved: true,
@@ -587,9 +721,18 @@ export async function decideReviewApprovalCore(
         and(
           eq(reviewRevisions.id, revision.id),
           eq(reviewRevisions.organisationId, organisationId),
+          eq(reviewRevisions.contentFingerprint, revision.contentFingerprint),
+          eq(reviewRevisions.isApproved, false),
         ),
+      )
+      .returning({ id: reviewRevisions.id });
+    if (revUpdated.length === 0) {
+      throw new ReviewError(
+        "Revision changed during approval; reload and retry",
+        409,
       );
-    await db
+    }
+    const reviewUpdated = await db
       .update(casePostIncidentReviews)
       .set({
         status: "approved",
@@ -601,11 +744,20 @@ export async function decideReviewApprovalCore(
         and(
           eq(casePostIncidentReviews.id, reviewId),
           eq(casePostIncidentReviews.organisationId, organisationId),
+          eq(casePostIncidentReviews.status, "pending_approval"),
+          eq(casePostIncidentReviews.currentRevisionId, revision.id),
         ),
+      )
+      .returning({ id: casePostIncidentReviews.id });
+    if (reviewUpdated.length === 0) {
+      throw new ReviewError(
+        "Review is not pending approval or was modified",
+        409,
       );
+    }
   }
 
-  const view = await getReviewCore(organisationId, reviewId);
+  const view = await loadReviewView(organisationId, reviewId);
   if (!view) throw new ReviewError("Review not found", 404);
   return view;
 }
@@ -613,10 +765,29 @@ export async function decideReviewApprovalCore(
 export async function listRevisionsCore(
   organisationId: string,
   reviewId: string,
-): Promise<ReviewRevision[]> {
-  const review = await getReviewCore(organisationId, reviewId);
+  actorUserId: string | null,
+): Promise<
+  Array<
+    Omit<ReviewRevision, "content"> & {
+      content: ReviewContent;
+    }
+  >
+> {
+  const review = await getReviewCore(organisationId, reviewId, actorUserId);
   if (!review) throw new ReviewError("Review not found", 404);
-  return db
+  let includeSensitive = false;
+  try {
+    await requireCaseAccess(
+      organisationId,
+      review.caseId,
+      actorUserId,
+      "view_sensitive",
+    );
+    includeSensitive = true;
+  } catch {
+    includeSensitive = false;
+  }
+  const rows = await db
     .select()
     .from(reviewRevisions)
     .where(
@@ -626,6 +797,15 @@ export async function listRevisionsCore(
       ),
     )
     .orderBy(desc(reviewRevisions.revision));
+  return rows.map((r) => {
+    const content = normaliseReviewContent(r.content);
+    return {
+      ...r,
+      content: includeSensitive
+        ? content
+        : redactContentForKnowledge(content),
+    };
+  });
 }
 
 /* ── Follow-up actions ─────────────────────────────────────────────────── */
@@ -646,17 +826,18 @@ export async function createFollowUpCore(
   actorUserId: string | null,
   input: CreateFollowUpInput,
 ): Promise<ReviewFollowUpAction> {
-  const review = await getReviewCore(organisationId, reviewId);
+  const review = await loadReviewView(organisationId, reviewId);
   if (!review) throw new ReviewError("Review not found", 404);
-  await requireCaseView(
+  await requireCaseAccess(
     organisationId,
     review.caseId,
     actorUserId,
-    "view_metadata",
+    "edit",
   );
   const title = input.title?.trim();
   if (!title) throw new ReviewError("Follow-up title is required");
   if (title.length > 500) throw new ReviewError("Title too long");
+  await assertOwnerInOrg(organisationId, input.ownerId);
 
   const id = newId("pir_fu");
   await db.insert(reviewFollowUpActions).values({
@@ -691,7 +872,10 @@ export async function createFollowUpCore(
 export async function listFollowUpsCore(
   organisationId: string,
   reviewId: string,
+  actorUserId: string | null,
 ): Promise<ReviewFollowUpAction[]> {
+  const review = await getReviewCore(organisationId, reviewId, actorUserId);
+  if (!review) throw new ReviewError("Review not found", 404);
   return db
     .select()
     .from(reviewFollowUpActions)
@@ -732,11 +916,11 @@ export async function updateFollowUpCore(
     )
     .limit(1);
   if (!existing) throw new ReviewError("Follow-up not found", 404);
-  await requireCaseView(
+  await requireCaseAccess(
     organisationId,
     existing.caseId,
     actorUserId,
-    "view_metadata",
+    "edit",
   );
 
   const patch: Partial<typeof reviewFollowUpActions.$inferInsert> = {
@@ -750,7 +934,10 @@ export async function updateFollowUpCore(
   if (input.description !== undefined) {
     patch.description = input.description?.trim() || null;
   }
-  if (input.ownerId !== undefined) patch.ownerId = input.ownerId;
+  if (input.ownerId !== undefined) {
+    await assertOwnerInOrg(organisationId, input.ownerId);
+    patch.ownerId = input.ownerId;
+  }
   if (input.dueAt !== undefined) {
     patch.dueAt = input.dueAt ? new Date(input.dueAt) : null;
   }
@@ -805,23 +992,23 @@ export async function publishKnowledgeFromReviewCore(
   actorUserId: string | null,
   input: CreateKnowledgeInput = {},
 ): Promise<KnowledgeArticle> {
-  const review = await getReviewCore(organisationId, reviewId);
+  const review = await loadReviewView(organisationId, reviewId);
   if (!review) throw new ReviewError("Review not found", 404);
 
+  // Mutations need edit; sensitive body also needs view_sensitive.
+  await requireCaseAccess(
+    organisationId,
+    review.caseId,
+    actorUserId,
+    "edit",
+  );
   const includeSensitive = Boolean(input.includeSensitive);
   if (includeSensitive) {
-    await requireCaseView(
+    await requireCaseAccess(
       organisationId,
       review.caseId,
       actorUserId,
       "view_sensitive",
-    );
-  } else {
-    await requireCaseView(
-      organisationId,
-      review.caseId,
-      actorUserId,
-      "view_metadata",
     );
   }
 
@@ -883,46 +1070,56 @@ export async function publishKnowledgeFromReviewCore(
 }
 
 /**
- * Serialize a knowledge article for API. If includesSensitive and actor
- * lacks view_sensitive, strip those fields from body (defense in depth).
+ * Serialize a knowledge article for API.
+ * Requires view_metadata on source case; strips sensitive body fields
+ * unless actor also has view_sensitive.
  */
 export async function toPublicKnowledgeArticle(
   organisationId: string,
   article: KnowledgeArticle,
   actorUserId: string | null,
 ): Promise<Record<string, unknown>> {
+  if (article.sourceCaseId) {
+    await requireCaseAccess(
+      organisationId,
+      article.sourceCaseId,
+      actorUserId,
+      "view_metadata",
+    );
+  }
+
   let body = article.body as Record<string, unknown>;
   let includesSensitive = article.includesSensitive;
 
-  if (article.includesSensitive && article.sourceCaseId) {
-    let allowed = false;
+  if (article.sourceCaseId) {
+    let canSensitive = false;
     try {
-      await requireCaseView(
+      await requireCaseAccess(
         organisationId,
         article.sourceCaseId,
         actorUserId,
         "view_sensitive",
       );
-      allowed = true;
+      canSensitive = true;
     } catch {
-      allowed = false;
+      canSensitive = false;
     }
-    if (!allowed) {
-      const redacted = redactContentForKnowledge({
-        sensitiveEvidenceNotes:
-          typeof body.sensitiveEvidenceNotes === "string"
-            ? body.sensitiveEvidenceNotes
-            : undefined,
-        restrictedNotes:
-          typeof body.restrictedNotes === "string"
-            ? body.restrictedNotes
-            : undefined,
-      });
-      void redacted;
+    if (!canSensitive) {
       const { sensitiveEvidenceNotes: _s, restrictedNotes: _r, ...rest } = body;
       body = rest;
       includesSensitive = false;
+    } else if (!article.includesSensitive) {
+      // Defensive: never surface keys that were not stored as sensitive.
+      const { sensitiveEvidenceNotes: _s, restrictedNotes: _r, ...rest } = body;
+      if (_s !== undefined || _r !== undefined) {
+        body = rest;
+      }
     }
+  } else if (article.includesSensitive) {
+    // No case binding: never expose sensitive body over API.
+    const { sensitiveEvidenceNotes: _s, restrictedNotes: _r, ...rest } = body;
+    body = rest;
+    includesSensitive = false;
   }
 
   return {
@@ -944,6 +1141,7 @@ export async function toPublicKnowledgeArticle(
 export async function getKnowledgeArticleCore(
   organisationId: string,
   articleId: string,
+  actorUserId: string | null,
 ): Promise<KnowledgeArticle | null> {
   const [row] = await db
     .select()
@@ -955,22 +1153,53 @@ export async function getKnowledgeArticleCore(
       ),
     )
     .limit(1);
-  return row ?? null;
+  if (!row) return null;
+  if (row.sourceCaseId) {
+    try {
+      await requireCaseAccess(
+        organisationId,
+        row.sourceCaseId,
+        actorUserId,
+        "view_metadata",
+      );
+    } catch {
+      return null;
+    }
+  }
+  return row;
 }
 
 export async function listKnowledgeArticlesCore(
   organisationId: string,
+  actorUserId: string | null,
   opts?: { status?: KnowledgeStatus; limit?: number },
 ): Promise<KnowledgeArticle[]> {
   const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 200);
   const conditions = [eq(knowledgeArticles.organisationId, organisationId)];
   if (opts?.status) conditions.push(eq(knowledgeArticles.status, opts.status));
-  return db
+  const fetchLimit = Math.min(limit * 4, 400);
+  const rows = await db
     .select()
     .from(knowledgeArticles)
     .where(and(...conditions))
     .orderBy(desc(knowledgeArticles.createdAt))
-    .limit(limit);
+    .limit(fetchLimit);
+  const caseIds = rows
+    .map((r) => r.sourceCaseId)
+    .filter((id): id is string => Boolean(id));
+  const allowed = await caseIdsAuthorized(
+    organisationId,
+    actorUserId,
+    caseIds,
+    "view_metadata",
+  );
+  const out: KnowledgeArticle[] = [];
+  for (const row of rows) {
+    if (row.sourceCaseId && !allowed.has(row.sourceCaseId)) continue;
+    out.push(row);
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 /* ── Improvement proposals ─────────────────────────────────────────────── */
@@ -991,16 +1220,18 @@ export async function createImprovementCore(
   actorUserId: string | null,
   input: CreateImprovementInput,
 ): Promise<ReviewImprovementProposal> {
-  const review = await getReviewCore(organisationId, reviewId);
+  const review = await loadReviewView(organisationId, reviewId);
   if (!review) throw new ReviewError("Review not found", 404);
-  await requireCaseView(
+  await requireCaseAccess(
     organisationId,
     review.caseId,
     actorUserId,
-    "view_metadata",
+    "edit",
   );
   const title = input.title?.trim();
   if (!title) throw new ReviewError("Title is required");
+  await assertOwnerInOrg(organisationId, input.ownerId);
+  await assertPlaybookInOrg(organisationId, input.linkedPlaybookId);
 
   const id = newId("pir_imp");
   await db.insert(reviewImprovementProposals).values({
@@ -1030,7 +1261,10 @@ export async function createImprovementCore(
 export async function listImprovementsCore(
   organisationId: string,
   reviewId: string,
+  actorUserId: string | null,
 ): Promise<ReviewImprovementProposal[]> {
+  const review = await getReviewCore(organisationId, reviewId, actorUserId);
+  if (!review) throw new ReviewError("Review not found", 404);
   return db
     .select()
     .from(reviewImprovementProposals)
@@ -1067,11 +1301,11 @@ export async function updateImprovementCore(
     )
     .limit(1);
   if (!existing) throw new ReviewError("Improvement not found", 404);
-  await requireCaseView(
+  await requireCaseAccess(
     organisationId,
     existing.caseId,
     actorUserId,
-    "view_metadata",
+    "edit",
   );
 
   const patch: Partial<typeof reviewImprovementProposals.$inferInsert> = {
@@ -1086,7 +1320,10 @@ export async function updateImprovementCore(
     patch.description = input.description?.trim() || null;
   }
   if (input.status !== undefined) patch.status = input.status;
-  if (input.ownerId !== undefined) patch.ownerId = input.ownerId;
+  if (input.ownerId !== undefined) {
+    await assertOwnerInOrg(organisationId, input.ownerId);
+    patch.ownerId = input.ownerId;
+  }
   if (input.externalTicketRef !== undefined) {
     patch.externalTicketRef = input.externalTicketRef?.trim() || null;
   }
@@ -1116,6 +1353,7 @@ export async function updateImprovementCore(
 
 export async function reviewReportingSummaryCore(
   organisationId: string,
+  actorUserId: string | null,
 ): Promise<{
   overdueReviews: number;
   openRequiredReviews: number;
@@ -1126,7 +1364,7 @@ export async function reviewReportingSummaryCore(
   improvementByKind: Array<{ kind: string; count: number }>;
 }> {
   const openStatuses = ["draft", "in_progress", "pending_approval"] as const;
-  const reviews = await db
+  const allReviews = await db
     .select({
       id: casePostIncidentReviews.id,
       status: casePostIncidentReviews.status,
@@ -1136,6 +1374,14 @@ export async function reviewReportingSummaryCore(
     })
     .from(casePostIncidentReviews)
     .where(eq(casePostIncidentReviews.organisationId, organisationId));
+
+  const allowedCases = await caseIdsAuthorized(
+    organisationId,
+    actorUserId,
+    allReviews.map((r) => r.caseId),
+    "view_metadata",
+  );
+  const reviews = allReviews.filter((r) => allowedCases.has(r.caseId));
 
   const now = new Date();
   let overdueReviews = 0;
@@ -1168,6 +1414,7 @@ export async function reviewReportingSummaryCore(
       status: reviewFollowUpActions.status,
       dueAt: reviewFollowUpActions.dueAt,
       theme: reviewFollowUpActions.theme,
+      caseId: reviewFollowUpActions.caseId,
     })
     .from(reviewFollowUpActions)
     .where(eq(reviewFollowUpActions.organisationId, organisationId));
@@ -1176,6 +1423,7 @@ export async function reviewReportingSummaryCore(
   let openFollowUps = 0;
   const themeCounts = new Map<string, number>();
   for (const f of followUps) {
+    if (!allowedCases.has(f.caseId)) continue;
     const open = f.status === "open" || f.status === "in_progress";
     if (open) openFollowUps++;
     if (open && f.dueAt && f.dueAt < now) overdueFollowUps++;
@@ -1184,13 +1432,13 @@ export async function reviewReportingSummaryCore(
     }
   }
 
-  // Themes from approved/published revisions' content.
+  // Themes from approved/published revisions' content (authorized cases only).
   const themeFromContent = new Map<string, number>();
   const approvedReviews = reviews.filter(
     (r) => r.status === "approved" || r.status === "published",
   );
   for (const r of approvedReviews) {
-    const full = await getReviewCore(organisationId, r.id);
+    const full = await loadReviewView(organisationId, r.id);
     for (const t of full?.content.themes ?? []) {
       themeFromContent.set(t, (themeFromContent.get(t) ?? 0) + 1);
     }
@@ -1202,11 +1450,13 @@ export async function reviewReportingSummaryCore(
   const improvements = await db
     .select({
       kind: reviewImprovementProposals.kind,
+      caseId: reviewImprovementProposals.caseId,
     })
     .from(reviewImprovementProposals)
     .where(eq(reviewImprovementProposals.organisationId, organisationId));
   const kindCounts = new Map<string, number>();
   for (const i of improvements) {
+    if (!allowedCases.has(i.caseId)) continue;
     kindCounts.set(i.kind, (kindCounts.get(i.kind) ?? 0) + 1);
   }
 
@@ -1226,7 +1476,17 @@ export async function reviewReportingSummaryCore(
   };
 }
 
-export function serializeReview(view: ReviewView): Record<string, unknown> {
+/**
+ * Public review DTO. Redacts sensitiveEvidenceNotes / restrictedNotes unless
+ * includeSensitive is true (caller must have checked view_sensitive).
+ */
+export function serializeReview(
+  view: ReviewView,
+  opts?: { includeSensitive?: boolean },
+): Record<string, unknown> {
+  const content = opts?.includeSensitive
+    ? view.content
+    : redactContentForKnowledge(view.content);
   return {
     id: view.id,
     caseId: view.caseId,
@@ -1237,7 +1497,7 @@ export function serializeReview(view: ReviewView): Record<string, unknown> {
     policyReason: view.policyReason,
     dueAt: view.dueAt?.toISOString() ?? null,
     title: view.title,
-    content: view.content,
+    content,
     currentRevision: view.currentRevision
       ? {
           id: view.currentRevision.id,
@@ -1271,5 +1531,29 @@ export function serializeReview(view: ReviewView): Record<string, unknown> {
     approvedAt: view.approvedAt?.toISOString() ?? null,
     publishedAt: view.publishedAt?.toISOString() ?? null,
   };
+}
+
+/**
+ * Resolve includeSensitive for serializeReview from case compartment.
+ * Fail closed when view_sensitive is missing.
+ */
+export async function serializeReviewForActor(
+  organisationId: string,
+  view: ReviewView,
+  actorUserId: string | null,
+): Promise<Record<string, unknown>> {
+  let includeSensitive = false;
+  try {
+    await requireCaseAccess(
+      organisationId,
+      view.caseId,
+      actorUserId,
+      "view_sensitive",
+    );
+    includeSensitive = true;
+  } catch {
+    includeSensitive = false;
+  }
+  return serializeReview(view, { includeSensitive });
 }
 

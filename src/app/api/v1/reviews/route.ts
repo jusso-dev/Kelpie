@@ -3,7 +3,7 @@ import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
 import {
   REVIEW_STATUSES,
   listOrgReviewsCore,
-  serializeReview,
+  serializeReviewForActor,
   type ReviewStatus,
 } from "@/lib/post-incident-review";
 
@@ -25,13 +25,26 @@ export async function GET(req: Request) {
     }
     status = statusParam as ReviewStatus;
   }
-  const reviews = await listOrgReviewsCore(auth.token.organisationId, {
-    status,
-    overdueOnly,
-    limit: Number.isFinite(limit) ? limit : 50,
-  });
+  const reviews = await listOrgReviewsCore(
+    auth.token.organisationId,
+    auth.token.createdBy,
+    {
+      status,
+      overdueOnly,
+      limit: Number.isFinite(limit) ? limit : 50,
+    },
+  );
+  const serialized = await Promise.all(
+    reviews.map((r) =>
+      serializeReviewForActor(
+        auth.token.organisationId,
+        r,
+        auth.token.createdBy,
+      ),
+    ),
+  );
   return NextResponse.json(
-    { reviews: reviews.map(serializeReview) },
+    { reviews: serialized },
     { headers: { "cache-control": "private, no-store" } },
   );
 }

@@ -15,7 +15,11 @@ export async function GET(req: Request, context: Params) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
   const { id } = await context.params;
-  const article = await getKnowledgeArticleCore(auth.token.organisationId, id);
+  const article = await getKnowledgeArticleCore(
+    auth.token.organisationId,
+    id,
+    auth.token.createdBy,
+  );
   if (!article) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }

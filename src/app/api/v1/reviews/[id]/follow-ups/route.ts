@@ -63,11 +63,22 @@ export async function GET(req: Request, context: Params) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
   const { id } = await context.params;
-  const followUps = await listFollowUpsCore(auth.token.organisationId, id);
-  return NextResponse.json(
-    { followUps: followUps.map(serializeFollowUp) },
-    { headers: { "cache-control": "private, no-store" } },
-  );
+  try {
+    const followUps = await listFollowUpsCore(
+      auth.token.organisationId,
+      id,
+      auth.token.createdBy,
+    );
+    return NextResponse.json(
+      { followUps: followUps.map(serializeFollowUp) },
+      { headers: { "cache-control": "private, no-store" } },
+    );
+  } catch (err) {
+    if (err instanceof ReviewError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
+    throw err;
+  }
 }
 
 export async function POST(req: Request, context: Params) {

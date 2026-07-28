@@ -13,7 +13,11 @@ export async function GET(req: Request, context: Params) {
   }
   const { id } = await context.params;
   try {
-    const revisions = await listRevisionsCore(auth.token.organisationId, id);
+    const revisions = await listRevisionsCore(
+      auth.token.organisationId,
+      id,
+      auth.token.createdBy,
+    );
     return NextResponse.json(
       {
         revisions: revisions.map((r) => ({
@@ -28,6 +32,8 @@ export async function GET(req: Request, context: Params) {
           approvalNotes: r.approvalNotes,
           createdBy: r.createdBy,
           createdAt: r.createdAt.toISOString(),
+          // Content already redacted by listRevisionsCore when actor lacks
+          // view_sensitive on the case.
           content: r.content,
         })),
       },
