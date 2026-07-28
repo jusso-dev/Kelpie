@@ -155,6 +155,15 @@ async function main() {
   // ── 5. Explicit manual rollback restores the previous version ───────────
   const currentActive = await getActiveCatalogVersion();
   assert.ok(currentActive);
+
+  // T9001 was introduced only by `testVersion` (step 2) and never existed in
+  // the bundled baseline that is about to be restored. Before rolling back,
+  // it must resolve as current (not deprecated) — sanity-checking the setup
+  // for the assertion below, not the rollback itself.
+  const beforeRollbackT9001 = await resolveTechnique("T9001");
+  assert.ok(beforeRollbackT9001, "T9001 must resolve before rollback (sanity check)");
+  assert.equal(beforeRollbackT9001?.deprecated, false);
+
   const rolledBackTo = await rollbackCatalogImport(currentActive!.id, "Integration test manual rollback");
   assert.equal(rolledBackTo.status, "active");
   const afterManualRollback = await getActiveCatalogVersion();
@@ -166,6 +175,27 @@ async function main() {
     .where(eq(attackCatalogVersions.id, currentActive!.id))
     .limit(1);
   assert.equal(rolledBackRow[0]?.status, "rolled_back", "the rolled-back version must stay visible in history, not be deleted");
+
+  // The defect this guards against: T9001 only ever existed on the version
+  // being rolled back (never on the restored baseline). A rollback that
+  // merely flips `status` columns without carrying it forward would leave
+  // it completely unresolvable — a hard miss, not the deliberate
+  // `deprecated: true` path — breaking any mapping recorded against it.
+  const afterRollbackT9001 = await resolveTechnique("T9001");
+  assert.ok(
+    afterRollbackT9001,
+    "a technique unique to the rolled-back version must still resolve after rollback (carried forward into the restored version), not disappear",
+  );
+  assert.equal(afterRollbackT9001?.catalogVersionId, rolledBackTo.id, "the carried-forward technique must belong to the now-active (restored) version");
+  assert.equal(afterRollbackT9001?.deprecated, true, "a technique carried forward by rollback must be marked deprecated");
+  assert.equal(afterRollbackT9001?.name, "Fixture Technique", "the carried-forward row must preserve the technique's last-known name");
+
+  // T1059 existed on both the rolled-back version and the restored version —
+  // it must keep resolving as non-deprecated (the restored version's own row
+  // is untouched, not overwritten by the carry-forward).
+  const afterRollbackT1059 = await resolveTechnique("T1059");
+  assert.ok(afterRollbackT1059);
+  assert.equal(afterRollbackT1059?.deprecated, false);
 
   // Rolling back a non-active version must be rejected.
   await assert.rejects(

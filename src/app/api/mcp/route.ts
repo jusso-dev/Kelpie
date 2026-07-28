@@ -345,7 +345,7 @@ const tools = [
     name: "attack_mappings_list",
     title: "List ATT&CK technique mappings",
     description:
-      "List ATT&CK technique mappings, either every mapping touching a case (its own mapping plus its observables/evidence/tasks) or the mappings on one specific entity. Includes confidence, source, notes, detection/response notes, and actor attribution.",
+      "List ATT&CK technique mappings, either every mapping touching a case (its own mapping plus its linked alerts/observables/evidence/tasks) or the mappings on one specific entity. Includes confidence, source, notes, detection/response notes, and actor attribution.",
     scope: "attack:read" as ScopeValue,
     readOnly: true,
     inputSchema: {
@@ -371,7 +371,7 @@ const tools = [
     name: "attack_technique_attach",
     title: "Attach an ATT&CK technique mapping",
     description:
-      "Attach an ATT&CK technique to a case, observable, evidence item, or task, recording confidence, source, notes, detection notes, response notes, and analyst-entered actor attribution. Rejects a duplicate mapping for the same technique on the same entity.",
+      "Attach an ATT&CK technique to a case, alert, observable, evidence item, or task, recording confidence, source, notes, detection notes, response notes, and analyst-entered actor attribution. Rejects a duplicate mapping for the same technique on the same entity.",
     scope: "attack:write" as ScopeValue,
     readOnly: false,
     inputSchema: {

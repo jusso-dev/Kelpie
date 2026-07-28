@@ -9,8 +9,10 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  alerts,
   attackTechniqueMappings,
   attachments,
+  caseAlerts,
   caseTasks,
   cases,
   observables,
@@ -18,6 +20,7 @@ import {
 } from "@/db/schema";
 import { newId } from "@/lib/utils";
 import { writeTimelineEvent } from "@/lib/timeline";
+import { recordAuditEvent } from "@/lib/audit/events";
 import { getActiveCatalogVersion, getTechniquesByIds, resolveTechnique } from "./catalog-core";
 import { findTactic } from "./tactics";
 
@@ -85,17 +88,24 @@ function validateConfidence(confidence: number | null | undefined) {
 }
 
 /**
- * Resolves the case an entity belongs to (for timeline/audit linkage) and
- * verifies the entity exists in the caller's organisation. `alert` has no
- * backing table on `main` yet (issue #55 lands it); rejecting it here keeps
- * the enum forward-compatible without ever skipping the tenant-ownership
- * check for a type we cannot actually verify.
+ * Resolves the case an entity belongs to (for timeline/audit linkage, best
+ * effort for `alert`) and verifies the entity exists in the caller's
+ * organisation — same ownership-check shape for every branch: select scoped
+ * by `(id, organisationId)`, throw 404 if nothing matches.
+ *
+ * `alert` is the one branch that can legitimately return a null `caseId`:
+ * an alert is linked to cases many-to-many via `case_alerts` (issue #55) and
+ * can exist before it is linked to any case at all. When it is linked to
+ * more than one, the row marked `isPrimary` is preferred, otherwise the most
+ * recently linked case; a mapping on an unlinked alert still succeeds, it
+ * just has no case to attach a timeline entry to (the org audit trail still
+ * records it — see the `caseId` null-checks at each call site).
  */
 async function resolveEntityCase(
   organisationId: string,
   entityType: MappingEntityType,
   entityId: string,
-): Promise<{ caseId: string }> {
+): Promise<{ caseId: string | null }> {
   if (entityType === "case") {
     const [row] = await db
       .select({ id: cases.id })
@@ -134,10 +144,39 @@ async function resolveEntityCase(
     if (!row) throw new AttackMappingError("Task not found", 404);
     return { caseId: row.caseId };
   }
-  throw new AttackMappingError(
-    "Alert mappings are not yet supported on this deployment (pending issue #55: normalized alerts)",
-    501,
-  );
+  // entityType === "alert"
+  const [alertRow] = await db
+    .select({ id: alerts.id })
+    .from(alerts)
+    .where(and(eq(alerts.id, entityId), eq(alerts.organisationId, organisationId)))
+    .limit(1);
+  if (!alertRow) throw new AttackMappingError("Alert not found", 404);
+  const [link] = await db
+    .select({ caseId: caseAlerts.caseId })
+    .from(caseAlerts)
+    .where(and(eq(caseAlerts.alertId, entityId), eq(caseAlerts.organisationId, organisationId)))
+    .orderBy(desc(caseAlerts.isPrimary), desc(caseAlerts.createdAt))
+    .limit(1);
+  return { caseId: link?.caseId ?? null };
+}
+
+/** Records the org-wide audit trail entry directly for a mapping change with no linked case (only possible for an unlinked `alert`); every other entity type always has a case and goes through `writeTimelineEvent` instead, which records both the case timeline and this same audit trail in one call. */
+async function recordMappingAuditWithoutCase(opts: {
+  organisationId: string;
+  actorId: string | null;
+  action: string;
+  mappingId: string;
+  metadata: Record<string, unknown>;
+}) {
+  await recordAuditEvent({
+    organisationId: opts.organisationId,
+    actorId: opts.actorId,
+    actorType: opts.actorId ? "user" : "system",
+    action: `attack_mapping.${opts.action}`,
+    targetType: "attack_mapping",
+    targetId: opts.mappingId,
+    metadata: opts.metadata,
+  });
 }
 
 async function techniqueDisplaysFor(techniqueIds: string[]): Promise<Map<string, TechniqueDisplay>> {
@@ -235,20 +274,31 @@ export async function attachTechniqueCore(
     );
   }
 
-  await writeTimelineEvent({
-    caseId,
-    actorId,
-    eventType: "attack_mapping_changed",
-    payload: {
+  const auditPayload = {
+    action: "created",
+    mapping_id: id,
+    entity_type: input.entityType,
+    entity_id: input.entityId,
+    technique_id: techniqueId,
+    confidence: input.confidence ?? null,
+    source,
+  };
+  if (caseId) {
+    await writeTimelineEvent({
+      caseId,
+      actorId,
+      eventType: "attack_mapping_changed",
+      payload: auditPayload,
+    });
+  } else {
+    await recordMappingAuditWithoutCase({
+      organisationId,
+      actorId,
       action: "created",
-      mapping_id: id,
-      entity_type: input.entityType,
-      entity_id: input.entityId,
-      technique_id: techniqueId,
-      confidence: input.confidence ?? null,
-      source,
-    },
-  });
+      mappingId: id,
+      metadata: auditPayload,
+    });
+  }
 
   return toMappingView(inserted);
 }
@@ -297,26 +347,35 @@ export async function updateMappingCore(
     .returning();
   if (!updated) throw new AttackMappingError("Mapping not found", 404);
 
+  const updatePayload = {
+    action: "updated",
+    mapping_id: mappingId,
+    entity_type: existing.entityType,
+    entity_id: existing.entityId,
+    technique_id: existing.techniqueId,
+    before: {
+      confidence: existing.confidence,
+      source: existing.source,
+    },
+    after: {
+      confidence: updated.confidence,
+      source: updated.source,
+    },
+  };
   if (existing.caseId) {
     await writeTimelineEvent({
       caseId: existing.caseId,
       actorId,
       eventType: "attack_mapping_changed",
-      payload: {
-        action: "updated",
-        mapping_id: mappingId,
-        entity_type: existing.entityType,
-        entity_id: existing.entityId,
-        technique_id: existing.techniqueId,
-        before: {
-          confidence: existing.confidence,
-          source: existing.source,
-        },
-        after: {
-          confidence: updated.confidence,
-          source: updated.source,
-        },
-      },
+      payload: updatePayload,
+    });
+  } else {
+    await recordMappingAuditWithoutCase({
+      organisationId,
+      actorId,
+      action: "updated",
+      mappingId,
+      metadata: updatePayload,
     });
   }
 
@@ -342,18 +401,27 @@ export async function removeMappingCore(
 
   await db.delete(attackTechniqueMappings).where(eq(attackTechniqueMappings.id, mappingId));
 
+  const removePayload = {
+    action: "removed",
+    mapping_id: mappingId,
+    entity_type: existing.entityType,
+    entity_id: existing.entityId,
+    technique_id: existing.techniqueId,
+  };
   if (existing.caseId) {
     await writeTimelineEvent({
       caseId: existing.caseId,
       actorId,
       eventType: "attack_mapping_changed",
-      payload: {
-        action: "removed",
-        mapping_id: mappingId,
-        entity_type: existing.entityType,
-        entity_id: existing.entityId,
-        technique_id: existing.techniqueId,
-      },
+      payload: removePayload,
+    });
+  } else {
+    await recordMappingAuditWithoutCase({
+      organisationId,
+      actorId,
+      action: "removed",
+      mappingId,
+      metadata: removePayload,
     });
   }
 }
@@ -377,7 +445,7 @@ export async function listMappingsForEntity(
   return toMappingViews(rows);
 }
 
-/** Every mapping touching a case, across all entity types attached to it (the case itself, its observables, evidence, and tasks). */
+/** Every mapping touching a case, across all entity types attached to it (the case itself, its linked alerts, observables, evidence, and tasks). */
 export async function listMappingsForCase(
   organisationId: string,
   caseId: string,

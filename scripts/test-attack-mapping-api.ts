@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../src/db";
 import {
+  alerts,
   apiTokens,
   attackStoryEntries,
   attackTechniqueMappings,
@@ -30,6 +31,11 @@ import {
 import { generateApiToken } from "../src/lib/api-tokens";
 import { newId } from "../src/lib/utils";
 import { ensureCatalogInitialised } from "../src/lib/attack/catalog-core";
+import {
+  createOrUpdateAlertFromProviderCore,
+  getOrCreateAlertSourceCore,
+  linkAlertToCaseCore,
+} from "../src/lib/investigations/alerts-core";
 
 const BASE_URL = process.env.API_BASE_URL ?? "http://127.0.0.1:3111";
 
@@ -78,10 +84,41 @@ async function createObservable(caseId: string, value: string): Promise<string> 
   return id;
 }
 
+let alertCounter = 0;
+/** Creates an alert (and its source) in the given org, optionally linked to a case as primary. */
+async function createAlert(organisationId: string, opts: { caseId?: string } = {}): Promise<string> {
+  alertCounter += 1;
+  const source = await getOrCreateAlertSourceCore({
+    organisationId,
+    kind: "test_source",
+    name: `Attack mapping test source ${runId}`,
+    tenantId: `tenant-${runId}`,
+  });
+  const { alert } = await createOrUpdateAlertFromProviderCore({
+    organisationId,
+    sourceId: source.id,
+    tenantId: `tenant-${runId}`,
+    externalId: `ATTACKAPI-ALERT-${runId}-${alertCounter}`,
+    title: `Attack mapping fixture alert ${alertCounter}`,
+    severity: "medium",
+  });
+  if (opts.caseId) {
+    await linkAlertToCaseCore({
+      organisationId,
+      actorId: null,
+      caseId: opts.caseId,
+      alertId: alert.id,
+      isPrimary: true,
+    });
+  }
+  return alert.id;
+}
+
 type MappingResponse = {
   id: string;
   entityType: string;
   entityId: string;
+  caseId: string | null;
   techniqueId: string;
   confidence: number | null;
   source: string;
@@ -469,6 +506,74 @@ async function main() {
     assert.ok(mcpCoverageContent.structuredContent.stats.totalMappedTechniques >= 1);
 
     console.log("attack MCP tool tests passed");
+
+    // ── 11. Alert entity type: success path + cross-tenant rejection ────────
+    const alertLinkedToCaseA = await createAlert(orgAId, { caseId: caseA });
+    const alertAttachRes = await attach(orgAToken, {
+      entityType: "alert",
+      entityId: alertLinkedToCaseA,
+      techniqueId: "T1078",
+      source: "detection_rule",
+    });
+    assert.equal(alertAttachRes.status, 201, `attaching to an alert must return 201, got ${alertAttachRes.status}`);
+    const alertAttachJson = (await alertAttachRes.json()) as { mapping: MappingResponse };
+    assert.equal(alertAttachJson.mapping.entityType, "alert");
+    assert.equal(
+      alertAttachJson.mapping.caseId,
+      caseA,
+      "an alert mapping must resolve caseId from its primary case_alerts link for timeline/audit purposes",
+    );
+    createdMappingIds.push(alertAttachJson.mapping.id);
+
+    // The alert's mapping must surface alongside the case's own mappings.
+    const caseAWithAlertMappingRes = await listMappings(orgAToken, `caseId=${caseA}`);
+    const caseAWithAlertMappingJson = (await caseAWithAlertMappingRes.json()) as { mappings: MappingResponse[] };
+    assert.ok(
+      caseAWithAlertMappingJson.mappings.some((m) => m.id === alertAttachJson.mapping.id),
+      "listing mappings by caseId must include a mapping attached to one of the case's linked alerts",
+    );
+
+    // It must also be recorded on the case timeline (same as any other entity type).
+    const alertTimelineRows = await db
+      .select({ eventType: timelineEvents.eventType, payload: timelineEvents.payload })
+      .from(timelineEvents)
+      .where(and(eq(timelineEvents.caseId, caseA), eq(timelineEvents.eventType, "attack_mapping_changed")));
+    assert.ok(
+      alertTimelineRows.some((r) => (r.payload as { entity_type?: string }).entity_type === "alert"),
+      "attaching a technique to an alert must write an attack_mapping_changed timeline event on its linked case",
+    );
+
+    // An alert not linked to any case yet still succeeds, with a null caseId (audited, no case timeline entry).
+    const unlinkedAlert = await createAlert(orgAId);
+    const unlinkedAlertAttachRes = await attach(orgAToken, {
+      entityType: "alert",
+      entityId: unlinkedAlert,
+      techniqueId: "T1027",
+    });
+    assert.equal(unlinkedAlertAttachRes.status, 201);
+    const unlinkedAlertAttachJson = (await unlinkedAlertAttachRes.json()) as { mapping: MappingResponse };
+    assert.equal(unlinkedAlertAttachJson.mapping.caseId, null, "a mapping on an alert with no case link must have a null caseId, not fail");
+    createdMappingIds.push(unlinkedAlertAttachJson.mapping.id);
+
+    // Cross-tenant: org A cannot attach a technique to org B's alert.
+    const orgBAlert = await createAlert(orgBId);
+    const crossTenantAlertRes = await attach(orgAToken, {
+      entityType: "alert",
+      entityId: orgBAlert,
+      techniqueId: "T1053",
+    });
+    assert.equal(
+      crossTenantAlertRes.status,
+      404,
+      `attaching to another organisation's alert must return 404, got ${crossTenantAlertRes.status}`,
+    );
+    const crossTenantMappingRows = await db
+      .select({ id: attackTechniqueMappings.id })
+      .from(attackTechniqueMappings)
+      .where(and(eq(attackTechniqueMappings.entityType, "alert"), eq(attackTechniqueMappings.entityId, orgBAlert)));
+    assert.equal(crossTenantMappingRows.length, 0, "no mapping row may ever be created for a cross-tenant alert attach attempt");
+
+    console.log("attack alert entity-type API test passed (success path + cross-tenant rejection)");
   } finally {
     await db.delete(attackTechniqueMappings).where(inArray(attackTechniqueMappings.organisationId, [orgAId, orgBId]));
     await db.delete(attackStoryEntries).where(inArray(attackStoryEntries.organisationId, [orgAId, orgBId]));
@@ -504,10 +609,18 @@ async function main() {
       .select({ id: organisations.id })
       .from(organisations)
       .where(inArray(organisations.id, [orgAId, orgBId]));
+    // Alerts/alert sources/case_alerts are not deleted explicitly above —
+    // their `organisationId` foreign key cascades on organisation delete,
+    // same as every other org-scoped table here. This just confirms that.
+    const remainingAlerts = await db
+      .select({ id: alerts.id })
+      .from(alerts)
+      .where(inArray(alerts.organisationId, [orgAId, orgBId]));
     assert.equal(remainingMappings.length, 0, "fixture mappings must be fully cleaned up");
     assert.equal(remainingCases.length, 0, "fixture cases must be fully cleaned up");
     assert.equal(remainingTokens.length, 0, "fixture api tokens must be fully cleaned up");
     assert.equal(remainingOrgs.length, 0, "fixture orgs must be fully cleaned up");
+    assert.equal(remainingAlerts.length, 0, "fixture alerts must be fully cleaned up (cascaded via organisation delete)");
     console.log("attack mapping api fixture cleanup verified: no fixture rows remain");
   }
 }

@@ -120,12 +120,10 @@ export const caseWaitingReasonEnum = pgEnum("case_waiting_reason", [
 ]);
 
 /**
- * `alert` is included so #55 (normalized alerts/entities/evidence) has a
- * ready-made attach point once it lands on main; `mapping-core.ts` rejects
- * writes for `alert` today with a clear "not yet supported" error rather than
- * skipping tenant-scoped existence validation for a table that does not exist
- * yet, since accepting an unverified entity id would be a tenant-isolation
- * gap, not a feature.
+ * `alert` maps to #55's normalized `alerts` table (`mapping-core.ts`'s
+ * `resolveEntityCase` verifies the alert belongs to the caller's
+ * organisation the same way every other entity type does before allowing a
+ * write against it).
  */
 export const attackMappingEntityTypeEnum = pgEnum("attack_mapping_entity_type", [
   "case",
@@ -2827,7 +2825,7 @@ export const attackTechniques = pgTable(
 
 /**
  * An analyst-recorded link between one ATT&CK technique and one entity
- * (case, observable, evidence item, task — `alert` is reserved for #55).
+ * (case, observable, evidence item, task, or alert).
  * `techniqueId` is the stable ATT&CK id (not a foreign key to
  * `attack_techniques.id`), so a mapping keeps resolving after a catalog
  * refresh retires the technique row it was created against; `catalogVersionId`

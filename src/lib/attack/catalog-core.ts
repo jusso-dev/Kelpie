@@ -206,9 +206,20 @@ export async function importCatalogVersion(input: {
  * Explicit manual rollback of a specific (typically currently-active)
  * catalog version back to whichever version most recently held `superseded`
  * status. Does not delete anything — the bad version is marked
- * `rolled_back` and stays in the audit history; its technique rows and any
- * mappings recorded against it keep resolving via `techniqueId`, which
- * mappings always store independent of catalog version.
+ * `rolled_back` and stays in the audit history.
+ *
+ * Critically, the version being restored may predate a technique the
+ * version being abandoned introduced (e.g. an analyst mapped a case to a
+ * technique that only exists starting from the version being rolled back).
+ * Without carrying that technique forward into the restored version, it
+ * would stop resolving entirely the moment the rollback flips which version
+ * is active — worse than the normal deprecation path, since
+ * `resolveTechnique`/`getTechniquesByIds` only ever query the currently
+ * active version's rows. So, exactly like a normal `importCatalogVersion`
+ * carry-forward, any technique id present on the version being rolled back
+ * but absent from the version being restored is inserted into the restored
+ * version as a `deprecated: true` row before it is reactivated — reusing
+ * `mergeCatalogTechniques` rather than a parallel carry-forward path.
  */
 export async function rollbackCatalogImport(
   catalogVersionId: string,
@@ -239,14 +250,58 @@ export async function rollbackCatalogImport(
   if (!previous) {
     throw new AttackCatalogError("No previous catalog version is available to roll back to", 409);
   }
+
+  const [targetTechniqueRows, previousTechniqueRows] = await Promise.all([
+    db.select().from(attackTechniques).where(eq(attackTechniques.catalogVersionId, target.id)),
+    db.select().from(attackTechniques).where(eq(attackTechniques.catalogVersionId, previous.id)),
+  ]);
+  const previousIds = new Set(previousTechniqueRows.map((t) => t.techniqueId));
+  // `mergeCatalogTechniques(previous, incoming)` returns `incoming` plus
+  // whichever `previous` entries `incoming` is missing, marked deprecated —
+  // here that means "the restored version's own techniques, plus whichever
+  // of the abandoned version's techniques it doesn't already have". Only the
+  // carried-forward tail is new; the restored version's own rows already
+  // exist in the database and must not be re-inserted.
+  const merged = mergeCatalogTechniques(targetTechniqueRows.map(toRaw), previousTechniqueRows.map(toRaw));
+  const newlyCarriedForward = merged.filter((t) => !previousIds.has(t.techniqueId));
+  const tacticCount = countDistinctTactics(merged);
+
   await db.transaction(async (tx) => {
+    if (newlyCarriedForward.length > 0) {
+      await tx.insert(attackTechniques).values(
+        newlyCarriedForward.map((t) => ({
+          id: newId("attacktech"),
+          catalogVersionId: previous.id,
+          techniqueId: t.techniqueId,
+          name: t.name,
+          domain: t.domain ?? "enterprise",
+          tactics: t.tactics,
+          isSubtechnique: t.isSubtechnique ?? false,
+          parentTechniqueId: t.parentTechniqueId ?? null,
+          platforms: t.platforms ?? [],
+          dataSources: t.dataSources ?? [],
+          description: t.description ?? null,
+          url: t.url ?? null,
+          deprecated: true,
+          revoked: t.revoked ?? false,
+          supersededByTechniqueId: t.supersededByTechniqueId ?? null,
+          attackVersion: t.attackVersion ?? null,
+        })),
+      );
+    }
     await tx
       .update(attackCatalogVersions)
       .set({ status: "rolled_back", error: trimmedReason })
       .where(eq(attackCatalogVersions.id, catalogVersionId));
     await tx
       .update(attackCatalogVersions)
-      .set({ status: "active", activatedAt: sql`now()`, supersededAt: null })
+      .set({
+        status: "active",
+        activatedAt: sql`now()`,
+        supersededAt: null,
+        techniqueCount: merged.length,
+        tacticCount,
+      })
       .where(eq(attackCatalogVersions.id, previous.id));
   });
   const [restored] = await db

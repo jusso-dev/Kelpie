@@ -333,13 +333,13 @@ Any subset of `verdict` (`unknown`, `clean`, `suspicious`, `malicious`), `remedi
 Cases created before this model existed (via `sourceSystem`/`sourceReference`, e.g. from Microsoft Sentinel/Defender XDR import) are backfilled by `npm run backfill:alerts`: for every such case with no alert yet, it creates (or reuses) an `alert_sources` row for that source, an `alerts` row that preserves the exact `sourceSystem` as `detectionSource` and `sourceReference` as the alert's immutable `externalId`, and links it into the case as the primary alert. The script is idempotent — re-running it after new source-backed cases appear only backfills the ones still missing an alert; it never creates a duplicate.
 ## ATT&CK technique mapping
 
-Kelpie ships a versioned, organisation-independent ATT&CK Enterprise technique catalog (a bundled offline baseline snapshot by default; an administrator can refresh it from a configured URL under **Settings**, which runs through BullMQ and is rolled back automatically on failure). Analysts attach techniques to a case, observable, evidence item, or task (`alert` is reserved for the upcoming normalized-alerts work), recording confidence, source, notes, detection notes, response notes, and analyst-entered actor attribution as separate fields. Kelpie never infers actor attribution automatically.
+Kelpie ships a versioned, organisation-independent ATT&CK Enterprise technique catalog (a bundled offline baseline snapshot by default; an administrator can refresh it from a configured URL under **Settings**, which runs through BullMQ and is rolled back automatically on failure). Analysts attach techniques to a case, alert, observable, evidence item, or task, recording confidence, source, notes, detection notes, response notes, and analyst-entered actor attribution as separate fields. Kelpie never infers actor attribution automatically. An alert mapping is linked to a case for timeline/audit purposes via its `case_alerts` link (preferring the alert's primary case, otherwise its most recently linked case); a mapping on an alert not yet linked to any case still succeeds — it is recorded on the organisation audit trail without a case timeline entry.
 
 ### `GET /api/v1/attack/techniques?q=&tactic=&includeDeprecated=&limit=`
 Search the active catalog version. `q` matches technique id or name substring. `tactic` is an exact ATT&CK tactic id (e.g. `lateral-movement`). Deprecated techniques are excluded unless `includeDeprecated=true` — deprecated techniques remain in the catalog and readable on historical mappings, they just don't surface in the default search.
 
 ### `GET /api/v1/attack/mappings?caseId=` or `?entityType=&entityId=`
-Returns every mapping touching a case (the case's own mapping plus its observables/evidence/tasks) or the mappings on one specific entity.
+Returns every mapping touching a case (the case's own mapping plus its linked alerts/observables/evidence/tasks) or the mappings on one specific entity.
 
 ### `POST /api/v1/attack/mappings`
 ```json
