@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { tiFeeds } from "@/db/schema";
+import { buildRunErrorSummary } from "../redact";
 import type { RunFilters, RunRecord, RunState } from "../types";
 
 /** Same synthetic-latest-poll approach as `case-source-polls.ts`. */
@@ -47,7 +48,7 @@ function toRecord(row: typeof tiFeeds.$inferSelect): RunRecord {
       indicatorCount: row.indicatorCount,
     },
     errorCategory: row.lastError ? "provider_error" : null,
-    errorSummary: row.lastError,
+    errorSummary: buildRunErrorSummary(row.lastError),
     cancel: { requested: false, requestedAt: null, requestedBy: null },
     killSwitch: { organisationActive: false, providerActive: false, actionActive: false },
     retryable: row.isActive,

@@ -1,7 +1,7 @@
 import { and, desc, eq, gte, lte, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { cases, responseActions, responseActionRuns } from "@/db/schema";
-import { buildRunSummary } from "../redact";
+import { buildRunErrorSummary, buildRunSummary } from "../redact";
 import { providerForActionKind } from "../kill-switch";
 import type { ErrorCategory, RunFilters, RunRecord, RunState } from "../types";
 
@@ -73,12 +73,14 @@ function toRecord(row: Row): RunRecord {
     }),
     errorCategory: failed ? ((run.errorCategory as ErrorCategory | null) ?? "unknown") : null,
     errorSummary: failed
-      ? typeof response.error === "string"
-        ? response.error
-        : typeof response.summary === "string"
-          ? response.summary
-          : "Response action failed"
-      : run.rejectionReason,
+      ? (buildRunErrorSummary(
+          typeof response.error === "string"
+            ? response.error
+            : typeof response.summary === "string"
+              ? response.summary
+              : null,
+        ) ?? "Response action failed")
+      : buildRunErrorSummary(run.rejectionReason),
     cancel: {
       requested: Boolean(run.cancelRequestedAt),
       requestedAt: run.cancelRequestedAt?.toISOString() ?? null,

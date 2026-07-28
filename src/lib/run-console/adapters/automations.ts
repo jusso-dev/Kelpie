@@ -1,7 +1,7 @@
 import { and, desc, eq, gte, lte, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { automationRules, automationRuns, cases } from "@/db/schema";
-import { buildRunSummary } from "../redact";
+import { buildRunErrorSummary, buildRunSummary } from "../redact";
 import { classifyErrorMessage } from "../error-category";
 import { MUSTER_AUTOMATION_PROVIDER } from "../kill-switch";
 import type { ErrorCategory, RunFilters, RunRecord, RunState } from "../types";
@@ -69,7 +69,7 @@ function toRecord(row: Row): RunRecord {
     errorCategory: failed
       ? ((run.errorCategory as ErrorCategory | null) ?? classifyErrorMessage(run.lastError))
       : null,
-    errorSummary: failed ? run.lastError : null,
+    errorSummary: failed ? buildRunErrorSummary(run.lastError) : null,
     cancel: {
       requested: Boolean(run.cancelRequestedAt),
       requestedAt: run.cancelRequestedAt?.toISOString() ?? null,

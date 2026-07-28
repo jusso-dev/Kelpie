@@ -1,7 +1,7 @@
 import { and, desc, eq, gte, lte, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { mobileNotificationDeliveries, webhookDeliveries, webhooks } from "@/db/schema";
-import { buildRunSummary } from "../redact";
+import { buildRunErrorSummary, buildRunSummary } from "../redact";
 import { classifyErrorMessage } from "../error-category";
 import type { RunFilters, RunRecord, RunState } from "../types";
 
@@ -70,7 +70,7 @@ function webhookToRecord(
     inputSummary: buildRunSummary({ event: row.event }),
     outputSummary: buildRunSummary({ latencyMs: row.latencyMs }),
     errorCategory: state === "failed" ? classifyErrorMessage(row.lastError) : null,
-    errorSummary: row.lastError,
+    errorSummary: buildRunErrorSummary(row.lastError),
     cancel: { requested: false, requestedAt: null, requestedBy: null },
     killSwitch: { organisationActive: false, providerActive: false, actionActive: false },
     // Deliveries already exhaust their own backoff schedule automatically;
@@ -114,7 +114,7 @@ function mobileToRecord(row: typeof mobileNotificationDeliveries.$inferSelect): 
     inputSummary: buildRunSummary({ event: row.event, title: row.title }),
     outputSummary: null,
     errorCategory: state === "failed" ? classifyErrorMessage(row.lastError) : null,
-    errorSummary: row.lastError,
+    errorSummary: buildRunErrorSummary(row.lastError),
     cancel: { requested: false, requestedAt: null, requestedBy: null },
     killSwitch: { organisationActive: false, providerActive: false, actionActive: false },
     // Deliveries already exhaust their own backoff schedule automatically;

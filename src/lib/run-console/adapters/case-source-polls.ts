@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { caseSources } from "@/db/schema";
+import { buildRunErrorSummary } from "../redact";
 import type { RunFilters, RunRecord, RunState } from "../types";
 
 /**
@@ -40,7 +41,7 @@ function toRecord(row: typeof caseSources.$inferSelect): RunRecord {
     inputSummary: { pollIntervalMinutes: row.pollIntervalMinutes },
     outputSummary: { importedCaseCount: row.importedCaseCount, cursorSet: Boolean(row.cursor) },
     errorCategory: row.lastError ? "provider_error" : null,
-    errorSummary: row.lastError,
+    errorSummary: buildRunErrorSummary(row.lastError),
     cancel: { requested: false, requestedAt: null, requestedBy: null },
     killSwitch: { organisationActive: false, providerActive: false, actionActive: false },
     retryable: row.isActive,

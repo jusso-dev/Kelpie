@@ -138,7 +138,7 @@ export default async function RunDetailPage({
         <section className="kelpie-section">
           <div className="kelpie-section-header">
             <h2>Error</h2>
-            <p>Support-safe: redacted before it ever reached this page.</p>
+            <p>Support-safe: credential-shaped values are redacted before display.</p>
           </div>
           <p className="text-sm text-slate-300 break-all">{run.errorSummary}</p>
         </section>

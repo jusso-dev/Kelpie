@@ -377,6 +377,44 @@ async function main() {
     assert.equal(redacted?.safe, "visible");
     console.log("ok: run summaries redact credentials before persistence/display");
 
+    // ── 9b. A real failed run's provider error is redacted end to end ──
+    // Regression: `errorSummary` used to be copied verbatim out of the
+    // provider response in every adapter while the detail page captioned it
+    // "redacted before it ever reached this page". Response-action handlers
+    // put raw provider error strings on the row, and `read_only` analysts can
+    // observe the console, so this field has to be scrubbed like the rest.
+    await db
+      .update(responseActionRuns)
+      .set({
+        status: "failed",
+        errorCategory: "provider_error",
+        response: {
+          error:
+            'Entra rejected the call: {"error":"invalid_client","client_secret":"s3cr3t-value","access_token":"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSJ9.aGVsbG93b3JsZHNpZ25hdHVyZQ"} ' +
+            "Authorization: Bearer AbCdEf0123456789AbCdEf0123456789AbCdEf01",
+        },
+      })
+      .where(eq(responseActionRuns.id, created.runId));
+
+    const failedRun = await getRun(orgAId, "response_action", created.runId);
+    const errorText = failedRun?.errorSummary ?? "";
+    assert.ok(errorText.length > 0, "a failed run still reports an error summary");
+    for (const secret of [
+      "s3cr3t-value",
+      "eyJhbGciOiJIUzI1NiJ9",
+      "AbCdEf0123456789AbCdEf0123456789AbCdEf01",
+    ]) {
+      assert.ok(
+        !errorText.includes(secret),
+        `errorSummary must not leak ${secret}: ${errorText}`,
+      );
+    }
+    assert.ok(
+      errorText.includes("invalid_client"),
+      "the support-useful part of the provider error survives redaction",
+    );
+    console.log("ok: a failed run's provider error is redacted before display");
+
     // ── 10. Authorisation: observation and control are granted separately ──
     assert.equal(canObserveRunConsole(fakeUser({ role: "read_only" })), true);
     assert.equal(canControlRuns(fakeUser({ role: "read_only" })), false);

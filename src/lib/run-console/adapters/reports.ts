@@ -1,7 +1,7 @@
 import { and, desc, eq, gte, lte, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { auditExportJobs } from "@/db/schema";
-import { buildRunSummary } from "../redact";
+import { buildRunErrorSummary, buildRunSummary } from "../redact";
 import type { RunFilters, RunRecord, RunState } from "../types";
 
 function toState(status: string): RunState {
@@ -50,7 +50,7 @@ function toRecord(row: typeof auditExportJobs.$inferSelect): RunRecord {
     inputSummary: buildRunSummary({ filters: row.filters }),
     outputSummary: buildRunSummary({ rowCount: row.rowCount }),
     errorCategory: state === "failed" ? "provider_error" : null,
-    errorSummary: row.error,
+    errorSummary: buildRunErrorSummary(row.error),
     cancel: { requested: false, requestedAt: null, requestedBy: null },
     killSwitch: { organisationActive: false, providerActive: false, actionActive: false },
     // Regeneration happens by requesting a fresh export from the audit page

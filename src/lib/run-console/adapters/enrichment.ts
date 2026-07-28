@@ -1,6 +1,7 @@
 import { and, desc, eq, gte, lte, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { enrichmentRuns } from "@/db/schema";
+import { buildRunErrorSummary } from "../redact";
 import type { ErrorCategory, RunFilters, RunRecord, RunState } from "../types";
 
 function toState(status: string): RunState {
@@ -47,7 +48,7 @@ function toRecord(run: typeof enrichmentRuns.$inferSelect): RunRecord {
     inputSummary: { limit: run.processedCount },
     outputSummary: { processed: run.processedCount },
     errorCategory: state === "failed" ? ((run.errorCategory as ErrorCategory | null) ?? "unknown") : null,
-    errorSummary: run.lastError,
+    errorSummary: buildRunErrorSummary(run.lastError),
     cancel: { requested: false, requestedAt: null, requestedBy: null },
     killSwitch: { organisationActive: false, providerActive: false, actionActive: false },
     // Enrichment is a rolling scheduled sweep, not a single governed action;
