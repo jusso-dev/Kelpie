@@ -13,6 +13,7 @@ import {
   enrichPendingCases,
   jobHandlers,
   pollExternalCaseSource,
+  pollMailbox,
   pollThreatFeed,
 } from "@/lib/jobs/handlers";
 import { processAuditExportJob } from "@/lib/audit/export";
@@ -38,6 +39,11 @@ async function processJob(job: Job<KelpieJobData, unknown, string>) {
     case "poll-case-source":
       if (!job.data.sourceId) throw new Error("Case-source job is missing sourceId");
       return pollExternalCaseSource(job.data.sourceId);
+    case "poll-mailbox":
+      if (!job.data.mailboxConnectionId) {
+        throw new Error("Mailbox job is missing mailboxConnectionId");
+      }
+      return pollMailbox(job.data.mailboxConnectionId);
     case "enrich-cases":
       return enrichPendingCases();
     case "export-audit-events":

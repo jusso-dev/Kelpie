@@ -4,6 +4,7 @@ import { organisations, enrichmentRuns } from "@/db/schema";
 import { newId } from "@/lib/utils";
 import { pollFeed } from "@/lib/ti/core";
 import { pollCaseSource } from "@/lib/case-sources/core";
+import { pollMailboxConnection } from "@/lib/mailbox/core";
 import { processPendingDeliveries } from "@/lib/webhooks";
 import { enrichOrganisationPending } from "@/lib/enrichment/registry";
 import { purgeExpiredCache } from "@/lib/enrichment/cache";
@@ -24,6 +25,12 @@ export async function pollThreatFeed(feedId: string) {
 
 export async function pollExternalCaseSource(sourceId: string) {
   const result = await pollCaseSource(sourceId);
+  if (result.error) throw new Error(result.error);
+  return result;
+}
+
+export async function pollMailbox(connectionId: string) {
+  const result = await pollMailboxConnection(connectionId);
   if (result.error) throw new Error(result.error);
   return result;
 }

@@ -190,6 +190,13 @@
       "when": 1785231451955,
       "tag": "0026_empty_token_scopes",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1785232132432,
+      "tag": "0027_mailbox_intake",
+      "breakpoints": true
     }
   ]
 }

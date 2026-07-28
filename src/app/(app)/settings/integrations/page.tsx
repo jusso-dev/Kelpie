@@ -4,6 +4,7 @@ import {
   caseSources,
   cases,
   inboundSourceStatus,
+  mailboxConnections,
   responseActions,
   tiFeeds,
   webhooks,
@@ -13,12 +14,14 @@ import { requireUser } from "@/lib/session";
 import { availableActionKinds } from "@/actions/response-actions";
 import ResponseActionSettings from "@/components/response-action-settings";
 import CaseSourceSettings from "@/components/case-source-settings";
+import MailboxSettings from "@/components/mailbox-settings";
 import AutomationSchedules from "@/components/automation-schedules";
 import VirusTotalSettings from "@/components/virustotal-settings";
 import WebhookSettings from "@/components/webhook-settings";
 import TawnySettings from "@/components/tawny-settings";
 import { getVirusTotalConfiguration } from "@/lib/enrichment/providers/virustotal";
 import { TAWNY_SOURCE_SYSTEM } from "@/lib/case-source-identity";
+import { publicMailboxConnection } from "@/lib/mailbox/core";
 import { Globe2 } from "lucide-react";
 
 export default async function IntegrationsSettingsPage() {
@@ -33,6 +36,7 @@ export default async function IntegrationsSettingsPage() {
     virusTotal,
     tawnyStatusRows,
     tawnyCaseCountRows,
+    mailboxRows,
   ] = await Promise.all([
     db
       .select({
@@ -91,6 +95,11 @@ export default async function IntegrationsSettingsPage() {
           eq(cases.sourceSystem, TAWNY_SOURCE_SYSTEM),
         ),
       ),
+    db
+      .select()
+      .from(mailboxConnections)
+      .where(eq(mailboxConnections.organisationId, user.organisationId))
+      .orderBy(desc(mailboxConnections.createdAt)),
   ]);
   const tawnyStatus = tawnyStatusRows[0] ?? null;
   const tawnyImportedCaseCount = Number(tawnyCaseCountRows[0]?.total ?? 0);
@@ -129,6 +138,41 @@ export default async function IntegrationsSettingsPage() {
             ...source,
             lastPolledAt: source.lastPolledAt?.toISOString() ?? null,
           }))}
+          isAdmin={isAdmin}
+        />
+      </section>
+
+      <section className="kelpie-section">
+        <div className="kelpie-section-header">
+          <h2>Inbound mailbox</h2>
+          <p>
+            Poll IMAP over TLS or Microsoft Graph mailboxes. Credentials are
+            encrypted at rest and never shown after save. Attachments use the
+            evidence pipeline; messages can auto-create cases or wait for review.
+          </p>
+        </div>
+        <MailboxSettings
+          connections={mailboxRows.map((row) => {
+            const pub = publicMailboxConnection(row);
+            return {
+              id: pub.id,
+              name: pub.name,
+              provider: pub.provider,
+              folder: pub.folder,
+              pollIntervalMinutes: pub.pollIntervalMinutes,
+              intakeMode: pub.intakeMode,
+              isActive: pub.isActive,
+              lastPolledAt: pub.lastPolledAt?.toISOString() ?? null,
+              lastSuccessAt: pub.lastSuccessAt?.toISOString() ?? null,
+              lastError: pub.lastError,
+              importedMessageCount: pub.importedMessageCount,
+              connectionMeta: (pub.connectionMeta ?? {}) as Record<
+                string,
+                unknown
+              >,
+              hasCredentials: pub.hasCredentials,
+            };
+          })}
           isAdmin={isAdmin}
         />
       </section>

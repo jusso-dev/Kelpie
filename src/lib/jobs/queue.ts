@@ -6,6 +6,7 @@ export type KelpieJobName =
   | "schedule-sync"
   | "poll-ti-feed"
   | "poll-case-source"
+  | "poll-mailbox"
   | "sla-check"
   | "escalation-check"
   | "deliver-webhooks"
@@ -21,6 +22,7 @@ export type KelpieJobName =
 export type KelpieJobData = {
   feedId?: string;
   sourceId?: string;
+  mailboxConnectionId?: string;
   auditExportJobId?: string;
   attackCatalogSourceUrl?: string;
   attackCatalogActorId?: string;
