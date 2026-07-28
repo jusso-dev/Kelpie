@@ -197,6 +197,13 @@
       "when": 1785232132432,
       "tag": "0027_mailbox_intake",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1785232650175,
+      "tag": "0028_elite_skaar",
+      "breakpoints": true
     }
   ]
 }

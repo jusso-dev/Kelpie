@@ -248,6 +248,37 @@ export const evidenceRelationshipTypeEnum = pgEnum("evidence_relationship_type",
   "derived_from",
 ]);
 
+/**
+ * Ordered case narrative content blocks (issue #58). Separate from conversational
+ * comments and raw timeline noise: findings, decisions, and report sections that
+ * analysts deliberately promote into the investigation record.
+ */
+export const caseContentBlockTypeEnum = pgEnum("case_content_block_type", [
+  "investigation_note",
+  "finding",
+  "hypothesis",
+  "decision",
+  "evidence_summary",
+  "containment_record",
+  "eradication_record",
+  "recovery_validation",
+  "stakeholder_update",
+  "code_query",
+  "table",
+  "checklist",
+  "external_reference",
+  "report_section",
+]);
+
+export const caseContentBlockLinkTypeEnum = pgEnum("case_content_block_link_type", [
+  "alert",
+  "entity",
+  "evidence_item",
+  "task",
+  "attack_technique",
+  "attack_mapping",
+]);
+
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Organisations + BetterAuth tables                                          */
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -3114,6 +3145,166 @@ export const d3fendMappings = pgTable(
   ],
 );
 
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Case content blocks — structured investigation narrative (issue #58)       */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Head state of one ordered case content block. Body is sanitised Markdown
+ * (no active HTML); structured payload is optional JSON for table/checklist
+ * types. `revisionNumber` is the head revision; every write appends a row to
+ * `case_content_block_revisions` and never rewrites prior history. Restoring
+ * an earlier revision creates a new head revision rather than deleting later
+ * ones. Soft-archive via `archivedAt` keeps the row for history.
+ */
+export const caseContentBlocks = pgTable(
+  "case_content_blocks",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    type: caseContentBlockTypeEnum("type").notNull(),
+    title: text("title").notNull(),
+    content: text("content").notNull().default(""),
+    contentStructured: jsonb("content_structured"),
+    sequenceIndex: integer("sequence_index").notNull(),
+    groupKey: text("group_key"),
+    collapsed: boolean("collapsed").notNull().default(false),
+    tlp: tlpEnum("tlp").notNull().default("amber"),
+    pap: papEnum("pap").notNull().default("amber"),
+    sensitive: boolean("sensitive").notNull().default(false),
+    /** When false, reports exclude this block. Sensitive blocks default false. */
+    includeInReport: boolean("include_in_report").notNull().default(true),
+    authorId: text("author_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    lastEditorId: text("last_editor_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    revisionNumber: integer("revision_number").notNull().default(1),
+    /** Comment this block was promoted from, if any. Preserved forever. */
+    sourceCommentId: text("source_comment_id").references(() => comments.id, {
+      onDelete: "set null",
+    }),
+    /** Actor who promoted the comment into a block. */
+    promotedById: text("promoted_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    promotedAt: timestamp("promoted_at", { withTimezone: true }),
+    /** Original comment author at promotion time (attribution survives user deletion via name snapshot in revision). */
+    originalAuthorId: text("original_author_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    originalCreatedAt: timestamp("original_created_at", { withTimezone: true }),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    archivedById: text("archived_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Sequence uniqueness only among active (non-archived) blocks so archive
+    // + reorder cannot collide on a freed index held by an archived row.
+    uniqueIndex("case_content_blocks_case_sequence_idx")
+      .on(t.caseId, t.sequenceIndex)
+      .where(sql`${t.archivedAt} is null`),
+    index("case_content_blocks_org_case_idx").on(t.organisationId, t.caseId),
+    index("case_content_blocks_source_comment_idx").on(t.sourceCommentId),
+  ],
+);
+
+/**
+ * Append-only revision history for a content block. Rows are never updated or
+ * deleted by application code. Restoring revision N inserts revision M+1 with
+ * the restored body and `restoredFromRevision = N`.
+ */
+export const caseContentBlockRevisions = pgTable(
+  "case_content_block_revisions",
+  {
+    id: text("id").primaryKey(),
+    blockId: text("block_id")
+      .notNull()
+      .references(() => caseContentBlocks.id, { onDelete: "cascade" }),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    revisionNumber: integer("revision_number").notNull(),
+    type: caseContentBlockTypeEnum("type").notNull(),
+    title: text("title").notNull(),
+    content: text("content").notNull(),
+    contentStructured: jsonb("content_structured"),
+    tlp: tlpEnum("tlp").notNull(),
+    pap: papEnum("pap").notNull(),
+    sensitive: boolean("sensitive").notNull(),
+    includeInReport: boolean("include_in_report").notNull(),
+    editorId: text("editor_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    changeSummary: text("change_summary"),
+    restoredFromRevision: integer("restored_from_revision"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("case_content_block_revisions_block_rev_idx").on(
+      t.blockId,
+      t.revisionNumber,
+    ),
+    index("case_content_block_revisions_case_idx").on(t.caseId),
+  ],
+);
+
+/**
+ * Authorised links from a content block to investigation records. Every link
+ * is re-checked for organisation + case membership on write so a guessed id
+ * from another org or case cannot be attached.
+ */
+export const caseContentBlockLinks = pgTable(
+  "case_content_block_links",
+  {
+    id: text("id").primaryKey(),
+    blockId: text("block_id")
+      .notNull()
+      .references(() => caseContentBlocks.id, { onDelete: "cascade" }),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    linkType: caseContentBlockLinkTypeEnum("link_type").notNull(),
+    targetId: text("target_id").notNull(),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("case_content_block_links_unique_idx").on(
+      t.blockId,
+      t.linkType,
+      t.targetId,
+    ),
+    index("case_content_block_links_case_idx").on(t.caseId),
+    index("case_content_block_links_target_idx").on(t.linkType, t.targetId),
+  ],
+);
+
 export type Organisation = typeof organisations.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type TwoFactor = typeof twoFactors.$inferSelect;
@@ -3181,6 +3372,10 @@ export type AttackTechniqueRow = typeof attackTechniques.$inferSelect;
 export type AttackTechniqueMapping = typeof attackTechniqueMappings.$inferSelect;
 export type AttackStoryEntry = typeof attackStoryEntries.$inferSelect;
 export type D3fendMapping = typeof d3fendMappings.$inferSelect;
+export type CaseContentBlock = typeof caseContentBlocks.$inferSelect;
+export type CaseContentBlockRevision =
+  typeof caseContentBlockRevisions.$inferSelect;
+export type CaseContentBlockLink = typeof caseContentBlockLinks.$inferSelect;
 
 export type PlaybookStepPhase =
   | "triage"

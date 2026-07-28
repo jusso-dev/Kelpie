@@ -28,6 +28,8 @@ Errors return `{ "error": "..." }` with an appropriate HTTP status (`400` invali
 | `alerts:raw_payload:read` | Read raw provider payload references behind alerts and evidence (sensitive; only grant to admin-issued tokens) |
 | `attack:read` | Read the ATT&CK technique catalog, technique mappings, attack stories, and coverage |
 | `attack:write` | Attach, update, and remove ATT&CK technique mappings and attack-story entries |
+| `content_blocks:read` | Read structured investigation content blocks and revision history |
+| `content_blocks:write` | Create, edit, archive, reorder, promote, and link structured investigation content blocks |
 
 **Empty scopes grant nothing.** A token whose `scopes` array is empty fails every scope check (`403`). Sensitive scopes (`alerts:raw_payload:read`, `evidence:override`, `audit:read`) are never implied. Migration `0026_empty_token_scopes` rewrites any pre-existing empty-scope tokens to an explicit non-sensitive set so ordinary integrations keep working without retaining those sensitive powers — re-issue tokens that intentionally need sensitive scopes from Settings after upgrading.
 
@@ -531,6 +533,69 @@ worked example.
 { "body": "VT result: malicious=12, suspicious=3. @sam.analyst please review" }
 ```
 `@handle` mentions trigger the same email path as the UI.
+
+### `POST /api/v1/cases/{caseId}/comments/{commentId}/promote`
+Promote a comment into a structured content block (`content_blocks:write`). Preserves the original author, original timestamp, source comment id, and promoting actor.
+
+```json
+{
+  "type": "investigation_note",
+  "title": "Field observation"
+}
+```
+Returns `201 { "block": { ... } }`. A second promotion of the same comment returns `409`.
+
+## Content blocks (investigation narrative)
+
+Ordered, versioned case content blocks for findings, decisions, and report sections. Separate from conversational comments. Body is sanitised Markdown (no active HTML). Revisions are append-only; restoring an earlier revision creates a new head rather than deleting later history. Reordering writes **one** timeline event for the whole operation.
+
+Block types: `investigation_note`, `finding`, `hypothesis`, `decision`, `evidence_summary`, `containment_record`, `eradication_record`, `recovery_validation`, `stakeholder_update`, `code_query`, `table`, `checklist`, `external_reference`, `report_section`.
+
+Link types (organisation- and case-authorised on write): `alert`, `entity`, `evidence_item`, `task`, `attack_technique`, `attack_mapping`.
+
+Sensitive blocks default to `includeInReport: false` (conservative export). Reports include non-archived blocks with `includeInReport: true` and `sensitive: false`.
+
+### `GET /api/v1/cases/{caseId}/content-blocks`
+Optional query: `includeArchived=true`. Returns `{ "blocks": [...] }` ordered by `sequenceIndex`. Each block embeds `links` and head `revisionNumber`.
+
+### `POST /api/v1/cases/{caseId}/content-blocks`
+```json
+{
+  "type": "finding",
+  "title": "Initial foothold",
+  "content": "Attacker used **valid accounts**.",
+  "tlp": "amber",
+  "pap": "amber",
+  "sensitive": false,
+  "includeInReport": true
+}
+```
+Returns `201 { "block": { ... } }`.
+
+### `GET /api/v1/cases/{caseId}/content-blocks/{blockId}`
+### `PATCH /api/v1/cases/{caseId}/content-blocks/{blockId}`
+Any subset of content fields, or one of the special actions:
+
+| Field | Effect |
+| --- | --- |
+| (content fields) | Appends a new revision and updates the head |
+| `targetIndex` | Reorders this block among active blocks (one timeline event) |
+| `archive: true` | Soft-archives the block |
+| `restoreRevision: N` | Restores revision N as a new head revision |
+
+### `DELETE /api/v1/cases/{caseId}/content-blocks/{blockId}`
+Soft-archives the block (same as `PATCH` with `archive: true`).
+
+### `GET /api/v1/cases/{caseId}/content-blocks/{blockId}/revisions`
+Append-only revision list ordered by `revisionNumber`.
+
+### `POST /api/v1/cases/{caseId}/content-blocks/{blockId}/links`
+```json
+{ "linkType": "task", "targetId": "task_..." }
+```
+Returns `201 { "link": { ... } }`. Cross-organisation or wrong-case targets return `404`.
+
+### `DELETE /api/v1/cases/{caseId}/content-blocks/{blockId}/links/{linkId}`
 
 ## Webhooks (outbound)
 

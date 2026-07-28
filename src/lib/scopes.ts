@@ -59,6 +59,15 @@ export const KNOWN_SCOPES = [
     value: "attack:write",
     label: "Attach, update, and remove ATT&CK technique mappings and attack-story entries",
   },
+  {
+    value: "content_blocks:read",
+    label: "Read structured investigation content blocks and revision history",
+  },
+  {
+    value: "content_blocks:write",
+    label:
+      "Create, edit, archive, reorder, promote, and link structured investigation content blocks",
+  },
 ] as const;
 
 export type ScopeValue = (typeof KNOWN_SCOPES)[number]["value"];

@@ -46,6 +46,7 @@ export type TimelineEventType =
   | "bulk_operation"
   | "attack_mapping_changed"
   | "attack_story_changed"
+  | "content_block_changed"
   | "custom";
 
 export async function writeTimelineEvent(opts: {
