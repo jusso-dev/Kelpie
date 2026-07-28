@@ -538,6 +538,11 @@ export const cases = pgTable(
     // backs the "recently reopened" built-in view as an indexed column
     // instead of a timeline scan.
     lastReopenedAt: timestamp("last_reopened_at", { withTimezone: true }),
+    // Set when this case was merged into another as a non-canonical source
+    // (issue #56). Source cases are never deleted; they stay navigable with
+    // this pointer to the surviving canonical case. Null while the case is
+    // active / not superseded.
+    supersededByCaseId: text("superseded_by_case_id"),
   },
   (t) => [
     uniqueIndex("cases_org_number_idx").on(t.organisationId, t.caseNumber),
@@ -568,6 +573,14 @@ export const cases = pgTable(
     index("cases_org_reopened_idx")
       .on(t.organisationId, t.lastReopenedAt)
       .where(sql`${t.lastReopenedAt} is not null`),
+    index("cases_org_superseded_idx")
+      .on(t.organisationId, t.supersededByCaseId)
+      .where(sql`${t.supersededByCaseId} is not null`),
+    foreignKey({
+      columns: [t.supersededByCaseId],
+      foreignColumns: [t.id],
+      name: "cases_superseded_by_case_id_fk",
+    }).onDelete("set null"),
   ],
 );
 
@@ -1718,6 +1731,299 @@ export const caseAlerts = pgTable(
     uniqueIndex("case_alerts_unique_idx").on(t.caseId, t.alertId),
     index("case_alerts_alert_idx").on(t.alertId),
     index("case_alerts_org_idx").on(t.organisationId),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Alert correlation (issue #56): rules, suggestions, membership lineage     */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Organisation-scoped, versioned correlation rules. A rule key identifies a
+ * logical rule across versions; enabling a new version supersedes the prior
+ * row for that key. Rules never mutate cases by themselves — they only
+ * produce suggestions unless the org policy explicitly enables auto-merge
+ * (disabled by default) and the rule is not in dry-run mode.
+ */
+export const correlationRuleStatusEnum = pgEnum("correlation_rule_status", [
+  "draft",
+  "active",
+  "disabled",
+  "superseded",
+]);
+
+export const correlationSuggestionStatusEnum = pgEnum(
+  "correlation_suggestion_status",
+  ["pending", "accepted", "rejected", "expired", "auto_applied"],
+);
+
+export const correlationSuggestionKindEnum = pgEnum(
+  "correlation_suggestion_kind",
+  ["group_alerts", "attach_to_case", "merge_cases"],
+);
+
+export const alertMembershipOperationEnum = pgEnum(
+  "alert_membership_operation",
+  ["link", "unlink", "move", "merge", "split", "create_case", "reverse_merge"],
+);
+
+export const caseMergeStatusEnum = pgEnum("case_merge_status", [
+  "active",
+  "reversed",
+]);
+
+export const correlationRules = pgTable(
+  "correlation_rules",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    /** Stable identity across versions (e.g. `shared-entity-window`). */
+    ruleKey: text("rule_key").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    version: integer("version").notNull().default(1),
+    status: correlationRuleStatusEnum("status").notNull().default("draft"),
+    /**
+     * When true, evaluation records suggestions only and never triggers
+     * automatic membership changes even if org policy would allow them.
+     * Default true so enabling a rule is always safe to inspect first.
+     */
+    dryRun: boolean("dry_run").notNull().default(true),
+    /**
+     * Signal weights, time window, threshold, and filters. Shape is owned by
+     * `src/lib/correlation/scoring.ts` (`CorrelationRuleConfig`).
+     */
+    config: jsonb("config").notNull().default(sql`'{}'::jsonb`),
+    scoreThreshold: integer("score_threshold").notNull().default(40),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    supersededAt: timestamp("superseded_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("correlation_rules_org_key_version_idx").on(
+      t.organisationId,
+      t.ruleKey,
+      t.version,
+    ),
+    index("correlation_rules_org_status_idx").on(t.organisationId, t.status),
+    check(
+      "correlation_rules_score_threshold_range",
+      sql.raw(
+        `"score_threshold" >= 0 and "score_threshold" <= 100`,
+      ),
+    ),
+    check(
+      "correlation_rules_version_positive",
+      sql.raw(`"version" >= 1`),
+    ),
+  ],
+);
+
+/**
+ * Transparent correlation suggestions. Every row carries score, contributing
+ * signals, rule/version, and status so analysts can accept/reject with full
+ * provenance. Suggestions never mutate membership without an explicit
+ * analyst action (or an org policy that explicitly enables auto-apply).
+ */
+export const correlationSuggestions = pgTable(
+  "correlation_suggestions",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    ruleId: text("rule_id").references(() => correlationRules.id, {
+      onDelete: "set null",
+    }),
+    ruleKey: text("rule_key").notNull(),
+    ruleVersion: integer("rule_version").notNull(),
+    kind: correlationSuggestionKindEnum("kind").notNull(),
+    status: correlationSuggestionStatusEnum("status")
+      .notNull()
+      .default("pending"),
+    score: integer("score").notNull(),
+    /** Contributing signal detail: shared entities, products, techniques, etc. */
+    contributingSignals: jsonb("contributing_signals")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    alertIds: jsonb("alert_ids").notNull().default(sql`'[]'::jsonb`),
+    caseIds: jsonb("case_ids").notNull().default(sql`'[]'::jsonb`),
+    /** Canonical target case when the suggestion is attach/merge. */
+    targetCaseId: text("target_case_id").references(() => cases.id, {
+      onDelete: "set null",
+    }),
+    explanation: text("explanation").notNull().default(""),
+    generatedAt: timestamp("generated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedBy: text("resolved_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    resolveReason: text("resolve_reason"),
+    /** Fingerprint of the alert set + kind so re-eval does not spam duplicates. */
+    fingerprint: text("fingerprint").notNull(),
+  },
+  (t) => [
+    uniqueIndex("correlation_suggestions_org_fingerprint_pending_idx")
+      .on(t.organisationId, t.fingerprint)
+      .where(sql`${t.status} = 'pending'`),
+    index("correlation_suggestions_org_status_idx").on(
+      t.organisationId,
+      t.status,
+    ),
+    index("correlation_suggestions_org_generated_idx").on(
+      t.organisationId,
+      t.generatedAt,
+    ),
+    index("correlation_suggestions_rule_idx").on(t.ruleId),
+    check(
+      "correlation_suggestions_score_range",
+      sql.raw(`"score" >= 0 and "score" <= 100`),
+    ),
+  ],
+);
+
+/**
+ * Immutable lineage of every alert membership change (link/unlink/move/
+ * merge/split). Preserves origin case, destination, actor, reason, and the
+ * correlation operation that caused the change.
+ */
+export const alertMembershipHistory = pgTable(
+  "alert_membership_history",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    alertId: text("alert_id")
+      .notNull()
+      .references(() => alerts.id, { onDelete: "cascade" }),
+    operation: alertMembershipOperationEnum("operation").notNull(),
+    fromCaseId: text("from_case_id").references(() => cases.id, {
+      onDelete: "set null",
+    }),
+    toCaseId: text("to_case_id").references(() => cases.id, {
+      onDelete: "set null",
+    }),
+    reason: text("reason").notNull(),
+    actorId: text("actor_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    /** Groups rows that belong to the same analyst/system operation. */
+    operationId: text("operation_id").notNull(),
+    suggestionId: text("suggestion_id").references(
+      () => correlationSuggestions.id,
+      { onDelete: "set null" },
+    ),
+    mergeId: text("merge_id"),
+    metadata: jsonb("metadata").notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("alert_membership_history_alert_idx").on(t.alertId, t.createdAt),
+    index("alert_membership_history_org_idx").on(t.organisationId, t.createdAt),
+    index("alert_membership_history_operation_idx").on(t.operationId),
+    index("alert_membership_history_from_case_idx").on(t.fromCaseId),
+    index("alert_membership_history_to_case_idx").on(t.toCaseId),
+  ],
+);
+
+/**
+ * Case merge records. Source cases are never deleted — they are marked
+ * superseded and remain navigable. Reversal is allowed until
+ * `reverseDeadline` when no incompatible downstream mutation blocks it.
+ */
+export const caseMerges = pgTable(
+  "case_merges",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    canonicalCaseId: text("canonical_case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "restrict" }),
+    /** Ordered list of source case ids that were merged into the canonical. */
+    sourceCaseIds: jsonb("source_case_ids").notNull().default(sql`'[]'::jsonb`),
+    /** Alert ids moved as part of this merge (for reverse). */
+    movedAlertIds: jsonb("moved_alert_ids").notNull().default(sql`'[]'::jsonb`),
+    /**
+     * Snapshot of which case each alert came from, keyed by alert id, so
+     * reverse can restore membership accurately.
+     */
+    alertOriginById: jsonb("alert_origin_by_id")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    reason: text("reason").notNull(),
+    actorId: text("actor_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    status: caseMergeStatusEnum("status").notNull().default("active"),
+    suggestionId: text("suggestion_id").references(
+      () => correlationSuggestions.id,
+      { onDelete: "set null" },
+    ),
+    mergedAt: timestamp("merged_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    reverseDeadline: timestamp("reverse_deadline", {
+      withTimezone: true,
+    }).notNull(),
+    reversedAt: timestamp("reversed_at", { withTimezone: true }),
+    reversedBy: text("reversed_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    reverseReason: text("reverse_reason"),
+    /** Case versions observed at merge time (for concurrency diagnostics). */
+    caseVersions: jsonb("case_versions").notNull().default(sql`'{}'::jsonb`),
+  },
+  (t) => [
+    index("case_merges_org_idx").on(t.organisationId, t.mergedAt),
+    index("case_merges_canonical_idx").on(t.canonicalCaseId),
+    index("case_merges_status_idx").on(t.organisationId, t.status),
+  ],
+);
+
+/**
+ * Per-rule acceptance metrics used as precision proxies (suggestion count,
+ * accept, reject, auto-applied). Updated when suggestions are created or
+ * resolved; not a separate time-series table for v1.
+ */
+export const correlationRuleMetrics = pgTable(
+  "correlation_rule_metrics",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    ruleKey: text("rule_key").notNull(),
+    ruleVersion: integer("rule_version").notNull(),
+    suggestionCount: integer("suggestion_count").notNull().default(0),
+    acceptedCount: integer("accepted_count").notNull().default(0),
+    rejectedCount: integer("rejected_count").notNull().default(0),
+    autoAppliedCount: integer("auto_applied_count").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("correlation_rule_metrics_org_key_version_idx").on(
+      t.organisationId,
+      t.ruleKey,
+      t.ruleVersion,
+    ),
   ],
 );
 
@@ -3546,6 +3852,11 @@ export type Entity = typeof entities.$inferSelect;
 export type EntityIdentifier = typeof entityIdentifiers.$inferSelect;
 export type AlertEntity = typeof alertEntities.$inferSelect;
 export type CaseAlert = typeof caseAlerts.$inferSelect;
+export type CorrelationRule = typeof correlationRules.$inferSelect;
+export type CorrelationSuggestion = typeof correlationSuggestions.$inferSelect;
+export type AlertMembershipHistoryRow = typeof alertMembershipHistory.$inferSelect;
+export type CaseMerge = typeof caseMerges.$inferSelect;
+export type CorrelationRuleMetrics = typeof correlationRuleMetrics.$inferSelect;
 export type EvidenceItem = typeof evidenceItems.$inferSelect;
 export type EvidenceRelationship = typeof evidenceRelationships.$inferSelect;
 export type Team = typeof teams.$inferSelect;
