@@ -164,6 +164,29 @@ export const assetContextKindEnum = pgEnum("asset_context_kind", [
   "business_service",
 ]);
 
+export const criticalityLevelEnum = pgEnum("criticality_level", [
+  "low",
+  "medium",
+  "high",
+  "critical",
+]);
+
+export const exposureLevelEnum = pgEnum("exposure_level", [
+  "internal",
+  "partner",
+  "internet_facing",
+  "public",
+]);
+
+export const environmentKindEnum = pgEnum("environment_kind", [
+  "production",
+  "staging",
+  "development",
+  "test",
+  "sandbox",
+  "unknown",
+]);
+
 export const privilegeLevelEnum = pgEnum("privilege_level", [
   "none",
   "standard",
@@ -4142,7 +4165,6 @@ export const casePriorityScores = pgTable(
   ],
 );
 
-export type Organisation = typeof organisations.$inferSelect;
 
 export type AssetIdentityContext = typeof assetIdentityContexts.$inferSelect;
 export type EntityContextMatchReview =

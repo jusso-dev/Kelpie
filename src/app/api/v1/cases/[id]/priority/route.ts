@@ -10,7 +10,6 @@ import {
 import { AssetContextError } from "@/lib/asset-context/types";
 import { serialiseContext } from "@/lib/asset-context/context-core";
 import { getPriorityScoringSettings } from "@/lib/asset-context/settings";
-import { effectiveContextFields } from "@/lib/asset-context/effective";
 
 const overrideSchema = z.object({
   score: z.number().int().min(0).max(100).nullable(),
@@ -23,7 +22,7 @@ export async function GET(
 ) {
   const auth = await authenticateApiTokenWithScope(req, "asset_context:read");
   if (!auth.ok) {
-    // Also allow cases:read for priority visibility on case detail
+    // cases:read may see priority scores with redacted context only
     const casesAuth = await authenticateApiTokenWithScope(req, "cases:read");
     if (!casesAuth.ok) {
       return NextResponse.json(
@@ -31,12 +30,20 @@ export async function GET(
         { status: casesAuth.status },
       );
     }
-    return handleGet(casesAuth.token.organisationId, await context.params);
+    return handleGet(
+      casesAuth.token.organisationId,
+      await context.params,
+      true,
+    );
   }
-  return handleGet(auth.token.organisationId, await context.params);
+  return handleGet(auth.token.organisationId, await context.params, false);
 }
 
-async function handleGet(organisationId: string, params: { id: string }) {
+async function handleGet(
+  organisationId: string,
+  params: { id: string },
+  redacted: boolean,
+) {
   const { id } = params;
   let score = await getCasePriorityCore(organisationId, id);
   if (!score) {
@@ -49,10 +56,12 @@ async function handleGet(organisationId: string, params: { id: string }) {
   const critical = await listCriticalContextsForCase(organisationId, id);
   return NextResponse.json({
     priority: score,
-    criticalContexts: critical.map((c) => ({
-      ...serialiseContext(c, { staleAfterHours: settings.staleAfterHours }),
-      effective: effectiveContextFields(c),
-    })),
+    criticalContexts: critical.map((c) =>
+      serialiseContext(c, {
+        staleAfterHours: settings.staleAfterHours,
+        redacted,
+      }),
+    ),
   });
 }
 

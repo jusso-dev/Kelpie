@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { users } from "@/db/schema";
 import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
 import {
   getPriorityScoringSettings,
@@ -36,6 +39,29 @@ export async function PATCH(req: Request) {
   const auth = await authenticateApiTokenWithScope(req, "asset_context:write");
   if (!auth.ok) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
+  }
+  // Org-wide weight / enablement is admin-only (matches session UI).
+  if (!auth.token.createdBy) {
+    return NextResponse.json(
+      { error: "Priority scoring settings require a user-backed admin token" },
+      { status: 403 },
+    );
+  }
+  const [actor] = await db
+    .select({ id: users.id, role: users.role })
+    .from(users)
+    .where(
+      and(
+        eq(users.id, auth.token.createdBy),
+        eq(users.organisationId, auth.token.organisationId),
+      ),
+    )
+    .limit(1);
+  if (!actor || actor.role !== "admin") {
+    return NextResponse.json(
+      { error: "Only organisation admins can update priority scoring settings" },
+      { status: 403 },
+    );
   }
   const body = await req.json().catch(() => null);
   const parsed = patchSchema.safeParse(body);

@@ -7,6 +7,7 @@ import { and, desc, eq, inArray, notInArray, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   assetIdentityContexts,
+  entities,
   entityContextMatchReviews,
   type AssetIdentityContext,
   type EntityContextMatchReview,
@@ -406,6 +407,15 @@ export async function linkContextToEntityCore(
   const existing = await getContextInOrg(contextId, organisationId);
   if (!existing) throw new AssetContextError("Context not found", 404);
 
+  const [entity] = await db
+    .select({ id: entities.id })
+    .from(entities)
+    .where(
+      and(eq(entities.id, entityId), eq(entities.organisationId, organisationId)),
+    )
+    .limit(1);
+  if (!entity) throw new AssetContextError("Entity not found", 404);
+
   const [updated] = await db
     .update(assetIdentityContexts)
     .set({
@@ -530,13 +540,72 @@ export async function listContextsForEntityIds(
 
 export function serialiseContext(
   row: AssetIdentityContext,
-  opts: { staleAfterHours?: number; now?: Date } = {},
+  opts: {
+    staleAfterHours?: number;
+    now?: Date;
+    /** When true, omit owner email, identifiers, attributes, sync errors. */
+    redacted?: boolean;
+  } = {},
 ) {
   const effective = effectiveContextFields(row);
   const now = opts.now ?? new Date();
   const stale = isContextStale(row, now, opts.staleAfterHours);
+  if (opts.redacted) {
+    return {
+      id: row.id,
+      organisationId: row.organisationId,
+      kind: row.kind,
+      entityId: row.entityId,
+      displayName: row.displayName,
+      criticality: row.criticality,
+      privilegeLevel: row.privilegeLevel,
+      exposure: row.exposure,
+      environment: row.environment,
+      isCrownJewel: row.isCrownJewel,
+      recoveryPriority: row.recoveryPriority,
+      lastSyncStatus: row.lastSyncStatus,
+      lastSyncAt: row.lastSyncAt,
+      effective,
+      isStale: stale,
+    };
+  }
+  // Explicit allowlist — never spread the full row (avoids accidental leaks).
   return {
-    ...row,
+    id: row.id,
+    organisationId: row.organisationId,
+    kind: row.kind,
+    entityId: row.entityId,
+    displayName: row.displayName,
+    primaryIdentifierKind: row.primaryIdentifierKind,
+    primaryIdentifierValue: row.primaryIdentifierValue,
+    ownerEmail: row.ownerEmail,
+    ownerTeam: row.ownerTeam,
+    businessService: row.businessService,
+    applicationName: row.applicationName,
+    criticality: row.criticality,
+    privilegeLevel: row.privilegeLevel,
+    exposure: row.exposure,
+    environment: row.environment,
+    isCrownJewel: row.isCrownJewel,
+    recoveryPriority: row.recoveryPriority,
+    dataClassifications: row.dataClassifications,
+    regulatoryScope: row.regulatoryScope,
+    attributes: row.attributes,
+    criticalityOverride: row.criticalityOverride,
+    privilegeLevelOverride: row.privilegeLevelOverride,
+    exposureOverride: row.exposureOverride,
+    isCrownJewelOverride: row.isCrownJewelOverride,
+    recoveryPriorityOverride: row.recoveryPriorityOverride,
+    providerSource: row.providerSource,
+    providerExternalId: row.providerExternalId,
+    providerUpdatedAt: row.providerUpdatedAt,
+    lastSyncAt: row.lastSyncAt,
+    lastSyncStatus: row.lastSyncStatus,
+    lastSyncError: row.lastSyncError,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    createdBy: row.createdBy,
+    updatedBy: row.updatedBy,
     effective,
     isStale: stale,
   };
