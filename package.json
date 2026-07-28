@@ -69,7 +69,8 @@
     "test:correlation-scoring": "tsx scripts/test-correlation-scoring.ts",
     "test:correlation-core": "tsx scripts/test-correlation-core.ts",
     "test:asset-context-scoring": "tsx scripts/test-asset-context-scoring.ts",
-    "test:asset-context-core": "tsx scripts/test-asset-context-core.ts"
+    "test:asset-context-core": "tsx scripts/test-asset-context-core.ts",
+    "test:integration-health": "tsx scripts/test-integration-health.ts"
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "^3.1095.0",

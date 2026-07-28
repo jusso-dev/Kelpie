@@ -51,6 +51,7 @@ export type TimelineEventType =
   | "case_merge_reversed"
   | "correlation_suggestion_accepted"
   | "correlation_suggestion_rejected"
+  | "source_sync"
   | "custom";
 
 export async function writeTimelineEvent(opts: {

@@ -90,6 +90,15 @@ export const KNOWN_SCOPES = [
     value: "asset_context:write",
     label: "Create/update asset context, import inventories, and set priority overrides",
   },
+  {
+    value: "integrations:read",
+    label: "Read integration health, sync conflicts, and support-safe diagnostics",
+  },
+  {
+    value: "integrations:write",
+    label:
+      "Pause/resume integrations, run connection tests, resolve sync conflicts, and change sync policy",
+  },
 ] as const;
 
 export type ScopeValue = (typeof KNOWN_SCOPES)[number]["value"];
