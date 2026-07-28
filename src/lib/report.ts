@@ -225,9 +225,49 @@ function summarisePayload(eventType: string, payload: unknown): string {
       return `${p.action ?? "changed"}${p.title ? `: ${p.title}` : ""}${p.revision != null ? ` (rev ${p.revision})` : ""}`;
     case "sla_breach":
       return `gate=${p.gate} +${p.minutes_over}m`;
+    case "stakeholder_response":
+      return `[external] ${p.attribution ?? "stakeholder"}: ${String(p.body_preview ?? "").slice(0, 120)}`;
+    case "stakeholder_evidence":
+      return `[external] ${p.attribution ?? "stakeholder"} ${p.action ?? "upload"} ${p.filename ?? p.title ?? ""}`.trim();
+    case "stakeholder_approval":
+      return `[external] ${p.attribution ?? "stakeholder"} ${p.decision ?? p.action ?? ""} ${p.title ?? ""}`.trim();
+    case "stakeholder_update":
+      return `[analyst] published update: ${p.title ?? ""}`;
+    case "stakeholder_invite":
+      return `[analyst] invite ${p.action ?? "created"} role=${p.role ?? "?"}`.trim();
+    case "automation_run":
+      return `[automation] ${String(p.rule_name ?? p.status ?? "")}`.trim();
     default:
       return JSON.stringify(p);
   }
+}
+
+/** Distinguish staff / automation / external actors for report timelines. */
+function timelineActorLabel(
+  eventType: string,
+  actorName: string | null,
+  payload: unknown,
+): string {
+  const p =
+    payload && typeof payload === "object"
+      ? (payload as Record<string, unknown>)
+      : {};
+  if (p.source === "external" || String(eventType).startsWith("stakeholder_")) {
+    if (
+      eventType === "stakeholder_invite" ||
+      eventType === "stakeholder_update" ||
+      p.source === "analyst"
+    ) {
+      return actorName ? `analyst:${actorName}` : "analyst";
+    }
+    const attr = typeof p.attribution === "string" ? p.attribution : null;
+    return attr ? `external:${attr}` : "external";
+  }
+  if (eventType === "automation_run" || p.source === "automation") {
+    return "automation";
+  }
+  if (!actorName) return "system";
+  return `analyst:${actorName}`;
 }
 
 export function renderCaseMarkdown(data: CaseReportData): string {
@@ -345,7 +385,7 @@ export function renderCaseMarkdown(data: CaseReportData): string {
     lines.push("## Timeline", "");
     for (const e of data.timeline) {
       lines.push(
-        `- ${e.occurredAt.toISOString()} — **${e.eventType}** — ${e.actorName ?? "system"} — ${summarisePayload(e.eventType, e.payload)}`,
+        `- ${e.occurredAt.toISOString()} — **${e.eventType}** — ${timelineActorLabel(e.eventType, e.actorName, e.payload)} — ${summarisePayload(e.eventType, e.payload)}`,
       );
     }
     lines.push("");
