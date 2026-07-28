@@ -22,6 +22,9 @@ Errors return `{ "error": "..." }` with an appropriate HTTP status (`400` invali
 | `case_relationships:read` | Read case relationships and duplicate/related suggestions |
 | `case_relationships:write` | Link, unlink, and dismiss case relationships |
 | `audit:read` | Search the organisation audit trail and read individual audit event detail (sensitive; only grant to admin-issued tokens) |
+| `alerts:read` | Read alerts, linked entities, and evidence items |
+| `alerts:write` | Create/link alerts, change alert disposition, link entities, and create/update evidence items |
+| `alerts:raw_payload:read` | Read raw provider payload references behind alerts and evidence (sensitive; only grant to admin-issued tokens) |
 
 ## Cases
 
@@ -224,6 +227,78 @@ Returns `200` with the same `{ "suggestions": [...] }` shape as the per-case sug
 { "candidateCaseId": "case_7f0a12", "reason": "Reviewed — unrelated despite the overlap" }
 ```
 Records that an analyst reviewed and rejected this pairing so it stops appearing in either case's suggestions. `reason` is required. Returns `200 { "ok": true }`. Returns `400` for a missing/empty reason or a candidate equal to the case itself, `403` without `case_relationships:write`, `404` if either case does not exist in the caller's organisation.
+
+## Investigation model: alerts, entities, evidence
+
+A case is an investigation container around independently addressable **alerts** (one detection each), **entities** (deduplicated users/devices/mailboxes/IPs/domains/URLs/files/hashes/processes/cloud resources/applications/tenants/networks/generic assets), and **evidence items** (indicators, log excerpts, findings — investigation-level records, distinct from the binary attachment storage documented separately). One case can hold many alerts; one alert can be linked to many entities and evidence items.
+
+**Field ownership.** Every alert and evidence item column is one of three kinds, and the API enforces the boundary rather than just documenting it:
+- *Provider-owned* (`title`, `description`, `detectionSource`/`detectionProduct`, `classification`, `severity` — until an analyst overrides it, `detectedAt`, `sourceUrl`, `normalizedFields`, `attackTechniques` on alerts; `source`, `firstSeenAt`/`lastSeenAt` on evidence items): refreshed every time the owning connector re-syncs. A provider re-sync is always safe to replay — it never overwrites analyst work.
+- *Analyst-owned* (`status`, `determination`, `assigneeId`, `analystNotes`, `dismissedReason` on alerts; `verdict`, `remediationState`, `analystNotes` on evidence items): only ever change through the `PATCH` endpoints below. Once an analyst sets `severity` on an alert, that override sticks — later provider syncs skip that one field but keep refreshing everything else.
+- *Derived* (alert `derivedFields`): recomputable, and always carries `{ value, method, computedAt }` provenance rather than a bare number.
+
+**Raw provider payloads** are never inlined in an alert, evidence item, or timeline event — they're bounded to 256KB, redacted (secret-shaped keys are stripped before storage, same redaction as the audit trail), and stored as a separate reference. Reading one back requires the separate, sensitive `alerts:raw_payload:read` scope (admin-issued tokens only) via `GET /api/v1/alerts/{id}/raw-payload`; it is never present in a list or detail response.
+
+**Pagination.** All three list endpoints below (`GET .../alerts`, `GET .../entities`, `GET .../evidence-items`) use the same opaque keyset cursor as `GET /api/v1/audit-events`: `limit` (default 50, maximum 200) and `cursor` (from a previous response's `nextCursor`, `null` once exhausted). Ordering is most-recently-created first, so pages stay stable under concurrent inserts.
+
+**Ownership and isolation.** Every alert, entity, evidence item, and link is scoped to the caller's organisation exactly like cases — a `GET`/`PATCH`/`POST` against an id from another organisation returns `404`, never a permission error that would confirm the id exists elsewhere. `(organisationId, sourceId, tenantId, externalId)` is unique on alerts, so re-polling a connector never creates a duplicate; `(organisationId, type, canonicalKey)` is unique on entities, so the same user/device/hash resolves to one row regardless of how many alerts mention it.
+
+**Concurrency.** Alerts carry an optimistic `version` counter, guarded the same way as case fields: pass the `version` you last read in a `PATCH` body and a conflicting concurrent write returns `409 { "error": "version_conflict", "current": { ...the alert as it now stands... } }` instead of silently clobbering another analyst's change. Omitting `version` skips the guard (last write wins on analyst-owned fields only — provider-owned fields are never touched by this endpoint).
+
+Reads use the `alerts:read` scope; every mutation below uses `alerts:write` (this single pair covers alerts, entities, and evidence items — there is no separate `entities:*` or `evidence_items:*` scope).
+
+### `GET /api/v1/cases/{id}/alerts`
+### `POST /api/v1/cases/{id}/alerts`
+Either links an existing alert into the case — `{ "alertId": "alert_...", "isPrimary": true }` — or creates a new manually-authored alert and links it in one call:
+```json
+{ "title": "Suspicious sign-in", "severity": "high", "description": "Impossible travel flagged" }
+```
+Linking is idempotent: linking an already-linked alert again returns the existing link rather than erroring or duplicating a timeline event. Returns `201` with `{ "alert": { ... }, "link": { ... } }`.
+
+### `GET /api/v1/alerts/{id}`
+### `PATCH /api/v1/alerts/{id}`
+Any subset of `status` (`new`, `in_progress`, `closed`, `dismissed`), `determination` (`unknown`, `true_positive`, `false_positive`, `benign_positive`), `severity` (setting this always marks it analyst-overridden), `assigneeId`, `analystNotes`, `dismissedReason`, plus optional `version` for the concurrency guard described above. Writes `alert_status_changed`, `alert_verdict_changed`, and/or `alert_assigned` timeline events on every case the alert is currently linked to, for whichever fields actually changed.
+
+### `GET /api/v1/alerts/{id}/entities`
+### `POST /api/v1/alerts/{id}/entities`
+Resolves (or creates) an entity from one or more identifiers and links it to the alert with a role (`actor`, `target`, `impacted`, `related`):
+```json
+{
+  "type": "user_identity",
+  "displayName": "sam.analyst@example.com",
+  "role": "actor",
+  "identifiers": [{ "kind": "email", "value": "sam.analyst@example.com" }]
+}
+```
+Entity resolution is type-aware: `email`/`upn`/hostnames/hashes normalise to lower case, SIDs to upper case, before matching. Linking is idempotent per `(alert, entity, role)` and writes an `alert_entity_linked` timeline event on every case the alert is linked to.
+
+### `GET /api/v1/alerts/{id}/raw-payload`
+Sensitive; requires `alerts:raw_payload:read`. Returns `404` if the alert has no `rawPayloadRefId`, or if the reference does not exist in the caller's organisation.
+
+### `GET /api/v1/cases/{id}/entities`
+Entities aggregated across every alert currently linked to the case, most-recently-seen first.
+
+### `GET /api/v1/cases/{id}/evidence-items`
+### `POST /api/v1/cases/{id}/evidence-items`
+```json
+{ "type": "observable", "value": "203.0.113.9", "alertId": "alert_...", "confidence": 80 }
+```
+`type` is required; `alertId`, `entityId`, and `attachmentId` (linking to a binary attachment) are all optional and independent. `confidence` is 0–100. Writes an `evidence_item_created` timeline event.
+
+### `GET /api/v1/evidence-items/{id}`
+### `PATCH /api/v1/evidence-items/{id}`
+Any subset of `verdict` (`unknown`, `clean`, `suspicious`, `malicious`), `remediationState` (`none`, `pending`, `remediated`, `not_applicable`), `analystNotes`. Writes `evidence_item_verdict_changed` and/or `evidence_item_remediation_changed` timeline events for whichever fields actually changed.
+
+### `GET /api/v1/evidence-items/{id}/relationships`
+### `POST /api/v1/evidence-items/{id}/relationships`
+```json
+{ "targetEvidenceId": "evitem_...", "relationshipType": "related_to", "reason": "Same campaign" }
+```
+`relationshipType` is `related_to`, `duplicate_of` (both symmetric — canonicalised the same way as case relationships, so linking B to A afterwards returns `409` rather than a second edge), or `derived_from` (directional — A derived_from B and B derived_from A are independent facts). Both evidence items must belong to the same case. Writes an `evidence_relationship_created` timeline event.
+
+### Migrating existing source-backed cases
+
+Cases created before this model existed (via `sourceSystem`/`sourceReference`, e.g. from Microsoft Sentinel/Defender XDR import) are backfilled by `npm run backfill:alerts`: for every such case with no alert yet, it creates (or reuses) an `alert_sources` row for that source, an `alerts` row that preserves the exact `sourceSystem` as `detectionSource` and `sourceReference` as the alert's immutable `externalId`, and links it into the case as the primary alert. The script is idempotent — re-running it after new source-backed cases appear only backfills the ones still missing an alert; it never creates a duplicate.
 
 ## Audit trail
 

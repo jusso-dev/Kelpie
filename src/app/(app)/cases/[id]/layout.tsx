@@ -15,7 +15,10 @@ import { CaseCollaborationProvider } from "@/components/case-collaboration";
 const tabs = [
   { key: "overview", label: "Overview", path: "" },
   { key: "tasks", label: "Tasks", path: "/tasks" },
+  { key: "alerts", label: "Alerts", path: "/alerts" },
+  { key: "entities", label: "Entities", path: "/entities" },
   { key: "observables", label: "Observables", path: "/observables" },
+  { key: "evidence-items", label: "Evidence", path: "/evidence-items" },
   { key: "timeline", label: "Timeline", path: "/timeline" },
   { key: "comments", label: "Comments", path: "/comments" },
   { key: "attachments", label: "Attachments", path: "/attachments" },

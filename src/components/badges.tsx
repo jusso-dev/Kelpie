@@ -99,6 +99,66 @@ export function ConfidenceBadge({ value }: { value: number | null }) {
   );
 }
 
+const alertStatusColours: Record<string, string> = {
+  new: "text-[color:var(--color-status-open)]",
+  in_progress: "text-[color:var(--color-status-progress)]",
+  closed: "text-[color:var(--color-status-closed)]",
+  dismissed: "text-slate-500",
+};
+
+export function AlertStatusBadge({ value }: { value: string }) {
+  return (
+    <span className={cn("kelpie-badge", alertStatusColours[value] ?? "text-slate-300")}>
+      {value.replace(/_/g, " ")}
+    </span>
+  );
+}
+
+const determinationColours: Record<string, string> = {
+  unknown: "text-slate-400",
+  true_positive: "text-red-400",
+  false_positive: "text-green-400",
+  benign_positive: "text-amber-400",
+};
+
+export function DeterminationBadge({ value }: { value: string }) {
+  return (
+    <span className={cn("kelpie-badge", determinationColours[value] ?? "text-slate-300")}>
+      {value.replace(/_/g, " ")}
+    </span>
+  );
+}
+
+const verdictColours: Record<string, string> = {
+  unknown: "text-slate-400",
+  clean: "text-green-400",
+  suspicious: "text-amber-400",
+  malicious: "text-red-400",
+};
+
+export function VerdictBadge({ value }: { value: string }) {
+  return (
+    <span className={cn("kelpie-badge", verdictColours[value] ?? "text-slate-300")}>
+      {value}
+    </span>
+  );
+}
+
+const remediationColours: Record<string, string> = {
+  none: "text-slate-400",
+  pending: "text-amber-400",
+  remediated: "text-green-400",
+  not_applicable: "text-slate-500",
+};
+
+export function RemediationBadge({ value }: { value: string }) {
+  return (
+    <span className={cn("kelpie-badge", remediationColours[value] ?? "text-slate-300")}>
+      {value.replace(/_/g, " ")}
+    </span>
+  );
+}
+
 export function TagBadge({
   value,
   tone = "neutral",

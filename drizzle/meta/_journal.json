@@ -148,6 +148,13 @@
       "when": 1785213084340,
       "tag": "0020_audit_events",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1785226393054,
+      "tag": "0021_kind_cammi",
+      "breakpoints": true
     }
   ]
 }
