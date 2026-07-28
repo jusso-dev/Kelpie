@@ -896,36 +896,15 @@ async function assertLinkTargetAuthorised(opts: {
         )
         .limit(1);
       if (!link) {
-        // Also reject if the alert exists in another org.
-        const [foreign] = await db
-          .select({ id: alerts.id })
-          .from(alerts)
-          .where(eq(alerts.id, targetId))
-          .limit(1);
-        if (foreign) {
-          throw new ContentBlockError(
-            "Alert is not linked to this case",
-            404,
-          );
-        }
+        // Uniform 404 — no unscoped alert lookup (would oracle foreign-tenant ids).
         throw new ContentBlockError("Alert not found", 404);
       }
       return link.alertId;
     }
     case "entity": {
-      const [entity] = await db
-        .select({ id: entities.id })
-        .from(entities)
-        .where(
-          and(
-            eq(entities.id, targetId),
-            eq(entities.organisationId, opts.organisationId),
-          ),
-        )
-        .limit(1);
-      if (!entity) throw new ContentBlockError("Entity not found", 404);
-
-      // Case-authorised: entity must appear on a case-linked alert or evidence item.
+      // Case-authorised only: entity must appear on a case-linked alert or
+      // evidence item. Uniform 404 whether the entity is missing, other-org,
+      // or merely not associated with this case (no membership oracle).
       const [viaAlert] = await db
         .select({ entityId: alertEntities.entityId })
         .from(alertEntities)
@@ -944,10 +923,10 @@ async function assertLinkTargetAuthorised(opts: {
           ),
         )
         .limit(1);
-      if (viaAlert) return entity.id;
+      if (viaAlert) return viaAlert.entityId;
 
       const [viaEvidence] = await db
-        .select({ id: evidenceItems.id })
+        .select({ entityId: evidenceItems.entityId })
         .from(evidenceItems)
         .where(
           and(
@@ -957,13 +936,10 @@ async function assertLinkTargetAuthorised(opts: {
           ),
         )
         .limit(1);
-      if (!viaEvidence) {
-        throw new ContentBlockError(
-          "Entity is not associated with this case",
-          404,
-        );
+      if (!viaEvidence?.entityId) {
+        throw new ContentBlockError("Entity not found", 404);
       }
-      return entity.id;
+      return viaEvidence.entityId;
     }
     case "evidence_item": {
       const [item] = await db

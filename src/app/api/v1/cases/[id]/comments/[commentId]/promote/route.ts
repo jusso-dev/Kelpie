@@ -19,11 +19,27 @@ const promoteSchema = z.object({
 type Params = { params: Promise<{ id: string; commentId: string }> };
 
 export async function POST(req: Request, { params }: Params) {
-  // Promoting needs content-block write; comment body is read via core.
-  const auth = await authenticateApiTokenWithScope(req, "content_blocks:write");
-  if (!auth.ok) {
-    return NextResponse.json({ error: auth.reason }, { status: auth.status });
+  // Promote copies comment body into a content block — require both write on
+  // blocks and read on comments so content_blocks:write alone cannot bypass
+  // comments:read least privilege.
+  const writeAuth = await authenticateApiTokenWithScope(
+    req,
+    "content_blocks:write",
+  );
+  if (!writeAuth.ok) {
+    return NextResponse.json(
+      { error: writeAuth.reason },
+      { status: writeAuth.status },
+    );
   }
+  const readAuth = await authenticateApiTokenWithScope(req, "comments:read");
+  if (!readAuth.ok) {
+    return NextResponse.json(
+      { error: readAuth.reason },
+      { status: readAuth.status },
+    );
+  }
+  const auth = writeAuth;
   const { id, commentId } = await params;
   const body = await req.json().catch(() => ({}));
   const parsed = promoteSchema.safeParse(body ?? {});
