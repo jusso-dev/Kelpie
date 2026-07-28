@@ -38,6 +38,8 @@ import {
   analystWorkloadCore,
   assignCaseAnalystCore,
   assignCaseQueueCore,
+  createQueueCore,
+  createTeamCore,
   queueHealthCore,
 } from "../src/lib/queues-core";
 import {
@@ -358,6 +360,156 @@ async function main() {
       .from(escalationPolicyRuns)
       .where(and(eq(escalationPolicyRuns.policyId, livePolicy.id), eq(escalationPolicyRuns.caseId, liveCase)));
     assert.equal(liveRunsAfterSecondPass.length, 1, "re-running the escalation checker must not duplicate the run for the same policy revision and case");
+
+    // ── 6c. Cross-tenant analyst assignment must be rejected on every path ──
+    // (direct core call, bulk operation, and escalation policy config), not
+    // just for watchers.
+    const crossTenantCase = await seedCase("A");
+    await assert.rejects(
+      () => assignCaseAnalystCore(orgAId, analystA1, crossTenantCase, analystB1),
+      /organisation/i,
+      "assignCaseAnalystCore must reject an assignee id from another organisation",
+    );
+    const [caseAfterRejectedAssign] = await db
+      .select({ assigneeId: cases.assigneeId })
+      .from(cases)
+      .where(eq(cases.id, crossTenantCase))
+      .limit(1);
+    assert.equal(caseAfterRejectedAssign.assigneeId, null, "a rejected cross-tenant assignment must not partially apply");
+
+    const bulkCrossTenantCase = await seedCase("A");
+    const bulkCrossTenantResult = await runBulkOperationCore(
+      orgAId,
+      analystA1,
+      "assign_analyst",
+      [bulkCrossTenantCase],
+      { assigneeId: analystB1 },
+    );
+    assert.equal(bulkCrossTenantResult.successCount, 0, "bulk assign_analyst must fail, not succeed, for a cross-tenant assignee id");
+    assert.equal(bulkCrossTenantResult.failureCount, 1);
+    const [bulkCaseAfterRejectedAssign] = await db
+      .select({ assigneeId: cases.assigneeId })
+      .from(cases)
+      .where(eq(cases.id, bulkCrossTenantCase))
+      .limit(1);
+    assert.equal(bulkCaseAfterRejectedAssign.assigneeId, null, "a rejected bulk cross-tenant assignment must not partially apply");
+
+    await assert.rejects(
+      () =>
+        createEscalationPolicyCore(orgAId, analystA1, {
+          name: "Cross-tenant reassign target",
+          conditions: {},
+          notifyEnabled: false,
+          notifyTargets: [],
+          reassignEnabled: true,
+          reassignToUserId: analystB1,
+          raiseSeverityEnabled: false,
+        }),
+      /organisation/i,
+      "creating an escalation policy that reassigns to another organisation's analyst must be rejected",
+    );
+    // Sanity check: the same reassignToQueueId that will be rejected below
+    // once it belongs to org B is accepted without error when it is org A's
+    // own queue (already exercised by the live-runner section above via
+    // `escalationTargetQueueId`), so the rejection asserted next is really
+    // about tenancy, not about the field being present at all.
+
+    const teamB = await createTeamCore(orgBId, analystB1, `Org B team ${runId}`);
+    const queueB = await createQueueCore(orgBId, analystB1, teamB.id, `Org B queue ${runId}`);
+    createdTeamIds.push(teamB.id);
+    createdQueueIds.push(queueB.id);
+    await assert.rejects(
+      () =>
+        createEscalationPolicyCore(orgAId, analystA1, {
+          name: "Cross-tenant reassign queue (real)",
+          conditions: {},
+          notifyEnabled: false,
+          notifyTargets: [],
+          reassignEnabled: true,
+          reassignToQueueId: queueB.id,
+          raiseSeverityEnabled: false,
+        }),
+      /organisation|not found/i,
+      "creating an escalation policy that reassigns into another organisation's queue must be rejected",
+    );
+
+    console.log("cross-tenant analyst assignment checks passed (direct, bulk, escalation config)");
+
+    // ── 6d. Escalation runner error isolation: one policy's action throwing ──
+    // ──    (here, via a directly-inserted row that bypasses the config-time ──
+    // ──    validation above, simulating stale/legacy data) must not stop    ──
+    // ──    later policies -- including another organisation's -- from      ──
+    // ──    running in the same pass.                                       ──
+    const brokenPolicyId = newId("escpol");
+    await db.insert(escalationPolicies).values({
+      id: brokenPolicyId,
+      organisationId: orgAId,
+      name: `Broken cross-org policy ${runId}`,
+      isActive: true,
+      conditions: {},
+      notifyEnabled: false,
+      notifyTargets: [],
+      reassignEnabled: true,
+      // Genuinely belongs to org B: the FK is satisfied (the row exists),
+      // but assignCaseQueueCore's own organisation-scoped lookup will find
+      // nothing and throw, which is exactly the failure this test isolates.
+      reassignToQueueId: queueB.id,
+      raiseSeverityEnabled: false,
+    });
+    createdPolicyIds.push(brokenPolicyId);
+    const brokenCase = await seedCase("A");
+
+    const orgBQueueForValidPolicy = await createQueueCore(orgBId, analystB1, teamB.id, `Org B valid target ${runId}`);
+    createdQueueIds.push(orgBQueueForValidPolicy.id);
+    const validOtherOrgPolicy = await createEscalationPolicyCore(orgBId, analystB1, {
+      name: `Valid org B policy ${runId}`,
+      conditions: {},
+      notifyEnabled: false,
+      notifyTargets: [],
+      reassignEnabled: true,
+      reassignToQueueId: orgBQueueForValidPolicy.id,
+      raiseSeverityEnabled: false,
+    });
+    createdPolicyIds.push(validOtherOrgPolicy.id);
+    await setEscalationPolicyActiveCore(orgBId, validOtherOrgPolicy.id, true);
+    const validOtherOrgCase = await seedCase("B");
+
+    await assert.doesNotReject(
+      () => runEscalationPolicies(),
+      "one policy's action throwing must not abort the whole escalation cycle",
+    );
+
+    const [validOtherOrgCaseAfter] = await db
+      .select({ queueId: cases.queueId })
+      .from(cases)
+      .where(eq(cases.id, validOtherOrgCase))
+      .limit(1);
+    assert.equal(
+      validOtherOrgCaseAfter.queueId,
+      orgBQueueForValidPolicy.id,
+      "org B's valid policy must still apply its action even though org A's broken policy failed in the same pass",
+    );
+    const validOtherOrgRuns = await db
+      .select()
+      .from(escalationPolicyRuns)
+      .where(and(eq(escalationPolicyRuns.policyId, validOtherOrgPolicy.id), eq(escalationPolicyRuns.caseId, validOtherOrgCase)));
+    assert.equal(validOtherOrgRuns.length, 1);
+    assert.equal(validOtherOrgRuns[0].reassignedToQueueId, orgBQueueForValidPolicy.id);
+
+    const brokenCaseAfter = await db
+      .select({ queueId: cases.queueId })
+      .from(cases)
+      .where(eq(cases.id, brokenCase))
+      .limit(1);
+    assert.equal(brokenCaseAfter[0]?.queueId, null, "the broken policy's action must not have partially applied");
+    const brokenPolicyRuns = await db
+      .select()
+      .from(escalationPolicyRuns)
+      .where(and(eq(escalationPolicyRuns.policyId, brokenPolicyId), eq(escalationPolicyRuns.caseId, brokenCase)));
+    assert.equal(brokenPolicyRuns.length, 1, "a run row is still recorded for the attempted (failed) escalation, so it is not retried every cycle");
+    assert.equal(brokenPolicyRuns[0].reassignedToQueueId, null, "the failed action must not be recorded as having completed");
+
+    console.log("escalation runner error isolation checks passed");
 
     // ── 7. Bulk operations: one batch audit record, concise per-case       ──
     // ──    timeline entries, tenant isolation, and no capped-page count.   ──

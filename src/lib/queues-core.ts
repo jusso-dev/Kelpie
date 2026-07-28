@@ -232,6 +232,21 @@ export async function assignCaseAnalystCore(
   const existing = await loadCaseInOrg(caseId, organisationId);
   if (!existing) throw new Error("Case not found");
   if (existing.assigneeId === assigneeId) return;
+  // `users` is a global table with no organisation predicate on its own, and
+  // both the case list and case detail render the assignee's name via a bare
+  // `leftJoin(users, eq(users.id, cases.assigneeId))`. Without this check, an
+  // analyst in one organisation could set `assigneeId` to an arbitrary user
+  // id from a different organisation and have that user's real name rendered
+  // in their own org's UI -- a cross-tenant PII disclosure, even though it
+  // grants the other org no access to the case itself.
+  if (assigneeId) {
+    const [member] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.id, assigneeId), eq(users.organisationId, organisationId)))
+      .limit(1);
+    if (!member) throw new Error("User is not a member of this organisation");
+  }
   await db
     .update(cases)
     .set({

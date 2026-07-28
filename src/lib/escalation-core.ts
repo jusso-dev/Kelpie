@@ -147,7 +147,7 @@ export type EscalationPolicyInput = {
   raiseSeverityTo?: CaseSeverity | null;
 };
 
-function validatePolicyInput(input: EscalationPolicyInput): void {
+function validatePolicyInputShape(input: EscalationPolicyInput): void {
   if (!input.name.trim()) throw new Error("Policy name is required");
   if (input.reassignEnabled && !input.reassignToQueueId && !input.reassignToUserId) {
     throw new Error("A reassign action needs a target queue or analyst");
@@ -164,12 +164,54 @@ function validatePolicyInput(input: EscalationPolicyInput): void {
   }
 }
 
+/**
+ * Validates both the input's shape and, just as importantly, that every
+ * queue/user id it names actually belongs to the caller's organisation.
+ * Without this, a policy could be configured (even by an org's own admin,
+ * by mistake or a compromised session) to reassign into another
+ * organisation's queue or onto another organisation's analyst; the same
+ * cross-tenant identifier check is enforced again at execution time in
+ * `assignCaseQueueCore` / `assignCaseAnalystCore`, but rejecting it here
+ * means a misconfigured policy never gets saved in the first place.
+ */
+async function validatePolicyInput(
+  organisationId: string,
+  input: EscalationPolicyInput,
+): Promise<void> {
+  validatePolicyInputShape(input);
+  const queueIds = [input.queueId, input.reassignToQueueId].filter(
+    (id): id is string => Boolean(id),
+  );
+  if (queueIds.length > 0) {
+    const rows = await db
+      .select({ id: queues.id })
+      .from(queues)
+      .where(and(inArray(queues.id, queueIds), eq(queues.organisationId, organisationId)));
+    const found = new Set(rows.map((r) => r.id));
+    for (const id of queueIds) {
+      if (!found.has(id)) {
+        throw new Error("Queue not found in this organisation");
+      }
+    }
+  }
+  if (input.reassignToUserId) {
+    const [user] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(
+        and(eq(users.id, input.reassignToUserId), eq(users.organisationId, organisationId)),
+      )
+      .limit(1);
+    if (!user) throw new Error("User is not a member of this organisation");
+  }
+}
+
 export async function createEscalationPolicyCore(
   organisationId: string,
   actorId: string,
   input: EscalationPolicyInput,
 ): Promise<{ id: string }> {
-  validatePolicyInput(input);
+  await validatePolicyInput(organisationId, input);
   const id = newId("escpol");
   await db.insert(escalationPolicies).values({
     id,
@@ -199,7 +241,7 @@ export async function updateEscalationPolicyCore(
   policyId: string,
   input: EscalationPolicyInput,
 ): Promise<void> {
-  validatePolicyInput(input);
+  await validatePolicyInput(organisationId, input);
   const [existing] = await db
     .select({ revision: escalationPolicies.revision })
     .from(escalationPolicies)
@@ -413,64 +455,84 @@ export async function runEscalationPolicies(): Promise<{
         .onConflictDoNothing()
         .returning({ id: escalationPolicyRuns.id });
       if (!inserted) continue; // already escalated this case under this revision
-      triggered++;
-      let notifySent = false;
-      let reassignedToQueueId: string | null = null;
-      let reassignedToUserId: string | null = null;
-      let severityRaisedTo: CaseSeverity | null = null;
-      if (policy.notifyEnabled) {
-        notifySent = await applyNotify(policy, caseRow);
-      }
-      if (policy.reassignEnabled) {
-        if (policy.reassignToQueueId) {
-          await assignCaseQueueCore(
-            policy.organisationId,
-            null,
-            caseRow.id,
-            policy.reassignToQueueId,
-          );
-          reassignedToQueueId = policy.reassignToQueueId;
+      // This is one shared background job iterating every active policy for
+      // every organisation on a schedule (see src/lib/jobs/schedulers.ts).
+      // One policy's action throwing (a transient DB error, a provider
+      // outage from applyNotify's email/push send, or any other surprise)
+      // must never abort the whole cycle -- every other tenant's policies,
+      // and every later case in this same policy, still need to run. So
+      // each case's action application is isolated: a failure here is
+      // recorded and the loop moves on, exactly like `deliverWebhooks` and
+      // `dispatchPendingMobilePushes` isolate one delivery's failure from
+      // the rest of their batch.
+      try {
+        let notifySent = false;
+        let reassignedToQueueId: string | null = null;
+        let reassignedToUserId: string | null = null;
+        let severityRaisedTo: CaseSeverity | null = null;
+        if (policy.notifyEnabled) {
+          notifySent = await applyNotify(policy, caseRow);
         }
-        if (policy.reassignToUserId) {
-          await assignCaseAnalystCore(
-            policy.organisationId,
-            null,
-            caseRow.id,
-            policy.reassignToUserId,
-          );
-          reassignedToUserId = policy.reassignToUserId;
+        if (policy.reassignEnabled) {
+          if (policy.reassignToQueueId) {
+            await assignCaseQueueCore(
+              policy.organisationId,
+              null,
+              caseRow.id,
+              policy.reassignToQueueId,
+            );
+            reassignedToQueueId = policy.reassignToQueueId;
+          }
+          if (policy.reassignToUserId) {
+            await assignCaseAnalystCore(
+              policy.organisationId,
+              null,
+              caseRow.id,
+              policy.reassignToUserId,
+            );
+            reassignedToUserId = policy.reassignToUserId;
+          }
         }
-      }
-      if (policy.raiseSeverityEnabled && policy.raiseSeverityTo) {
-        const rank = SEVERITIES.indexOf(policy.raiseSeverityTo);
-        const currentRank = SEVERITIES.indexOf(caseRow.severity);
-        if (rank > currentRank) {
-          await db
-            .update(cases)
-            .set({ severity: policy.raiseSeverityTo, version: sql`${cases.version} + 1` })
-            .where(eq(cases.id, caseRow.id));
-          severityRaisedTo = policy.raiseSeverityTo;
+        if (policy.raiseSeverityEnabled && policy.raiseSeverityTo) {
+          const rank = SEVERITIES.indexOf(policy.raiseSeverityTo);
+          const currentRank = SEVERITIES.indexOf(caseRow.severity);
+          if (rank > currentRank) {
+            await db
+              .update(cases)
+              .set({ severity: policy.raiseSeverityTo, version: sql`${cases.version} + 1` })
+              .where(eq(cases.id, caseRow.id));
+            severityRaisedTo = policy.raiseSeverityTo;
+          }
         }
+        await db
+          .update(escalationPolicyRuns)
+          .set({ notifySent, reassignedToQueueId, reassignedToUserId, severityRaisedTo })
+          .where(eq(escalationPolicyRuns.id, inserted.id));
+        await writeTimelineEvent({
+          caseId: caseRow.id,
+          actorId: null,
+          eventType: "escalation_triggered",
+          payload: {
+            policy_id: policy.id,
+            policy_name: policy.name,
+            policy_revision: policy.revision,
+            reason: evaluation.reasons.join("; "),
+            notify_sent: notifySent,
+            reassigned_to_queue_id: reassignedToQueueId,
+            reassigned_to_user_id: reassignedToUserId,
+            severity_raised_to: severityRaisedTo,
+          },
+        });
+        triggered++;
+      } catch (error) {
+        console.error("Escalation policy action failed", {
+          policyId: policy.id,
+          policyRevision: policy.revision,
+          organisationId: policy.organisationId,
+          caseId: caseRow.id,
+          error: error instanceof Error ? error.message : error,
+        });
       }
-      await db
-        .update(escalationPolicyRuns)
-        .set({ notifySent, reassignedToQueueId, reassignedToUserId, severityRaisedTo })
-        .where(eq(escalationPolicyRuns.id, inserted.id));
-      await writeTimelineEvent({
-        caseId: caseRow.id,
-        actorId: null,
-        eventType: "escalation_triggered",
-        payload: {
-          policy_id: policy.id,
-          policy_name: policy.name,
-          policy_revision: policy.revision,
-          reason: evaluation.reasons.join("; "),
-          notify_sent: notifySent,
-          reassigned_to_queue_id: reassignedToQueueId,
-          reassigned_to_user_id: reassignedToUserId,
-          severity_raised_to: severityRaisedTo,
-        },
-      });
     }
   }
   return { scanned, triggered };
