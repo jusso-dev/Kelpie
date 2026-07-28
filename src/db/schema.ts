@@ -106,6 +106,18 @@ export const evidenceRelevanceEnum = pgEnum("evidence_relevance", [
   "not_relevant",
 ]);
 
+/**
+ * What a case is currently blocked on, set explicitly by an analyst. This is
+ * deliberately separate from `case_status` (the incident lifecycle) so
+ * "awaiting third party" / "awaiting approval" built-in views can be
+ * indexed queries rather than a guess derived from status or free-text.
+ */
+export const caseWaitingReasonEnum = pgEnum("case_waiting_reason", [
+  "none",
+  "third_party",
+  "approval",
+]);
+
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Investigation data model: alerts, entities, evidence items (issue #55)    */
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -390,6 +402,14 @@ export const cases = pgTable(
       .notNull()
       .default(sql`'[]'::jsonb`),
     acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+    // Who explicitly acknowledged the case. Distinct from the automatic
+    // acknowledgedAt stamp that setCaseStatusCore still applies on the first
+    // open -> in_progress transition: the explicit `acknowledgeCase` action
+    // (src/actions/queues.ts) only sets acknowledgedAt/acknowledgedBy when
+    // neither is already set, so whichever happens first wins.
+    acknowledgedBy: text("acknowledged_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
     containedAt: timestamp("contained_at", { withTimezone: true }),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     slaState: jsonb("sla_state").notNull().default(sql`'{}'::jsonb`),
@@ -397,6 +417,39 @@ export const cases = pgTable(
     sourceSystem: text("source_system"),
     sourceReference: text("source_reference"),
     sourceUrl: text("source_url"),
+    // Team queue ownership, distinct from `assigneeId` (the individual
+    // primary owner). A case can sit in a queue with no individual owner at
+    // all.
+    queueId: text("queue_id").references(() => queues.id, {
+      onDelete: "set null",
+    }),
+    queueAssignedAt: timestamp("queue_assigned_at", { withTimezone: true }),
+    queueAssignedBy: text("queue_assigned_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    // When the current `assigneeId` was set, distinct from both
+    // `queueAssignedAt` and `acknowledgedAt`.
+    assigneeAssignedAt: timestamp("assignee_assigned_at", {
+      withTimezone: true,
+    }),
+    assigneeAssignedBy: text("assignee_assigned_by").references(
+      () => users.id,
+      { onDelete: "set null" },
+    ),
+    waitingReason: caseWaitingReasonEnum("waiting_reason")
+      .notNull()
+      .default("none"),
+    waitingSince: timestamp("waiting_since", { withTimezone: true }),
+    // Bumped on every timeline event for this case (see writeTimelineEvent);
+    // backs the "stale investigation" built-in view and per-queue aging
+    // buckets without recomputing from the timeline table on every read.
+    lastActivityAt: timestamp("last_activity_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    // Set when status transitions away from `closed` back to an open state;
+    // backs the "recently reopened" built-in view as an indexed column
+    // instead of a timeline scan.
+    lastReopenedAt: timestamp("last_reopened_at", { withTimezone: true }),
   },
   (t) => [
     uniqueIndex("cases_org_number_idx").on(t.organisationId, t.caseNumber),
@@ -407,6 +460,393 @@ export const cases = pgTable(
       ),
     index("cases_org_status_idx").on(t.organisationId, t.status),
     index("cases_org_opened_idx").on(t.organisationId, t.openedAt),
+    index("cases_org_assignee_status_idx").on(
+      t.organisationId,
+      t.assigneeId,
+      t.status,
+    ),
+    index("cases_org_queue_status_idx").on(
+      t.organisationId,
+      t.queueId,
+      t.status,
+    ),
+    index("cases_org_last_activity_idx").on(
+      t.organisationId,
+      t.lastActivityAt,
+    ),
+    index("cases_org_waiting_idx")
+      .on(t.organisationId, t.waitingReason)
+      .where(sql`${t.waitingReason} <> 'none'`),
+    index("cases_org_reopened_idx")
+      .on(t.organisationId, t.lastReopenedAt)
+      .where(sql`${t.lastReopenedAt} is not null`),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Teams, queues, watchers, hand-offs                                         */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+export const teams = pgTable(
+  "teams",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("teams_org_name_idx").on(t.organisationId, t.name),
+    index("teams_org_idx").on(t.organisationId),
+  ],
+);
+
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    addedBy: text("added_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("team_members_team_user_idx").on(t.teamId, t.userId),
+    index("team_members_org_user_idx").on(t.organisationId, t.userId),
+  ],
+);
+
+/**
+ * A specialised queue belongs to exactly one team. Queue ownership on a case
+ * (`cases.queueId`) is separate from individual ownership (`cases.assigneeId`)
+ * so work can sit with a team before any analyst picks it up.
+ */
+export const queues = pgTable(
+  "queues",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("queues_team_name_idx").on(t.teamId, t.name),
+    index("queues_org_idx").on(t.organisationId),
+    index("queues_team_idx").on(t.teamId),
+  ],
+);
+
+/**
+ * Additional assignees on a case, on top of the single primary owner
+ * (`cases.assigneeId`). Deliberately its own table rather than an array
+ * column so "cases I'm an additional assignee on" stays a plain indexed join.
+ */
+export const caseAssignees = pgTable(
+  "case_assignees",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    addedBy: text("added_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("case_assignees_case_user_idx").on(t.caseId, t.userId),
+    index("case_assignees_org_user_idx").on(t.organisationId, t.userId),
+  ],
+);
+
+/**
+ * Watching/subscribing to a case is purely a notification preference. It
+ * never grants read/write access on its own: access remains governed by
+ * organisation membership and role, exactly as for any other case. Every
+ * watcher row is scoped to a case the watcher's organisation already owns
+ * (enforced at the action/API layer), so this table cannot be used to leak
+ * cross-tenant visibility.
+ */
+export const caseWatchers = pgTable(
+  "case_watchers",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    notifyOnComment: boolean("notify_on_comment").notNull().default(true),
+    notifyOnStatusChange: boolean("notify_on_status_change")
+      .notNull()
+      .default(true),
+    notifyOnAssignment: boolean("notify_on_assignment")
+      .notNull()
+      .default(true),
+    notifyOnSlaRisk: boolean("notify_on_sla_risk").notNull().default(true),
+    addedBy: text("added_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("case_watchers_case_user_idx").on(t.caseId, t.userId),
+    index("case_watchers_org_user_idx").on(t.organisationId, t.userId),
+  ],
+);
+
+/**
+ * Immutable shift hand-off snapshots. Never updated or deleted by application
+ * code (see migration 0021's `shift_handoffs_no_update` /
+ * `shift_handoffs_no_delete` triggers) -- a correction is a new hand-off, not
+ * an edit, so the record an analyst read at shift start can never be
+ * silently rewritten later.
+ */
+export const shiftHandoffs = pgTable(
+  "shift_handoffs",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    fromUserId: text("from_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    toUserId: text("to_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    fromQueueId: text("from_queue_id").references(() => queues.id, {
+      onDelete: "set null",
+    }),
+    toQueueId: text("to_queue_id").references(() => queues.id, {
+      onDelete: "set null",
+    }),
+    summary: text("summary").notNull(),
+    keyActions: jsonb("key_actions").notNull().default(sql`'[]'::jsonb`),
+    openItems: jsonb("open_items").notNull().default(sql`'[]'::jsonb`),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("shift_handoffs_case_idx").on(t.caseId, t.createdAt),
+    index("shift_handoffs_org_idx").on(t.organisationId),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Escalation policies                                                       */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Versioned, safely-disableable escalation policies. Every field this policy
+ * can act through is a typed, fixed column (notify / reassign / raise
+ * severity) rather than a free-form action list, so a destructive response
+ * action is not merely disallowed by convention -- it has no column to be
+ * stored in. `revision` is bumped on every edit (see updateEscalationPolicy
+ * in src/lib/escalation-core.ts) and `escalationPolicyRuns` records which
+ * revision fired, so a policy's behaviour history stays reconstructable.
+ * `isActive` defaults to false: new and edited policies start disabled and
+ * must be turned on deliberately.
+ */
+export const escalationPolicies = pgTable(
+  "escalation_policies",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    revision: integer("revision").notNull().default(1),
+    isActive: boolean("is_active").notNull().default(false),
+    // Scope: apply only to cases in this queue, or organisation-wide when null.
+    queueId: text("queue_id").references(() => queues.id, {
+      onDelete: "set null",
+    }),
+    /** See EscalationConditions in src/lib/escalation-core.ts for the validated shape. */
+    conditions: jsonb("conditions").notNull().default(sql`'{}'::jsonb`),
+    notifyEnabled: boolean("notify_enabled").notNull().default(false),
+    /** Subset of "assignee" | "queue_members" | "watchers". */
+    notifyTargets: jsonb("notify_targets").notNull().default(sql`'[]'::jsonb`),
+    reassignEnabled: boolean("reassign_enabled").notNull().default(false),
+    reassignToQueueId: text("reassign_to_queue_id").references(
+      () => queues.id,
+      { onDelete: "set null" },
+    ),
+    reassignToUserId: text("reassign_to_user_id").references(
+      () => users.id,
+      { onDelete: "set null" },
+    ),
+    raiseSeverityEnabled: boolean("raise_severity_enabled")
+      .notNull()
+      .default(false),
+    raiseSeverityTo: severityEnum("raise_severity_to"),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("escalation_policies_org_active_idx").on(
+      t.organisationId,
+      t.isActive,
+    ),
+    check(
+      "escalation_policies_reassign_target",
+      sql.raw(
+        `"reassign_enabled" = false or "reassign_to_queue_id" is not null or "reassign_to_user_id" is not null`,
+      ),
+    ),
+    check(
+      "escalation_policies_raise_severity_target",
+      sql.raw(
+        `"raise_severity_enabled" = false or "raise_severity_to" is not null`,
+      ),
+    ),
+  ],
+);
+
+/** One row per (policy revision, case) that actually fired -- the idempotency key that stops a policy re-escalating the same case on every evaluation tick. */
+export const escalationPolicyRuns = pgTable(
+  "escalation_policy_runs",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    policyId: text("policy_id")
+      .notNull()
+      .references(() => escalationPolicies.id, { onDelete: "cascade" }),
+    policyRevision: integer("policy_revision").notNull(),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    triggerReason: text("trigger_reason").notNull(),
+    notifySent: boolean("notify_sent").notNull().default(false),
+    reassignedToQueueId: text("reassigned_to_queue_id"),
+    reassignedToUserId: text("reassigned_to_user_id"),
+    severityRaisedTo: severityEnum("severity_raised_to"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("escalation_policy_runs_policy_rev_case_idx").on(
+      t.policyId,
+      t.policyRevision,
+      t.caseId,
+    ),
+    index("escalation_policy_runs_org_idx").on(t.organisationId, t.createdAt),
+    index("escalation_policy_runs_case_idx").on(t.caseId),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Bulk case operations                                                      */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+export const bulkOperationTypeEnum = pgEnum("bulk_operation_type", [
+  "assign_queue",
+  "assign_analyst",
+  "add_watcher",
+  "remove_watcher",
+  "add_tag",
+  "remove_tag",
+  "set_severity",
+  "set_status",
+  "acknowledge",
+]);
+
+/**
+ * One row per bulk action a user runs against a set of cases -- the "one
+ * batch audit record" acceptance criterion. Concise per-case timeline
+ * entries are written alongside this through the normal
+ * `writeTimelineEvent` path so each affected case's own history stays
+ * readable without replaying the batch.
+ */
+export const bulkOperations = pgTable(
+  "bulk_operations",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    operationType: bulkOperationTypeEnum("operation_type").notNull(),
+    caseIds: jsonb("case_ids").notNull().default(sql`'[]'::jsonb`),
+    params: jsonb("params").notNull().default(sql`'{}'::jsonb`),
+    successCount: integer("success_count").notNull().default(0),
+    failureCount: integer("failure_count").notNull().default(0),
+    errors: jsonb("errors").notNull().default(sql`'[]'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("bulk_operations_org_created_idx").on(
+      t.organisationId,
+      t.createdAt,
+    ),
   ],
 );
 
@@ -2312,6 +2752,15 @@ export type AlertEntity = typeof alertEntities.$inferSelect;
 export type CaseAlert = typeof caseAlerts.$inferSelect;
 export type EvidenceItem = typeof evidenceItems.$inferSelect;
 export type EvidenceRelationship = typeof evidenceRelationships.$inferSelect;
+export type Team = typeof teams.$inferSelect;
+export type TeamMember = typeof teamMembers.$inferSelect;
+export type Queue = typeof queues.$inferSelect;
+export type CaseAssignee = typeof caseAssignees.$inferSelect;
+export type CaseWatcher = typeof caseWatchers.$inferSelect;
+export type ShiftHandoff = typeof shiftHandoffs.$inferSelect;
+export type EscalationPolicy = typeof escalationPolicies.$inferSelect;
+export type EscalationPolicyRun = typeof escalationPolicyRuns.$inferSelect;
+export type BulkOperation = typeof bulkOperations.$inferSelect;
 
 export type PlaybookStepPhase =
   | "triage"

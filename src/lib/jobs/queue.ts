@@ -7,6 +7,7 @@ export type KelpieJobName =
   | "poll-ti-feed"
   | "poll-case-source"
   | "sla-check"
+  | "escalation-check"
   | "deliver-webhooks"
   | "deliver-automations"
   | "enrich-cases"

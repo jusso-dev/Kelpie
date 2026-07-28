@@ -5,6 +5,7 @@ import { newId } from "./utils";
 import { queueAutomationRunsForTimelineEvent } from "./automations/core";
 import { fireWebhook } from "./webhooks";
 import { recordAuditEvent } from "./audit/events";
+import { notifyWatchersForEvent } from "./watchers-core";
 
 export type TimelineEventType =
   | "case_created"
@@ -36,6 +37,13 @@ export type TimelineEventType =
   | "evidence_item_verdict_changed"
   | "evidence_item_remediation_changed"
   | "evidence_relationship_created"
+  | "queue_assignment_change"
+  | "acknowledged"
+  | "handoff_recorded"
+  | "watcher_added"
+  | "watcher_removed"
+  | "escalation_triggered"
+  | "bulk_operation"
   | "custom";
 
 export async function writeTimelineEvent(opts: {
@@ -55,6 +63,13 @@ export async function writeTimelineEvent(opts: {
     occurredAt: timelineEvents.occurredAt,
   });
   if (created) {
+    // Bump the case's activity stamp so the "stale investigation" built-in
+    // view (#54) and per-queue aging buckets stay accurate without scanning
+    // the timeline table on every read.
+    await db
+      .update(cases)
+      .set({ lastActivityAt: created.occurredAt })
+      .where(eq(cases.id, opts.caseId));
     await queueAutomationRunsForTimelineEvent({
       timelineEventId: created.id,
       timelineEventType: opts.eventType,
@@ -100,6 +115,21 @@ export async function writeTimelineEvent(opts: {
           await fireWebhook(caseRow.organisationId, "case.closed", payload);
         }
       }
+      // Watchers are a notification preference only, never an access grant:
+      // this only ever reads who is watching and their own preference flags,
+      // it does not change who can view or edit the case.
+      await notifyWatchersForEvent({
+        caseId: opts.caseId,
+        organisationId: caseRow.organisationId,
+        caseNumber: caseRow.caseNumber,
+        caseTitle: caseRow.title,
+        actorId: opts.actorId,
+        eventType: opts.eventType,
+        payload: opts.payload ?? {},
+      }).catch(() => {
+        // Watcher notification is best-effort; it must never block the
+        // timeline write it is reacting to.
+      });
     }
   }
 }

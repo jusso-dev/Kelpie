@@ -10,6 +10,7 @@ import { purgeExpiredCache } from "@/lib/enrichment/cache";
 import { dispatchPendingMobilePushes } from "@/lib/mobile-push";
 import { pruneStalePresence } from "@/lib/presence";
 import { runSlaChecks } from "@/lib/sla-runner";
+import { runEscalationPolicies } from "@/lib/escalation-core";
 import { processPendingAutomationRuns } from "@/lib/automations/dispatch";
 import { scanPendingEvidence } from "@/lib/evidence/scan-runner";
 import { purgeExpiredAuditExports } from "@/lib/audit/export";
@@ -84,6 +85,7 @@ export async function purgeAuditData() {
 
 export const jobHandlers = {
   "sla-check": runSlaChecks,
+  "escalation-check": runEscalationPolicies,
   "deliver-webhooks": processPendingDeliveries,
   "deliver-automations": processPendingAutomationRuns,
   "enrich-cases": enrichPendingCases,

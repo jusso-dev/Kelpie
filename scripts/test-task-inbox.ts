@@ -100,11 +100,12 @@ async function main() {
     await page.goto(`${baseUrl}/sign-in`);
     await page.getByLabel("Email").fill("admin@acme.local");
     await page.getByLabel("Password").fill("kelpieadmin");
-    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page.waitForURL("**/dashboard");
 
     await page.getByRole("link", { name: "Tasks", exact: true }).click();
     await page.waitForURL("**/tasks");
+    await page.getByText("Inbox overdue task", { exact: true }).waitFor();
     const body = await page.locator("body").innerText();
     assert.doesNotMatch(body, /Inbox completed task/);
     assert.ok(body.indexOf("Inbox overdue task") < body.indexOf("Inbox soon task"));
@@ -124,6 +125,7 @@ async function main() {
     assert.doesNotMatch(await page.locator("body").innerText(), /Inbox overdue task/);
 
     await page.goto(`${baseUrl}/tasks?status=invalid&due=unknown&assignee=missing&page=abc`);
+    await page.locator('select[name="status"]').waitFor();
     assert.equal(await page.locator('select[name="status"]').inputValue(), "open");
     assert.equal(await page.locator('select[name="due"]').inputValue(), "any");
     assert.equal(await page.locator('select[name="assignee"]').inputValue(), "");
@@ -148,7 +150,7 @@ async function main() {
     await readOnlyPage.goto(`${baseUrl}/sign-in`);
     await readOnlyPage.getByLabel("Email").fill("analyst@acme.local");
     await readOnlyPage.getByLabel("Password").fill("kelpieanalyst");
-    await readOnlyPage.getByRole("button", { name: "Sign in" }).click();
+    await readOnlyPage.getByRole("button", { name: "Sign in", exact: true }).click();
     await readOnlyPage.waitForURL("**/dashboard");
     await readOnlyPage.goto(`${baseUrl}/tasks?due=soon`);
     const readOnlyStatus = readOnlyPage.getByLabel("Status for task Inbox soon task");

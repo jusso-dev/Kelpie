@@ -108,3 +108,68 @@ export function evaluateSla(c: Case, policy: SlaPolicy, now = new Date()): SlaEv
 export function nextOpenGate(evaluation: SlaEvaluation): SlaTargetEvaluation | null {
   return evaluation.targets.find((t) => t.achievedAt === null) ?? null;
 }
+
+/**
+ * Set-based mirror of `evaluateSla` for indexed list/dashboard queries where
+ * running the per-row evaluator in JS would defeat the query's own
+ * pagination and indexing. `caseSlaAtRiskSql` (deadline within the warning
+ * window OR already passed) backs the existing combined "SLA: at risk" case
+ * filter; `caseSlaBreachedSql` / `caseSlaWarningSql` split that into the two
+ * distinct built-in queue views (#54) without changing the older filter's
+ * behaviour.
+ */
+export function caseSlaBreachedSql() {
+  return sql<boolean>`(
+    ${cases.status} <> 'closed'
+    AND EXISTS (
+      SELECT 1
+      FROM ${slaPolicies}
+      WHERE ${slaPolicies.organisationId} = ${cases.organisationId}
+        AND ${slaPolicies.severity} = ${cases.severity}
+        AND (
+          (${cases.acknowledgedAt} IS NULL AND ${cases.openedAt} + (${slaPolicies.timeToAcknowledgeMinutes} * interval '1 minute') <= now())
+          OR (${cases.containedAt} IS NULL AND ${cases.openedAt} + (${slaPolicies.timeToContainMinutes} * interval '1 minute') <= now())
+          OR (${cases.resolvedAt} IS NULL AND ${cases.openedAt} + (${slaPolicies.timeToResolveMinutes} * interval '1 minute') <= now())
+        )
+    )
+  )`;
+}
+
+const WARNING_WINDOW_INTERVAL = sql.raw(
+  `interval '${WARNING_WINDOW_MINUTES} minutes'`,
+);
+
+export function caseSlaWarningSql() {
+  return sql<boolean>`(
+    ${cases.status} <> 'closed'
+    AND NOT ${caseSlaBreachedSql()}
+    AND EXISTS (
+      SELECT 1
+      FROM ${slaPolicies}
+      WHERE ${slaPolicies.organisationId} = ${cases.organisationId}
+        AND ${slaPolicies.severity} = ${cases.severity}
+        AND (
+          (${cases.acknowledgedAt} IS NULL AND ${cases.openedAt} + (${slaPolicies.timeToAcknowledgeMinutes} * interval '1 minute') <= now() + ${WARNING_WINDOW_INTERVAL})
+          OR (${cases.containedAt} IS NULL AND ${cases.openedAt} + (${slaPolicies.timeToContainMinutes} * interval '1 minute') <= now() + ${WARNING_WINDOW_INTERVAL})
+          OR (${cases.resolvedAt} IS NULL AND ${cases.openedAt} + (${slaPolicies.timeToResolveMinutes} * interval '1 minute') <= now() + ${WARNING_WINDOW_INTERVAL})
+        )
+    )
+  )`;
+}
+
+export function caseSlaAtRiskSql() {
+  return sql<boolean>`(
+    ${cases.status} <> 'closed'
+    AND EXISTS (
+      SELECT 1
+      FROM ${slaPolicies}
+      WHERE ${slaPolicies.organisationId} = ${cases.organisationId}
+        AND ${slaPolicies.severity} = ${cases.severity}
+        AND (
+          (${cases.acknowledgedAt} IS NULL AND ${cases.openedAt} + (${slaPolicies.timeToAcknowledgeMinutes} * interval '1 minute') <= now() + ${WARNING_WINDOW_INTERVAL})
+          OR (${cases.containedAt} IS NULL AND ${cases.openedAt} + (${slaPolicies.timeToContainMinutes} * interval '1 minute') <= now() + ${WARNING_WINDOW_INTERVAL})
+          OR (${cases.resolvedAt} IS NULL AND ${cases.openedAt} + (${slaPolicies.timeToResolveMinutes} * interval '1 minute') <= now() + ${WARNING_WINDOW_INTERVAL})
+        )
+    )
+  )`;
+}

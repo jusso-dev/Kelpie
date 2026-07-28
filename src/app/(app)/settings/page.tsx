@@ -97,6 +97,12 @@ export default async function SettingsPage() {
           >
             Run console
           </Link>
+          <Link
+            href="/settings/escalation-policies"
+            className="kelpie-btn kelpie-btn-secondary justify-center"
+          >
+            Escalation policies
+          </Link>
         </div>
       </section>
 

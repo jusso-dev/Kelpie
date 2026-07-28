@@ -18,6 +18,9 @@ import CasePresence from "@/components/case-presence";
 import CustomFieldsPanel from "@/components/custom-fields-panel";
 import CaseActionRunner from "@/components/case-action-runner";
 import CaseRelationshipsPanel from "@/components/case-relationships-panel";
+import { QueueOwnershipPanel } from "@/components/queue-ownership-panel";
+import { WatchersPanel } from "@/components/watchers-panel";
+import { HandoffPanel } from "@/components/handoff-panel";
 import { evaluateSla, loadSlaPolicy } from "@/lib/sla";
 import {
   listRelationshipsCore,
@@ -32,6 +35,9 @@ import { format } from "date-fns";
 import CaseSummaryEditor from "@/components/case-summary-editor";
 import { sourceSystemLabel } from "@/lib/case-source-identity";
 import { safeExternalUrl } from "@/lib/safe-url";
+import { listAdditionalAssigneesCore, listQueuesCore } from "@/lib/queues-core";
+import { listWatchersCore } from "@/lib/watchers-core";
+import { listHandoffsCore } from "@/lib/handoffs-core";
 
 type Props = { params: Promise<{ id: string }> };
 
@@ -74,14 +80,27 @@ export default async function CaseOverviewPage({ params }: Props) {
   const techniques = (c.mitreTechniques as string[]) ?? [];
   const slaPolicy = await loadSlaPolicy(user.organisationId, c.severity);
   const slaEvaluation = slaPolicy ? evaluateSla(c, slaPolicy) : null;
-  const [customFields, availableActions, responseActionRuns, relationships, suggestions] =
-    await Promise.all([
-      getCustomFieldsForEntity(user.organisationId, c.id),
-      listAvailableActions(user.organisationId, c.id),
-      listCaseResponseActionRuns(user.organisationId, c.id),
-      listRelationshipsCore(user.organisationId, c.id),
-      listSuggestionsCore(user.organisationId, c.id),
-    ]);
+  const [
+    customFields,
+    availableActions,
+    responseActionRuns,
+    relationships,
+    suggestions,
+    queueOptions,
+    additionalAssignees,
+    watchers,
+    handoffs,
+  ] = await Promise.all([
+    getCustomFieldsForEntity(user.organisationId, c.id),
+    listAvailableActions(user.organisationId, c.id),
+    listCaseResponseActionRuns(user.organisationId, c.id),
+    listRelationshipsCore(user.organisationId, c.id),
+    listSuggestionsCore(user.organisationId, c.id),
+    listQueuesCore(user.organisationId),
+    listAdditionalAssigneesCore(user.organisationId, c.id),
+    listWatchersCore(user.organisationId, c.id),
+    listHandoffsCore(user.organisationId, c.id),
+  ]);
   const canEdit = user.role === "admin" || user.role === "analyst";
   const sourceLabel = sourceSystemLabel(c.sourceSystem);
   // Re-validated at render time: a legacy row or a bypass of the public API's
@@ -206,6 +225,53 @@ export default async function CaseOverviewPage({ params }: Props) {
           }
           assigneeId={c.assigneeId}
           users={orgUsers}
+        />
+
+        <QueueOwnershipPanel
+          caseId={c.id}
+          queueId={c.queueId}
+          queueAssignedAt={c.queueAssignedAt ? c.queueAssignedAt.toISOString() : null}
+          assigneeAssignedAt={c.assigneeAssignedAt ? c.assigneeAssignedAt.toISOString() : null}
+          acknowledgedAt={c.acknowledgedAt ? c.acknowledgedAt.toISOString() : null}
+          waitingReason={c.waitingReason}
+          waitingSince={c.waitingSince ? c.waitingSince.toISOString() : null}
+          queues={queueOptions.map((q) => ({ id: q.id, name: q.name, teamName: q.teamName }))}
+          members={orgUsers.map((u) => ({ id: u.id, name: u.name }))}
+          additionalAssignees={additionalAssignees.map((a) => ({
+            userId: a.userId,
+            userName: a.userName,
+          }))}
+          canEdit={canEdit}
+        />
+
+        <WatchersPanel
+          caseId={c.id}
+          currentUserId={user.id}
+          watchers={watchers.map((w) => ({
+            userId: w.userId,
+            userName: w.userName,
+            notifyOnComment: w.notifyOnComment,
+            notifyOnStatusChange: w.notifyOnStatusChange,
+            notifyOnAssignment: w.notifyOnAssignment,
+            notifyOnSlaRisk: w.notifyOnSlaRisk,
+          }))}
+          members={orgUsers.map((u) => ({ id: u.id, name: u.name }))}
+          canManageOthers={canEdit}
+        />
+
+        <HandoffPanel
+          caseId={c.id}
+          handoffs={handoffs.map((h) => ({
+            id: h.id,
+            summary: h.summary,
+            keyActions: Array.isArray(h.keyActions) ? (h.keyActions as string[]) : [],
+            openItems: Array.isArray(h.openItems) ? (h.openItems as string[]) : [],
+            fromUserId: h.fromUserId,
+            toUserId: h.toUserId,
+            createdAt: h.createdAt.toISOString(),
+          }))}
+          members={orgUsers.map((u) => ({ id: u.id, name: u.name }))}
+          canCreate={canEdit}
         />
 
         <CaseActionRunner
