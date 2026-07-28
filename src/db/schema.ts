@@ -352,6 +352,69 @@ export const evidenceRelationshipTypeEnum = pgEnum("evidence_relationship_type",
 ]);
 
 /**
+ * Investigation graph node kinds exposed by the case graph API (issue #65).
+ * Entity subtypes are projected from `entity_type` rather than inventing new
+ * entity rows; structural nodes (case, alert, evidence, technique) come from
+ * their own tables.
+ */
+export const investigationGraphNodeTypeEnum = pgEnum(
+  "investigation_graph_node_type",
+  [
+    "case",
+    "alert",
+    "identity",
+    "device",
+    "mailbox",
+    "file",
+    "process",
+    "ip",
+    "domain",
+    "url",
+    "cloud_resource",
+    "evidence",
+    "technique",
+    "email_message",
+    "application",
+    "tenant",
+    "network",
+    "asset",
+    "other",
+  ],
+);
+
+/**
+ * Typed investigation graph edges (issue #65). Includes structural
+ * relationships already stored elsewhere (`belongs_to_case`,
+ * `triggered_alert`, evidence relationship types, technique mappings) plus
+ * analyst/provider/rule edges that are not otherwise modelled.
+ */
+export const investigationGraphEdgeTypeEnum = pgEnum(
+  "investigation_graph_edge_type",
+  [
+    "observed_on",
+    "communicated_with",
+    "executed",
+    "downloaded",
+    "sent_by",
+    "received_by",
+    "authenticated_to",
+    "resolved_to",
+    "parent_process",
+    "triggered_alert",
+    "belongs_to_case",
+    "related_to",
+    "derived_from",
+    "duplicate_of",
+    "maps_to_technique",
+  ],
+);
+
+export const investigationGraphProvenanceEnum = pgEnum(
+  "investigation_graph_provenance",
+  ["provider", "analyst", "rule"],
+);
+
+/**
  * Case visibility / need-to-know compartments (issue #61).
  * `organisation` is the default open-within-tenant mode; the other three
  * restrict who may know a case exists or read its content.
@@ -5469,6 +5532,101 @@ export const integrationSyncWrites = pgTable(
 );
 
 /* ────────────────────────────────────────────────────────────────────────── */
+/* Investigation graph edges (issue #65)                                      */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Explicit, provenanced graph edges between case-scoped investigation nodes.
+ * Structural edges (case↔alert, alert↔entity, evidence links, ATT&CK
+ * mappings) are derived at read time from their source tables; this table
+ * stores only edges that are not already represented there so presentation
+ * never invents unsupported relationships. Every row carries confidence,
+ * provenance (provider|analyst|rule), optional observed time range, and
+ * creator for audit and filtering.
+ */
+export const investigationGraphEdges = pgTable(
+  "investigation_graph_edges",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    sourceNodeType: investigationGraphNodeTypeEnum("source_node_type").notNull(),
+    sourceNodeId: text("source_node_id").notNull(),
+    targetNodeType: investigationGraphNodeTypeEnum("target_node_type").notNull(),
+    targetNodeId: text("target_node_id").notNull(),
+    edgeType: investigationGraphEdgeTypeEnum("edge_type").notNull(),
+    /** 0–100. Null means confidence is unknown (still filterable separately). */
+    confidence: integer("confidence"),
+    provenance: investigationGraphProvenanceEnum("provenance").notNull(),
+    /** Free-text origin detail: provider name, rule id, connector, etc. */
+    source: text("source").notNull(),
+    observedAtStart: timestamp("observed_at_start", { withTimezone: true }),
+    observedAtEnd: timestamp("observed_at_end", { withTimezone: true }),
+    creatorId: text("creator_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    ruleId: text("rule_id"),
+    ruleVersion: text("rule_version"),
+    reason: text("reason"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("investigation_graph_edges_org_case_idx").on(
+      t.organisationId,
+      t.caseId,
+    ),
+    index("investigation_graph_edges_source_idx").on(
+      t.caseId,
+      t.sourceNodeType,
+      t.sourceNodeId,
+    ),
+    index("investigation_graph_edges_target_idx").on(
+      t.caseId,
+      t.targetNodeType,
+      t.targetNodeId,
+    ),
+    uniqueIndex("investigation_graph_edges_unique_idx").on(
+      t.organisationId,
+      t.caseId,
+      t.sourceNodeType,
+      t.sourceNodeId,
+      t.targetNodeType,
+      t.targetNodeId,
+      t.edgeType,
+      t.provenance,
+      t.source,
+    ),
+    check(
+      "investigation_graph_edges_confidence_range",
+      sql.raw(
+        `"confidence" is null or ("confidence" >= 0 and "confidence" <= 100)`,
+      ),
+    ),
+    check(
+      "investigation_graph_edges_no_self_link",
+      sql.raw(
+        `not ("source_node_type" = "target_node_type" and "source_node_id" = "target_node_id")`,
+      ),
+    ),
+    check(
+      "investigation_graph_edges_observed_range",
+      sql.raw(
+        `"observed_at_start" is null or "observed_at_end" is null or "observed_at_start" <= "observed_at_end"`,
+      ),
+    ),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
 /* Vendor news watchlist                                                      */
 /* ────────────────────────────────────────────────────────────────────────── */
 
@@ -5579,6 +5737,7 @@ export type CaseCompartmentTeam = typeof caseCompartmentTeams.$inferSelect;
 export type CaseCompartmentMember = typeof caseCompartmentMembers.$inferSelect;
 export type CaseAccessGrant = typeof caseAccessGrants.$inferSelect;
 export type CaseAccessEvent = typeof caseAccessEvents.$inferSelect;
+export type InvestigationGraphEdge = typeof investigationGraphEdges.$inferSelect;
 
 export type PlaybookStepPhase =
   | "triage"

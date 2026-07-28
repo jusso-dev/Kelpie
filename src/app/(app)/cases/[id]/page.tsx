@@ -36,8 +36,10 @@ import {
 } from "@/lib/access";
 import { listMappingsForCase } from "@/lib/attack/mapping-core";
 import { listStoryCore } from "@/lib/attack/story-core";
+import { buildCaseGraphCore } from "@/lib/investigations/graph-core";
 import AttackMappingsPanel from "@/components/attack-mappings-panel";
 import AttackStoryPanel from "@/components/attack-story-panel";
+import InvestigationGraphPanel from "@/components/investigation-graph-panel";
 import {
   listAvailableActions,
   listCaseResponseActionRuns,
@@ -129,6 +131,7 @@ export default async function CaseOverviewPage({ params }: Props) {
     attackMappings,
     attackStory,
     prioritySettings,
+    investigationGraph,
   ] = await Promise.all([
     getCustomFieldsForEntity(user.organisationId, c.id),
     listAvailableActions(user.organisationId, c.id),
@@ -142,6 +145,15 @@ export default async function CaseOverviewPage({ params }: Props) {
     listMappingsForCase(user.organisationId, c.id),
     listStoryCore(user.organisationId, c.id),
     getPriorityScoringSettings(user.organisationId),
+    buildCaseGraphCore({
+      organisationId: user.organisationId,
+      caseId: c.id,
+      actor,
+      permissions: gate.permissions,
+      view: "graph",
+      nodeLimit: 100,
+      edgeLimit: 200,
+    }).catch(() => null),
   ]);
   let priority = await getCasePriorityCore(user.organisationId, c.id);
   if (!priority) {
@@ -309,6 +321,20 @@ export default async function CaseOverviewPage({ params }: Props) {
             techniqueName: e.techniqueName,
           }))}
         />
+
+        {investigationGraph ? (
+          <InvestigationGraphPanel
+            caseId={c.id}
+            nodes={investigationGraph.nodes}
+            edges={investigationGraph.edges}
+            story={investigationGraph.story}
+            tacticLanes={investigationGraph.tacticLanes}
+            truncated={
+              investigationGraph.limits.nodesTruncated ||
+              investigationGraph.limits.edgesTruncated
+            }
+          />
+        ) : null}
 
         <CustomFieldsPanel
           caseId={c.id}

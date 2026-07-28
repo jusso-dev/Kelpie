@@ -37,6 +37,8 @@ export type TimelineEventType =
   | "evidence_item_verdict_changed"
   | "evidence_item_remediation_changed"
   | "evidence_relationship_created"
+  | "investigation_graph_edge_created"
+  | "investigation_graph_edge_removed"
   | "queue_assignment_change"
   | "acknowledged"
   | "handoff_recorded"

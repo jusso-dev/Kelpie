@@ -521,6 +521,66 @@ Send `{ "targetIndex": 2 }` to reorder, or any subset of `title`, `description`,
 
 ### `DELETE /api/v1/cases/{id}/attack-story/{entryId}`
 
+## Investigation graph (relationship graph + attack story)
+
+Typed investigation graph for a case (issue #65). Nodes and structural edges are **derived** from already-stored data (`case_alerts`, `alert_entities`, `evidence_items` / `evidence_relationships`, ATT&CK mappings, attack-story entries). Analyst/provider/rule edges with full provenance live in `investigation_graph_edges` — presentation never invents unsupported relationships.
+
+Every edge exposes `confidence` (0–100 or null when unknown), `provenance` (`provider` | `analyst` | `rule`), `source`, optional observed time range, and `creatorId`.
+
+Authorisation uses case compartments: `authorizeCase` + `resolveTokenActor`. Restricted/sensitive nodes are **omitted** entirely (no count, topology, label, or export leak).
+
+Scopes: `cases:read` for graph/export; `cases:write` for creating/removing stored edges. Export additionally requires compartment permission `export`.
+
+Node types: `case`, `alert`, `identity`, `device`, `mailbox`, `file`, `process`, `ip`, `domain`, `url`, `cloud_resource`, `evidence`, `technique`, `email_message`, `application`, `tenant`, `network`, `asset`, `other`.
+
+Edge types: `observed_on`, `communicated_with`, `executed`, `downloaded`, `sent_by`, `received_by`, `authenticated_to`, `resolved_to`, `parent_process`, `triggered_alert`, `belongs_to_case`, `related_to`, `derived_from`, `duplicate_of`, `maps_to_technique`.
+
+### `GET /api/v1/cases/{id}/graph`
+Query:
+
+| Param | Meaning |
+| --- | --- |
+| `nodeTypes` | Comma-separated node types to keep |
+| `minConfidence` | Hide edges with known confidence below this (0–100). Null-confidence structural edges still show |
+| `view` | `graph` (default), `story`, `tactic_lanes`, `evidence` |
+| `nodeLimit` | Progressive node cap (default 200, max 500) |
+| `edgeLimit` | Progressive edge cap (default 500, max 2000) |
+
+Returns `{ caseId, view, nodes, edges, story, tacticLanes, limits, counts, filters, generatedAt }`.
+
+- `story` is ordered by explicit `sequenceIndex` only; entries with missing or out-of-order `occurredAt` set `timingAmbiguous` + `timingNote` (clock/source ambiguity is visible; order never claims timestamp causality).
+- `tacticLanes` groups mapped techniques by ATT&CK tactic id.
+- `view=evidence` keeps evidence nodes and evidence–evidence edges (plus case anchor when not filtered out).
+- `counts` reflect only access-visible nodes/edges after filters.
+
+### `POST /api/v1/cases/{id}/graph`
+Create a stored provenanced edge (both endpoints must already exist on the case):
+```json
+{
+  "sourceNodeType": "ip",
+  "sourceNodeId": "ent_…",
+  "targetNodeType": "domain",
+  "targetNodeId": "ent_…",
+  "edgeType": "resolved_to",
+  "confidence": 75,
+  "provenance": "analyst",
+  "source": "manual_investigation",
+  "observedAtStart": "2026-07-01T10:06:00.000Z",
+  "observedAtEnd": null,
+  "reason": "PTR and passive DNS agree"
+}
+```
+`provenance: "rule"` requires `ruleId`. Returns `201 { "edge": { … } }`. Duplicate unique edges return `409`.
+
+### `DELETE /api/v1/cases/{id}/graph/edges/{edgeId}`
+Removes a **stored** edge only (derived edges cannot be deleted). Returns `{ "ok": true }`.
+
+### `GET /api/v1/cases/{id}/graph/export`
+Requires compartment `export`. Query: `format=json|text` (default `json`), plus the same filter params as the graph GET.
+
+- `format=json` → `{ "snapshot": { …graph… }, "text": "…" }`
+- `format=text` → `text/plain` attachment with the textual relationship list (provenance, confidence, observed range)
+
 ### Optional D3FEND countermeasure mappings
 
 ### `GET /api/v1/attack/d3fend-mappings?playbookId=&responseActionId=`
