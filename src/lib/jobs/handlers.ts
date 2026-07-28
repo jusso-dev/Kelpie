@@ -1,5 +1,7 @@
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { organisations } from "@/db/schema";
+import { organisations, enrichmentRuns } from "@/db/schema";
+import { newId } from "@/lib/utils";
 import { pollFeed } from "@/lib/ti/core";
 import { pollCaseSource } from "@/lib/case-sources/core";
 import { processPendingDeliveries } from "@/lib/webhooks";
@@ -25,13 +27,51 @@ export async function pollExternalCaseSource(sourceId: string) {
   return result;
 }
 
+/**
+ * Records one durable `enrichment_runs` row per organisation per sweep so the
+ * run console (issue #67) has a real queryable record of this scheduled job,
+ * rather than inventing a generic execution log. The enrichment logic itself
+ * (`enrichOrganisationPending`) is untouched; this only wraps it.
+ */
+async function enrichOrganisationWithRunRecord(organisationId: string): Promise<number> {
+  const id = newId("enr");
+  await db.insert(enrichmentRuns).values({
+    id,
+    organisationId,
+    status: "running",
+    startedAt: new Date(),
+  });
+  try {
+    const result = await enrichOrganisationPending(organisationId, 50);
+    await db
+      .update(enrichmentRuns)
+      .set({
+        status: "succeeded",
+        processedCount: result.enriched,
+        finishedAt: new Date(),
+      })
+      .where(eq(enrichmentRuns.id, id));
+    return result.enriched;
+  } catch (error) {
+    await db
+      .update(enrichmentRuns)
+      .set({
+        status: "failed",
+        errorCategory: "provider_error",
+        lastError: error instanceof Error ? error.message : "enrichment sweep failed",
+        finishedAt: new Date(),
+      })
+      .where(eq(enrichmentRuns.id, id));
+    throw error;
+  }
+}
+
 export async function enrichPendingCases() {
   await purgeExpiredCache();
   const orgs = await db.select({ id: organisations.id }).from(organisations);
   let enriched = 0;
   for (const organisation of orgs) {
-    const result = await enrichOrganisationPending(organisation.id, 50);
-    enriched += result.enriched;
+    enriched += await enrichOrganisationWithRunRecord(organisation.id);
   }
   return { enriched, organisations: orgs.length };
 }

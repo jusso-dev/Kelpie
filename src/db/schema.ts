@@ -1643,6 +1643,31 @@ export const responseActionRuns = pgTable(
     target: text("target"),
     request: jsonb("request").notNull().default(sql`'{}'::jsonb`),
     response: jsonb("response").notNull().default(sql`'{}'::jsonb`),
+    /**
+     * Typed classification of a failed/cancelled run, used by the run console
+     * so operators can filter/triage without parsing free-text errors. See
+     * `src/lib/run-console/error-category.ts`.
+     */
+    errorCategory: text("error_category"),
+    /**
+     * Retry lineage: a manual retry never rewrites this row. Instead it
+     * inserts a new run with `parentRunId` pointing here and `rootRunId`
+     * pointing at the original (first) attempt in the chain. A partial
+     * unique index (below) guarantees at most one child per parent, so a
+     * concurrent double-retry can never race into two children.
+     */
+    parentRunId: text("parent_run_id"),
+    rootRunId: text("root_run_id"),
+    attempt: integer("attempt").notNull().default(1),
+    /**
+     * Best-effort cancel marker. Never rewritten to imply a provider effect
+     * was reversed; a run already `running` still completes with its true
+     * provider outcome, this only records that cancellation was requested.
+     */
+    cancelRequestedAt: timestamp("cancel_requested_at", { withTimezone: true }),
+    cancelRequestedBy: text("cancel_requested_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
     startedAt: timestamp("started_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -1654,6 +1679,20 @@ export const responseActionRuns = pgTable(
     index("response_action_runs_action_idx").on(t.actionId),
     index("response_action_runs_org_status_idx").on(t.organisationId, t.status),
     uniqueIndex("response_action_runs_idempotency_key_idx").on(t.idempotencyKey),
+    index("response_action_runs_root_idx").on(t.rootRunId),
+    uniqueIndex("response_action_runs_parent_idx")
+      .on(t.parentRunId)
+      .where(sql`${t.parentRunId} is not null`),
+    foreignKey({
+      columns: [t.parentRunId],
+      foreignColumns: [t.id],
+      name: "response_action_runs_parent_run_id_response_action_runs_id_fk",
+    }).onDelete("set null"),
+    foreignKey({
+      columns: [t.rootRunId],
+      foreignColumns: [t.id],
+      name: "response_action_runs_root_run_id_response_action_runs_id_fk",
+    }).onDelete("set null"),
   ],
 );
 
@@ -1715,6 +1754,7 @@ export const automationRuns = pgTable(
     triggerEvent: text("trigger_event").notNull(),
     traceId: text("trace_id").notNull(),
     status: text("status").notNull().default("pending"),
+    /** Automatic in-place backoff retries within this same row (see `dispatch.ts`). */
     attemptCount: integer("attempt_count").notNull().default(0),
     nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true })
       .notNull()
@@ -1722,18 +1762,133 @@ export const automationRuns = pgTable(
     request: jsonb("request").notNull(),
     response: jsonb("response").notNull().default(sql`'{}'::jsonb`),
     lastError: text("last_error"),
+    errorCategory: text("error_category"),
+    /**
+     * Manual retry lineage (distinct from `attemptCount`'s automatic
+     * backoff): a manual retry after a terminal failure/cancellation inserts
+     * a new row rather than rewriting this one. See `response_action_runs`
+     * for the identical pattern and the partial unique index below.
+     */
+    parentRunId: text("parent_run_id"),
+    rootRunId: text("root_run_id"),
+    lineageAttempt: integer("lineage_attempt").notNull().default(1),
+    cancelRequestedAt: timestamp("cancel_requested_at", { withTimezone: true }),
+    cancelRequestedBy: text("cancel_requested_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
   },
   (t) => [
-    uniqueIndex("automation_runs_rule_event_idx").on(
-      t.ruleId,
-      t.triggerEventId,
-    ),
+    /**
+     * Only the original (root) attempt for a given (rule, triggering event)
+     * is deduplicated here; a manual retry child is exempt so retrying a
+     * failed run never collides with the row this constraint already
+     * protects (issue #67: retry must never rewrite prior history).
+     */
+    uniqueIndex("automation_runs_rule_event_idx")
+      .on(t.ruleId, t.triggerEventId)
+      .where(sql`${t.parentRunId} is null`),
     index("automation_runs_pending_idx").on(t.status, t.nextAttemptAt),
     index("automation_runs_case_idx").on(t.caseId, t.createdAt),
+    index("automation_runs_root_idx").on(t.rootRunId),
+    uniqueIndex("automation_runs_parent_idx")
+      .on(t.parentRunId)
+      .where(sql`${t.parentRunId} is not null`),
+    foreignKey({
+      columns: [t.parentRunId],
+      foreignColumns: [t.id],
+      name: "automation_runs_parent_run_id_automation_runs_id_fk",
+    }).onDelete("set null"),
+    foreignKey({
+      columns: [t.rootRunId],
+      foreignColumns: [t.id],
+      name: "automation_runs_root_run_id_automation_runs_id_fk",
+    }).onDelete("set null"),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Run console: kill switches and enrichment batch runs                       */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * A kill switch stops a category of automated/governed work before it is
+ * claimed or executed (see `src/lib/run-console/kill-switch.ts`). Always
+ * organisation-scoped; `scope` narrows it further to a single provider
+ * (e.g. `cloudflare`, `microsoft_entra`) or a single action/rule id.
+ * `scopeKey` is `''` (never null) for organisation-wide switches so the
+ * unique index below has one well-defined row per switch identity.
+ */
+export const killSwitchScopeEnum = pgEnum("kill_switch_scope", [
+  "organisation",
+  "provider",
+  "action",
+]);
+
+export const killSwitches = pgTable(
+  "kill_switches",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    scope: killSwitchScopeEnum("scope").notNull(),
+    scopeKey: text("scope_key").notNull().default(""),
+    enabled: boolean("enabled").notNull().default(true),
+    reason: text("reason").notNull(),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedBy: text("updated_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("kill_switches_org_scope_key_idx").on(
+      t.organisationId,
+      t.scope,
+      t.scopeKey,
+    ),
+    index("kill_switches_org_idx").on(t.organisationId),
+  ],
+);
+
+/**
+ * One row per scheduled per-organisation enrichment sweep
+ * (`enrichPendingCases` in `src/lib/jobs/handlers.ts`). Enrichment itself
+ * writes results straight onto `observables.enrichment`; this table exists
+ * only so the run console has a durable, queryable record of each sweep
+ * (queued/started/finished, how many observables were processed) rather than
+ * inventing a generic execution log.
+ */
+export const enrichmentRuns = pgTable(
+  "enrichment_runs",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("running"),
+    queuedAt: timestamp("queued_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    processedCount: integer("processed_count").notNull().default(0),
+    errorCategory: text("error_category"),
+    lastError: text("last_error"),
+  },
+  (t) => [
+    index("enrichment_runs_org_idx").on(t.organisationId, t.queuedAt),
   ],
 );
 
@@ -2082,6 +2237,11 @@ export type WebhookDelivery = typeof webhookDeliveries.$inferSelect;
 export type EnrichmentCacheRow = typeof enrichmentCache.$inferSelect;
 export type ResponseAction = typeof responseActions.$inferSelect;
 export type ResponseActionRun = typeof responseActionRuns.$inferSelect;
+export type AutomationRuleRow = typeof automationRules.$inferSelect;
+export type AutomationRunRow = typeof automationRuns.$inferSelect;
+export type KillSwitchRow = typeof killSwitches.$inferSelect;
+export type EnrichmentRunRow = typeof enrichmentRuns.$inferSelect;
+export type AuditExportJobRow = typeof auditExportJobs.$inferSelect;
 export type TiFeed = typeof tiFeeds.$inferSelect;
 export type TiIndicator = typeof tiIndicators.$inferSelect;
 export type CaseSource = typeof caseSources.$inferSelect;

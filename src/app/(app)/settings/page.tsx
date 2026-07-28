@@ -91,6 +91,12 @@ export default async function SettingsPage() {
           >
             Audit log
           </Link>
+          <Link
+            href="/settings/run-console"
+            className="kelpie-btn kelpie-btn-secondary justify-center"
+          >
+            Run console
+          </Link>
         </div>
       </section>
 
