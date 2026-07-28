@@ -19,7 +19,7 @@
  */
 import { db } from "@/db";
 import { caseTemplates, playbooks } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { newId } from "./utils";
 import {
   BASELINE_PLAYBOOKS,
@@ -61,7 +61,7 @@ export async function seedBaselineOrganisationData(
       continue;
     }
     const id = newId("pb");
-    await db.insert(playbooks).values({
+    const created = await db.insert(playbooks).values({
       id,
       organisationId,
       name: baseline.name,
@@ -78,7 +78,29 @@ export async function seedBaselineOrganisationData(
       requiredObservableTypes: baseline.requiredObservableTypes,
       catalogueKey: baseline.key,
       catalogueVersion: PLAYBOOK_CATALOGUE_VERSION,
-    });
+    })
+      // The read above and this write are not in one transaction, so two
+      // concurrent syncs for the same organisation can both decide a key is
+      // missing. The unique index on (organisationId, catalogueKey) settles
+      // it; without this the loser would throw mid-loop and leave the
+      // organisation partially synced.
+      .onConflictDoNothing()
+      .returning({ id: playbooks.id });
+    if (created.length === 0) {
+      const [winner] = await db
+        .select({ id: playbooks.id })
+        .from(playbooks)
+        .where(
+          and(
+            eq(playbooks.organisationId, organisationId),
+            eq(playbooks.catalogueKey, baseline.key),
+          ),
+        )
+        .limit(1);
+      if (winner) playbookIdsByKey.set(baseline.key, winner.id);
+      playbooksSkipped++;
+      continue;
+    }
     playbookIdsByKey.set(baseline.key, id);
     playbooksCreated++;
   }
@@ -119,7 +141,7 @@ export async function seedBaselineOrganisationData(
       }
       continue;
     }
-    await db.insert(caseTemplates).values({
+    const createdTemplate = await db.insert(caseTemplates).values({
       id: newId("ct"),
       organisationId,
       name: template.name,
@@ -133,7 +155,14 @@ export async function seedBaselineOrganisationData(
       defaultTasks: template.defaultTasks,
       catalogueKey: template.key,
       catalogueVersion: PLAYBOOK_CATALOGUE_VERSION,
-    });
+    })
+      // Same concurrent-sync race as the playbook insert above.
+      .onConflictDoNothing()
+      .returning({ id: caseTemplates.id });
+    if (createdTemplate.length === 0) {
+      templatesSkipped++;
+      continue;
+    }
     templatesCreated++;
   }
 

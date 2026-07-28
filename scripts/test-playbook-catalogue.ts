@@ -298,6 +298,57 @@ async function main() {
     assert.equal(customOnly[0].isBaseline, false);
 
     console.log("Catalogue filtering (scenario/classification/severity/tag/observableType/q) verified.");
+
+    // ── Concurrent sync of the same organisation ─────────────────────────
+    // The existence check and the insert are not one transaction, so two
+    // admins (or one double-click) can both decide a key is missing. The
+    // unique index settles it; the loser must skip rather than throw and
+    // leave the organisation half-synced.
+    const orgCId = newId("org");
+    await db.insert(organisations).values({
+      id: orgCId,
+      name: "Catalogue test org C",
+      slug: `catalogue-c-${Date.now()}`,
+    });
+    try {
+      const [runOne, runTwo] = await Promise.all([
+        seedBaselineOrganisationData(orgCId),
+        seedBaselineOrganisationData(orgCId),
+      ]);
+      assert.equal(
+        runOne.playbooksCreated + runOne.playbooksSkipped,
+        EXPECTED_SCENARIO_COUNT,
+        "every scenario is accounted for even when two syncs race",
+      );
+      assert.equal(runTwo.playbooksCreated + runTwo.playbooksSkipped, EXPECTED_SCENARIO_COUNT);
+
+      const racedPlaybooks = await db
+        .select({ id: playbooks.id })
+        .from(playbooks)
+        .where(eq(playbooks.organisationId, orgCId));
+      assert.equal(
+        racedPlaybooks.length,
+        EXPECTED_SCENARIO_COUNT,
+        "a raced sync must not duplicate or drop playbooks",
+      );
+      const racedTemplates = await db
+        .select({ id: caseTemplates.id })
+        .from(caseTemplates)
+        .where(eq(caseTemplates.organisationId, orgCId));
+      assert.equal(
+        racedTemplates.length,
+        EXPECTED_SCENARIO_COUNT,
+        "a raced sync must leave templates fully seeded, not partially",
+      );
+      assert.equal(
+        await baselineCatalogueIsBehind(orgCId),
+        false,
+        "a raced sync still leaves the organisation fully synced",
+      );
+      console.log("Concurrent baseline sync leaves the organisation fully and singly seeded.");
+    } finally {
+      await db.delete(organisations).where(eq(organisations.id, orgCId));
+    }
   } finally {
     await db.delete(organisations).where(eq(organisations.id, orgAId));
     await db.delete(organisations).where(eq(organisations.id, orgBId));
