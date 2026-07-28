@@ -2778,6 +2778,10 @@ export const attackCatalogVersions = pgTable(
   (t) => [
     index("attack_catalog_versions_status_idx").on(t.status),
     uniqueIndex("attack_catalog_versions_version_idx").on(t.version),
+    // At most one active catalog version at a time (global singleton).
+    uniqueIndex("attack_catalog_versions_one_active_idx")
+      .on(sql`(true)`)
+      .where(sql`${t.status} = 'active'`),
   ],
 );
 

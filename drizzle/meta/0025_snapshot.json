@@ -1,5 +1,5 @@
 {
-  "id": "8a68cb34-2578-4583-9b1f-28a8eac12d15",
+  "id": "44dbed7d-793a-42e3-bba5-1d3c7f28dc94",
   "prevId": "61909279-8518-466c-a3e1-d6a82911124c",
   "version": "7",
   "dialect": "postgresql",
@@ -1384,6 +1384,22 @@
             }
           ],
           "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "attack_catalog_versions_one_active_idx": {
+          "name": "attack_catalog_versions_one_active_idx",
+          "columns": [
+            {
+              "expression": "(true)",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"attack_catalog_versions\".\"status\" = 'active'",
           "concurrently": false,
           "method": "btree",
           "with": {}

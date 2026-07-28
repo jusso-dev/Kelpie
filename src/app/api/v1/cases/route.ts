@@ -112,8 +112,9 @@ export async function GET(req: Request) {
   }
   if (source) filters.push(eq(cases.sourceSystem, source));
   if (technique) {
+    const techniqueId = technique.trim().toUpperCase();
     filters.push(
-      sql`EXISTS (SELECT 1 FROM ${attackTechniqueMappings} m WHERE m.case_id = ${cases.id} AND m.technique_id = ${technique})`,
+      sql`EXISTS (SELECT 1 FROM ${attackTechniqueMappings} m WHERE m.case_id = ${cases.id} AND m.technique_id = ${techniqueId})`,
     );
   }
   if (tactic) {

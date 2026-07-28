@@ -5,9 +5,12 @@
  * administrator-configured URL. Both funnel into `importCatalogVersion`,
  * which does the actual versioning/rollback work.
  */
+import { eq } from "drizzle-orm";
 import { z } from "zod";
+import { db } from "@/db";
+import { attackCatalogVersions } from "@/db/schema";
 import { safeFetch } from "@/lib/outbound-request";
-import { baselineCatalogSource } from "./baseline-catalog";
+import { BASELINE_CATALOG_VERSION, baselineCatalogSource } from "./baseline-catalog";
 import { AttackCatalogError, importCatalogVersion } from "./catalog-core";
 import type { CatalogSourceInput } from "./types";
 
@@ -52,9 +55,26 @@ export async function fetchCatalogFromUrl(url: string): Promise<CatalogSourceInp
 }
 
 export async function refreshAttackCatalogFromBundled(actorId?: string | null) {
+  // First import uses the stable baseline version string. Subsequent restores
+  // (admin "restore shipped baseline" after a URL import, or a second click)
+  // stamp a unique version so the unique(version) constraint does not 409
+  // while content still comes from the same offline bundle.
+  const base = baselineCatalogSource();
+  const existing = await db
+    .select({ id: attackCatalogVersions.id })
+    .from(attackCatalogVersions)
+    .where(eq(attackCatalogVersions.version, BASELINE_CATALOG_VERSION))
+    .limit(1);
+  const catalog =
+    existing.length === 0
+      ? base
+      : {
+          ...base,
+          version: `${BASELINE_CATALOG_VERSION}+restore-${Date.now()}`,
+        };
   return importCatalogVersion({
     source: "bundled_baseline",
-    catalog: baselineCatalogSource(),
+    catalog,
     actorId,
   });
 }

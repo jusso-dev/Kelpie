@@ -7,7 +7,7 @@
  * acceptance criterion: ordering must not claim causality from timestamps
  * alone.
  */
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   attackStoryEntries,
@@ -120,37 +120,44 @@ export async function addStoryEntryCore(
     if (!mapping) throw new AttackStoryError("Mapping not found on this case", 404);
   }
 
-  const existing = await db
-    .select({ sequenceIndex: attackStoryEntries.sequenceIndex })
-    .from(attackStoryEntries)
-    .where(eq(attackStoryEntries.caseId, caseId))
-    .orderBy(asc(attackStoryEntries.sequenceIndex));
-  const nextSequenceIndex =
-    existing.length > 0 ? existing[existing.length - 1].sequenceIndex + 1 : 0;
-
   const occurredAt = input.occurredAt ? new Date(input.occurredAt) : null;
   if (input.occurredAt && (!occurredAt || Number.isNaN(occurredAt.getTime()))) {
     throw new AttackStoryError("occurredAt must be a valid timestamp");
   }
 
   const id = newId("attackstory");
-  const [inserted] = await db
-    .insert(attackStoryEntries)
-    .values({
-      id,
-      organisationId,
-      caseId,
-      mappingId: input.mappingId ?? null,
-      techniqueId: input.techniqueId?.trim().toUpperCase() || null,
-      sequenceIndex: nextSequenceIndex,
-      title,
-      description: input.description?.trim() || null,
-      provenance: input.provenance ?? "analyst",
-      sourceRef: input.sourceRef?.trim() || null,
-      occurredAt,
-      createdBy: actorId,
-    })
-    .returning();
+  // Allocate sequenceIndex inside a transaction with a lock on the case's
+  // story rows so concurrent POSTs cannot both claim the same next index.
+  const inserted = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT id FROM ${attackStoryEntries} WHERE ${attackStoryEntries.caseId} = ${caseId} FOR UPDATE`,
+    );
+    const existing = await tx
+      .select({ sequenceIndex: attackStoryEntries.sequenceIndex })
+      .from(attackStoryEntries)
+      .where(eq(attackStoryEntries.caseId, caseId))
+      .orderBy(asc(attackStoryEntries.sequenceIndex));
+    const nextSequenceIndex =
+      existing.length > 0 ? existing[existing.length - 1].sequenceIndex + 1 : 0;
+    const [row] = await tx
+      .insert(attackStoryEntries)
+      .values({
+        id,
+        organisationId,
+        caseId,
+        mappingId: input.mappingId ?? null,
+        techniqueId: input.techniqueId?.trim().toUpperCase() || null,
+        sequenceIndex: nextSequenceIndex,
+        title,
+        description: input.description?.trim() || null,
+        provenance: input.provenance ?? "analyst",
+        sourceRef: input.sourceRef?.trim() || null,
+        occurredAt,
+        createdBy: actorId,
+      })
+      .returning();
+    return row;
+  });
   if (!inserted) throw new AttackStoryError("Story entry could not be created");
 
   await writeTimelineEvent({
@@ -179,21 +186,24 @@ export async function reorderStoryEntryCore(
   const caseRow = await loadCaseInOrg(caseId, organisationId);
   if (!caseRow) throw new AttackStoryError("Case not found", 404);
 
-  const rows = await db
-    .select()
-    .from(attackStoryEntries)
-    .where(eq(attackStoryEntries.caseId, caseId))
-    .orderBy(asc(attackStoryEntries.sequenceIndex));
-  if (!rows.some((r) => r.id === entryId)) {
-    throw new AttackStoryError("Story entry not found", 404);
-  }
+  const clampedTarget = await db.transaction(async (tx) => {
+    // Lock all story rows for the case before computing the new order so
+    // concurrent reorders cannot clobber each other mid-renumber.
+    const rows = await tx
+      .select()
+      .from(attackStoryEntries)
+      .where(eq(attackStoryEntries.caseId, caseId))
+      .orderBy(asc(attackStoryEntries.sequenceIndex))
+      .for("update");
+    if (!rows.some((r) => r.id === entryId)) {
+      throw new AttackStoryError("Story entry not found", 404);
+    }
 
-  const orderedIds = reorderIds(rows.map((r) => r.id), entryId, targetIndex);
-  const byId = new Map(rows.map((r) => [r.id, r]));
-  const reordered = orderedIds.map((id) => byId.get(id)!);
-  const clampedTarget = orderedIds.indexOf(entryId);
+    const orderedIds = reorderIds(rows.map((r) => r.id), entryId, targetIndex);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const reordered = orderedIds.map((id) => byId.get(id)!);
+    const nextTarget = orderedIds.indexOf(entryId);
 
-  await db.transaction(async (tx) => {
     // Two-phase renumber (offset then final) so intermediate writes never
     // collide with the unique (caseId, sequenceIndex) index.
     for (let i = 0; i < reordered.length; i++) {
@@ -208,6 +218,7 @@ export async function reorderStoryEntryCore(
         .set({ sequenceIndex: i })
         .where(eq(attackStoryEntries.id, reordered[i].id));
     }
+    return nextTarget;
   });
 
   await writeTimelineEvent({

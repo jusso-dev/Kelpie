@@ -108,6 +108,7 @@ ALTER TABLE "d3fend_mappings" ADD CONSTRAINT "d3fend_mappings_response_action_id
 ALTER TABLE "d3fend_mappings" ADD CONSTRAINT "d3fend_mappings_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "attack_catalog_versions_status_idx" ON "attack_catalog_versions" USING btree ("status");--> statement-breakpoint
 CREATE UNIQUE INDEX "attack_catalog_versions_version_idx" ON "attack_catalog_versions" USING btree ("version");--> statement-breakpoint
+CREATE UNIQUE INDEX "attack_catalog_versions_one_active_idx" ON "attack_catalog_versions" USING btree ((true)) WHERE "attack_catalog_versions"."status" = 'active';--> statement-breakpoint
 CREATE UNIQUE INDEX "attack_story_case_sequence_idx" ON "attack_story_entries" USING btree ("case_id","sequence_index");--> statement-breakpoint
 CREATE INDEX "attack_story_org_case_idx" ON "attack_story_entries" USING btree ("organisation_id","case_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "attack_mappings_unique_idx" ON "attack_technique_mappings" USING btree ("organisation_id","entity_type","entity_id","technique_id");--> statement-breakpoint

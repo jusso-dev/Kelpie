@@ -80,6 +80,9 @@ export async function getActiveCatalogVersion(): Promise<AttackCatalogVersion | 
     .select()
     .from(attackCatalogVersions)
     .where(eq(attackCatalogVersions.status, "active"))
+    // Prefer most recently activated when a race briefly leaves two actives
+    // (partial unique index prevents this long-term; order is defense-in-depth).
+    .orderBy(desc(attackCatalogVersions.activatedAt), desc(attackCatalogVersions.importedAt))
     .limit(1);
   return row ?? null;
 }
@@ -111,16 +114,25 @@ export async function importCatalogVersion(input: {
   if (input.catalog.techniques.length === 0) {
     throw new AttackCatalogError("Catalog import contained no techniques");
   }
+  // A prior failed attempt for the same version string must not permanently
+  // block retries (BullMQ redelivery / admin re-click). Failed rows have no
+  // technique payload (the insert txn rolled back), so deleting them is safe.
   const existingVersion = await db
-    .select({ id: attackCatalogVersions.id })
+    .select({ id: attackCatalogVersions.id, status: attackCatalogVersions.status })
     .from(attackCatalogVersions)
     .where(eq(attackCatalogVersions.version, version))
     .limit(1);
   if (existingVersion.length > 0) {
-    throw new AttackCatalogError(
-      `Catalog version "${version}" has already been imported`,
-      409,
-    );
+    if (existingVersion[0].status === "failed") {
+      await db
+        .delete(attackCatalogVersions)
+        .where(eq(attackCatalogVersions.id, existingVersion[0].id));
+    } else {
+      throw new AttackCatalogError(
+        `Catalog version "${version}" has already been imported`,
+        409,
+      );
+    }
   }
 
   const versionId = newId("attackver");
@@ -134,20 +146,29 @@ export async function importCatalogVersion(input: {
   });
 
   try {
-    const previousActive = await getActiveCatalogVersion();
-    const previousTechniqueRows = previousActive
-      ? await db
-          .select()
-          .from(attackTechniques)
-          .where(eq(attackTechniques.catalogVersionId, previousActive.id))
-      : [];
-    const merged = mergeCatalogTechniques(
-      previousTechniqueRows.map(toRaw),
-      input.catalog.techniques,
-    );
-    const tacticCount = countDistinctTactics(merged);
-
     await db.transaction(async (tx) => {
+      // Serialize activation against concurrent importers so we never leave
+      // two status=active rows (also enforced by partial unique index).
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('attack_catalog_activate'))`);
+
+      const [previousActive] = await tx
+        .select()
+        .from(attackCatalogVersions)
+        .where(eq(attackCatalogVersions.status, "active"))
+        .orderBy(desc(attackCatalogVersions.activatedAt), desc(attackCatalogVersions.importedAt))
+        .limit(1);
+      const previousTechniqueRows = previousActive
+        ? await tx
+            .select()
+            .from(attackTechniques)
+            .where(eq(attackTechniques.catalogVersionId, previousActive.id))
+        : [];
+      const merged = mergeCatalogTechniques(
+        previousTechniqueRows.map(toRaw),
+        input.catalog.techniques,
+      );
+      const tacticCount = countDistinctTactics(merged);
+
       await tx.insert(attackTechniques).values(
         merged.map((t) => ({
           id: newId("attacktech"),
