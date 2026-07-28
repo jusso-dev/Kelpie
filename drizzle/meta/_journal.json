@@ -225,6 +225,13 @@
       "when": 1785235038855,
       "tag": "0031_asset_identity_context",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1785235561462,
+      "tag": "0032_integration_health",
+      "breakpoints": true
     }
   ]
 }
