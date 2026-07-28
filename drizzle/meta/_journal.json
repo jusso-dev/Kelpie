@@ -281,6 +281,13 @@
       "when": 1785242050949,
       "tag": "0039_stakeholder_portal",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1785242267207,
+      "tag": "0040_improvement_register",
+      "breakpoints": true
     }
   ]
 }

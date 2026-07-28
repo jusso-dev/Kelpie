@@ -79,7 +79,8 @@
     "test:post-incident-review": "tsx scripts/test-post-incident-review.ts",
     "test:investigation-graph": "tsx scripts/test-investigation-graph.ts",
     "test:investigation-console": "tsx scripts/test-investigation-console.ts",
-    "test:stakeholder-portal": "tsx scripts/test-stakeholder-portal.ts"
+    "test:stakeholder-portal": "tsx scripts/test-stakeholder-portal.ts",
+    "test:improvement-register": "tsx scripts/test-improvement-register.ts"
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "^3.1095.0",
