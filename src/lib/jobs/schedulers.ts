@@ -17,6 +17,7 @@ const SYSTEM_SCHEDULES: Array<{
 }> = [
   { id: "system:schedule-sync", every: 60_000, name: "schedule-sync" },
   { id: "system:sla-check", every: 60_000, name: "sla-check" },
+  { id: "system:escalation-check", every: 60_000, name: "escalation-check" },
   { id: "system:deliver-webhooks", every: 60_000, name: "deliver-webhooks" },
   { id: "system:deliver-automations", every: 60_000, name: "deliver-automations" },
   { id: "system:enrich-cases", every: 60_000, name: "enrich-cases" },

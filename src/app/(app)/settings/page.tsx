@@ -56,6 +56,18 @@ export default async function SettingsPage() {
         </div>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <Link
+            href="/settings/teams"
+            className="kelpie-btn kelpie-btn-secondary justify-center"
+          >
+            Teams &amp; queues
+          </Link>
+          <Link
+            href="/settings/escalation-policies"
+            className="kelpie-btn kelpie-btn-secondary justify-center"
+          >
+            Escalation policies
+          </Link>
+          <Link
             href="/settings/integrations"
             className="kelpie-btn kelpie-btn-secondary justify-center"
           >

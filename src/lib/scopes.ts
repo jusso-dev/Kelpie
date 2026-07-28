@@ -32,6 +32,30 @@ export const KNOWN_SCOPES = [
     value: "audit:read",
     label: "Read organisation audit events (sensitive; only grant to admin-issued tokens)",
   },
+  { value: "teams:read", label: "Read teams and team queues" },
+  {
+    value: "teams:write",
+    label: "Create, update, and manage team membership (sensitive; only grant to admin-issued tokens)",
+  },
+  { value: "watchers:read", label: "Read case watchers and hand-offs" },
+  {
+    value: "watchers:write",
+    label: "Add/remove case watchers, create hand-offs, and acknowledge cases",
+  },
+  {
+    value: "escalation_policies:read",
+    label: "Read escalation policies and their run history",
+  },
+  {
+    value: "escalation_policies:write",
+    label:
+      "Create, update, and disable escalation policies (sensitive; only grant to admin-issued tokens)",
+  },
+  {
+    value: "bulk_operations:write",
+    label: "Apply bulk operations across multiple cases",
+  },
+  { value: "workload:read", label: "Read analyst workload and queue-health metrics" },
 ] as const;
 
 export type ScopeValue = (typeof KNOWN_SCOPES)[number]["value"];

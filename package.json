@@ -49,6 +49,12 @@
     "test:evidence-api": "tsx scripts/test-evidence-api.ts",
     "test:audit-redaction": "tsx scripts/test-audit-redaction.ts",
     "test:audit-events-api": "tsx scripts/test-audit-events-api.ts",
+    "test:teams-api": "tsx scripts/test-teams-api.ts",
+    "test:case-ownership-api": "tsx scripts/test-case-ownership-api.ts",
+    "test:escalation-policies-api": "tsx scripts/test-escalation-policies-api.ts",
+    "test:bulk-operations-api": "tsx scripts/test-bulk-operations-api.ts",
+    "test:workload-api": "tsx scripts/test-workload-api.ts",
+    "test:team-queues-ui": "tsx scripts/test-team-queues-ui.ts",
     "test:visual": "tsx scripts/visual-smoke.ts"
   },
   "dependencies": {

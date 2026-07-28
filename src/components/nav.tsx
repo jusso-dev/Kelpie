@@ -9,6 +9,7 @@ import {
   BriefcaseBusiness,
   CircleUserRound,
   Database,
+  Gauge,
   Globe2,
   LayoutDashboard,
   Library,
@@ -25,6 +26,7 @@ import SignOutButton from "./sign-out-button";
 const links = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
   { href: "/cases", label: "Cases", icon: BriefcaseBusiness },
+  { href: "/workload", label: "Workload", icon: Gauge },
   { href: "/tasks", label: "Tasks", icon: ListChecks },
   { href: "/observables", label: "Observables", icon: Database },
   { href: "/ti", label: "Threat intel", icon: Radar },

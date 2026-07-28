@@ -106,6 +106,36 @@ export const evidenceRelevanceEnum = pgEnum("evidence_relevance", [
   "not_relevant",
 ]);
 
+export const teamMemberRoleEnum = pgEnum("team_member_role", [
+  "lead",
+  "member",
+]);
+
+export const escalationActionTypeEnum = pgEnum("escalation_action_type", [
+  "notify",
+  "reassign",
+  "raise_severity",
+]);
+
+export const escalationTriggerTypeEnum = pgEnum("escalation_trigger_type", [
+  "age_minutes",
+  "sla_warning",
+  "sla_breached",
+  "stale_status",
+]);
+
+export const bulkOperationTypeEnum = pgEnum("bulk_operation_type", [
+  "queue_assign",
+  "analyst_assign",
+  "watcher_add",
+  "watcher_remove",
+  "tag_add",
+  "tag_remove",
+  "severity_change",
+  "status_change",
+  "acknowledge",
+]);
+
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Organisations + BetterAuth tables                                          */
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -251,6 +281,64 @@ export const verifications = pgTable("verifications", {
 });
 
 /* ────────────────────────────────────────────────────────────────────────── */
+/* Teams / queues                                                             */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * A team doubles as a specialised queue: work can be assigned to `teams.id`
+ * via `cases.queueId` without any individual owner. Membership governs who
+ * shows up as an assignment/hand-off candidate for the queue; it is not an
+ * access-control list — case read/write access is still governed purely by
+ * organisation + role, same as every other table.
+ */
+export const teams = pgTable(
+  "teams",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("teams_org_name_idx").on(t.organisationId, t.name),
+    index("teams_org_active_idx").on(t.organisationId, t.isActive),
+  ],
+);
+
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    id: text("id").primaryKey(),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: teamMemberRoleEnum("role").notNull().default("member"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("team_members_team_user_idx").on(t.teamId, t.userId),
+    index("team_members_user_idx").on(t.userId),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
 /* Cases                                                                      */
 /* ────────────────────────────────────────────────────────────────────────── */
 
@@ -277,6 +365,19 @@ export const cases = pgTable(
     tlp: tlpEnum("tlp").notNull().default("amber"),
     pap: papEnum("pap").notNull().default("amber"),
     assigneeId: text("assignee_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    assigneeAssignedAt: timestamp("assignee_assigned_at", {
+      withTimezone: true,
+    }),
+    queueId: text("queue_id").references(() => teams.id, {
+      onDelete: "set null",
+    }),
+    queueAssignedAt: timestamp("queue_assigned_at", { withTimezone: true }),
+    queueAssignedBy: text("queue_assigned_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    acknowledgedBy: text("acknowledged_by").references(() => users.id, {
       onDelete: "set null",
     }),
     reporterId: text("reporter_id").references(() => users.id, {
@@ -316,6 +417,16 @@ export const cases = pgTable(
       ),
     index("cases_org_status_idx").on(t.organisationId, t.status),
     index("cases_org_opened_idx").on(t.organisationId, t.openedAt),
+    index("cases_org_assignee_status_idx").on(
+      t.organisationId,
+      t.assigneeId,
+      t.status,
+    ),
+    index("cases_org_queue_status_idx").on(
+      t.organisationId,
+      t.queueId,
+      t.status,
+    ),
   ],
 );
 
@@ -529,6 +640,243 @@ export const caseRelationshipDismissals = pgTable(
     check(
       "case_relationship_dismissals_canonical_order",
       sql.raw(`"case_id_a" < "case_id_b"`),
+    ),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Case ownership: additional assignees, watchers, hand-offs                  */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/** Additional assignees beyond `cases.assigneeId` (the primary owner). */
+export const caseAssignees = pgTable(
+  "case_assignees",
+  {
+    id: text("id").primaryKey(),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    addedBy: text("added_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    addedAt: timestamp("added_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("case_assignees_case_user_idx").on(t.caseId, t.userId),
+    index("case_assignees_org_user_idx").on(t.organisationId, t.userId),
+  ],
+);
+
+/**
+ * Watching a case only ever grants a notification; it never grants or implies
+ * read/write access to the case. Access remains governed solely by
+ * organisation + role, exactly as for every other table.
+ */
+export const caseWatchers = pgTable(
+  "case_watchers",
+  {
+    id: text("id").primaryKey(),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    notifyOnComment: boolean("notify_on_comment").notNull().default(true),
+    notifyOnStatusChange: boolean("notify_on_status_change")
+      .notNull()
+      .default(true),
+    notifyOnAssignment: boolean("notify_on_assignment")
+      .notNull()
+      .default(true),
+    notifyOnEscalation: boolean("notify_on_escalation")
+      .notNull()
+      .default(true),
+    addedBy: text("added_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("case_watchers_case_user_idx").on(t.caseId, t.userId),
+    index("case_watchers_org_user_idx").on(t.organisationId, t.userId),
+  ],
+);
+
+/**
+ * Immutable shift hand-off record: a snapshot of case state plus a note at
+ * the moment ownership moved, not an editable comment. Append-only at the DB
+ * layer (see migration 0021) — application code only ever inserts here.
+ */
+export const caseHandoffs = pgTable(
+  "case_handoffs",
+  {
+    id: text("id").primaryKey(),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    fromUserId: text("from_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    toUserId: text("to_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    toQueueId: text("to_queue_id").references(() => teams.id, {
+      onDelete: "set null",
+    }),
+    note: text("note").notNull(),
+    snapshot: jsonb("snapshot").notNull().default(sql`'{}'::jsonb`),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("case_handoffs_case_idx").on(t.caseId, t.createdAt),
+    index("case_handoffs_org_idx").on(t.organisationId),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Escalation policies                                                       */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * `actions` is restricted at the application layer (src/lib/escalation-core.ts)
+ * to `notify` | `reassign` | `raise_severity` — the executor has no import
+ * path to `src/lib/response-actions/*`, so an escalation policy can never
+ * trigger a destructive response action, by construction rather than by
+ * runtime check alone. Policies are versioned and only ever disabled
+ * (`disabledAt`/`disabledBy`), never deleted, so `escalationRuns` always
+ * references a coherent policy history.
+ */
+export const escalationPolicies = pgTable(
+  "escalation_policies",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    isActive: boolean("is_active").notNull().default(true),
+    version: integer("version").notNull().default(0),
+    triggerType: escalationTriggerTypeEnum("trigger_type").notNull(),
+    triggerConfig: jsonb("trigger_config").notNull().default(sql`'{}'::jsonb`),
+    actions: jsonb("actions").notNull().default(sql`'[]'::jsonb`),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    disabledAt: timestamp("disabled_at", { withTimezone: true }),
+    disabledBy: text("disabled_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+  },
+  (t) => [
+    uniqueIndex("escalation_policies_org_name_idx").on(
+      t.organisationId,
+      t.name,
+    ),
+    index("escalation_policies_org_active_idx").on(
+      t.organisationId,
+      t.isActive,
+    ),
+  ],
+);
+
+/** Append-only execution log for escalation policies (see migration 0021). */
+export const escalationRuns = pgTable(
+  "escalation_runs",
+  {
+    id: text("id").primaryKey(),
+    policyId: text("policy_id").references(() => escalationPolicies.id, {
+      onDelete: "set null",
+    }),
+    policyVersion: integer("policy_version").notNull(),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    actionType: escalationActionTypeEnum("action_type").notNull(),
+    outcome: text("outcome").notNull(),
+    detail: jsonb("detail").notNull().default(sql`'{}'::jsonb`),
+    triggeredAt: timestamp("triggered_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("escalation_runs_case_idx").on(t.caseId, t.triggeredAt),
+    index("escalation_runs_policy_idx").on(t.policyId),
+    index("escalation_runs_org_idx").on(t.organisationId, t.triggeredAt),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Bulk operations                                                           */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * One row per bulk operation request: the batch audit record required
+ * alongside the concise per-case timeline entries each affected case gets.
+ * `outcomes` records exactly which case ids succeeded/failed so a partial
+ * failure is never reported as a silent full success. Append-only (see
+ * migration 0021); `idempotencyKey` is unique per organisation so a
+ * double-submitted bulk request has exactly one effect.
+ */
+export const bulkOperations = pgTable(
+  "bulk_operations",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    operationType: bulkOperationTypeEnum("operation_type").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestedCount: integer("requested_count").notNull(),
+    successCount: integer("success_count").notNull().default(0),
+    failureCount: integer("failure_count").notNull().default(0),
+    outcomes: jsonb("outcomes").notNull().default(sql`'[]'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("bulk_operations_org_idempotency_idx").on(
+      t.organisationId,
+      t.idempotencyKey,
+    ),
+    index("bulk_operations_org_created_idx").on(
+      t.organisationId,
+      t.createdAt,
     ),
   ],
 );
@@ -1568,6 +1916,14 @@ export type Organisation = typeof organisations.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type TwoFactor = typeof twoFactors.$inferSelect;
 export type Case = typeof cases.$inferSelect;
+export type Team = typeof teams.$inferSelect;
+export type TeamMember = typeof teamMembers.$inferSelect;
+export type CaseAssignee = typeof caseAssignees.$inferSelect;
+export type CaseWatcher = typeof caseWatchers.$inferSelect;
+export type CaseHandoff = typeof caseHandoffs.$inferSelect;
+export type EscalationPolicy = typeof escalationPolicies.$inferSelect;
+export type EscalationRun = typeof escalationRuns.$inferSelect;
+export type BulkOperation = typeof bulkOperations.$inferSelect;
 export type CaseTask = typeof caseTasks.$inferSelect;
 export type Observable = typeof observables.$inferSelect;
 export type CaseRelationship = typeof caseRelationships.$inferSelect;

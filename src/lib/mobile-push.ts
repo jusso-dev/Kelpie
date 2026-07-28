@@ -10,7 +10,12 @@ import {
 } from "@/db/schema";
 import { newId } from "@/lib/utils";
 
-export type MobilePushEvent = "sla_breach" | "comment_mention";
+export type MobilePushEvent =
+  | "sla_breach"
+  | "comment_mention"
+  | "watcher_notification"
+  | "escalation_action"
+  | "handoff_created";
 
 export type MobilePushInput = {
   event: MobilePushEvent;

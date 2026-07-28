@@ -26,6 +26,15 @@ export type TimelineEventType =
   | "relationship_created"
   | "relationship_removed"
   | "relationship_suggestion_dismissed"
+  | "queue_assignment_change"
+  | "additional_assignee_added"
+  | "additional_assignee_removed"
+  | "watcher_added"
+  | "watcher_removed"
+  | "handoff_created"
+  | "acknowledged"
+  | "escalation_triggered"
+  | "bulk_operation_applied"
   | "custom";
 
 export async function writeTimelineEvent(opts: {

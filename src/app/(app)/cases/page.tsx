@@ -14,7 +14,7 @@ import {
 import { formatDistanceToNow } from "date-fns";
 import { ArrowUpRight, Filter, Search, ShieldAlert, X } from "lucide-react";
 import { db } from "@/db";
-import { cases, slaPolicies, users } from "@/db/schema";
+import { caseWatchers, cases, slaPolicies, teams, timelineEvents, users } from "@/db/schema";
 import { requireUser } from "@/lib/session";
 import {
   SeverityBadge,
@@ -26,6 +26,12 @@ import {
   KNOWN_PUSH_SOURCE_SYSTEMS,
   sourceSystemLabel,
 } from "@/lib/case-source-identity";
+import {
+  BulkActionBar,
+  CaseRowCheckbox,
+  CaseSelectionProvider,
+  SelectAllCheckbox,
+} from "@/components/cases/bulk-action-bar";
 
 const PAGE_SIZE = 50;
 const STATUSES = [
@@ -48,6 +54,24 @@ const CLASSIFICATIONS = [
 ] as const;
 const TLPS = ["clear", "green", "amber", "amber_strict", "red"] as const;
 const SORTS = ["priority", "recent", "oldest", "severity"] as const;
+const VIEWS = [
+  "watched",
+  "awaiting_third_party",
+  "awaiting_approval",
+  "stale",
+  "reopened",
+] as const;
+
+const OPERATIONAL_VIEWS: Array<{ label: string; href: string }> = [
+  { label: "Unassigned", href: "?assignee=unassigned" },
+  { label: "My cases", href: "?assignee=mine" },
+  { label: "Watched cases", href: "?view=watched" },
+  { label: "SLA warning/breached", href: "?sla=risk" },
+  { label: "Awaiting third party", href: "?view=awaiting_third_party" },
+  { label: "Awaiting approval", href: "?view=awaiting_approval" },
+  { label: "Stale investigation", href: "?view=stale" },
+  { label: "Recently reopened", href: "?view=reopened" },
+];
 
 type RawSearchParams = Promise<Record<string, string | string[] | undefined>>;
 type TeamMember = { id: string; name: string };
@@ -59,10 +83,12 @@ type QueueParams = {
   classification?: (typeof CLASSIFICATIONS)[number];
   tlp?: (typeof TLPS)[number];
   assignee?: string;
+  queue?: string;
   tag?: string;
   dataTag?: string;
   source?: string;
   sla?: "risk";
+  view?: (typeof VIEWS)[number];
   sort: (typeof SORTS)[number];
   page: number;
 };
@@ -98,6 +124,7 @@ function normaliseSource(raw: string | undefined): string | undefined {
 function normaliseParams(
   raw: Record<string, string | string[] | undefined>,
   team: TeamMember[],
+  teamQueues: TeamMember[],
 ): QueueParams {
   const rawAssignee = first(raw.assignee);
   const assignee =
@@ -105,6 +132,13 @@ function normaliseParams(
       ? rawAssignee
       : team.some((member) => member.id === rawAssignee)
         ? rawAssignee
+        : undefined;
+  const rawQueue = first(raw.queue);
+  const queue =
+    rawQueue === "unassigned"
+      ? rawQueue
+      : teamQueues.some((t) => t.id === rawQueue)
+        ? rawQueue
         : undefined;
   const rawPage = Number(first(raw.page));
   return {
@@ -114,10 +148,12 @@ function normaliseParams(
     classification: pick(CLASSIFICATIONS, first(raw.classification)),
     tlp: pick(TLPS, first(raw.tlp)),
     assignee,
+    queue,
     tag: cleanText(first(raw.tag), 60),
     dataTag: cleanText(first(raw.dataTag), 60),
     source: normaliseSource(first(raw.source)),
     sla: first(raw.sla) === "risk" ? "risk" : undefined,
+    view: pick(VIEWS, first(raw.view)),
     sort: pick(SORTS, first(raw.sort)) ?? "priority",
     page:
       Number.isInteger(rawPage) && rawPage > 0
@@ -147,7 +183,8 @@ export default async function CasesPage({
   searchParams: RawSearchParams;
 }) {
   const user = await requireUser();
-  const [rawParams, team, sourceSystemRows] = await Promise.all([
+  const canBulkEdit = user.role === "admin" || user.role === "analyst";
+  const [rawParams, team, sourceSystemRows, teamQueues] = await Promise.all([
     searchParams,
     db
       .select({ id: users.id, name: users.name })
@@ -165,8 +202,13 @@ export default async function CasesPage({
       )
       .orderBy(asc(cases.sourceSystem))
       .limit(50),
+    db
+      .select({ id: teams.id, name: teams.name })
+      .from(teams)
+      .where(and(eq(teams.organisationId, user.organisationId), eq(teams.isActive, true)))
+      .orderBy(asc(teams.name)),
   ]);
-  const params = normaliseParams(rawParams, team);
+  const params = normaliseParams(rawParams, team, teamQueues);
   // Known push producers (e.g. Tawny) are always offered even if this org has
   // no cases yet; managed connectors are only offered once observed, since
   // their identifiers are per-org connection ids.
@@ -203,11 +245,48 @@ export default async function CasesPage({
   } else if (params.assignee) {
     filters.push(eq(cases.assigneeId, params.assignee));
   }
+  if (params.queue === "unassigned") {
+    filters.push(isNull(cases.queueId));
+  } else if (params.queue) {
+    filters.push(eq(cases.queueId, params.queue));
+  }
   if (params.tag) filters.push(sql`${cases.tags} ? ${params.tag}`);
   if (params.dataTag) {
     filters.push(sql`${cases.dataClassificationTags} ? ${params.dataTag}`);
   }
   if (params.source) filters.push(eq(cases.sourceSystem, params.source));
+
+  // Built-in operational views not already covered by a granular filter
+  // above (unassigned/mine live on `assignee`, SLA warning/breached lives on
+  // `sla=risk`).
+  if (params.view === "watched") {
+    filters.push(
+      sql`EXISTS (SELECT 1 FROM ${caseWatchers} WHERE ${caseWatchers.caseId} = ${cases.id} AND ${caseWatchers.userId} = ${user.id})`,
+    );
+  } else if (params.view === "awaiting_third_party") {
+    filters.push(sql`${cases.tags} ? 'awaiting-third-party'`);
+  } else if (params.view === "awaiting_approval") {
+    filters.push(sql`${cases.tags} ? 'awaiting-approval'`);
+  } else if (params.view === "stale") {
+    filters.push(sql`
+      ${cases.status} <> 'closed'
+      AND NOT EXISTS (
+        SELECT 1 FROM ${timelineEvents}
+        WHERE ${timelineEvents.caseId} = ${cases.id}
+          AND ${timelineEvents.occurredAt} >= now() - interval '7 days'
+      )
+    `);
+  } else if (params.view === "reopened") {
+    filters.push(sql`
+      EXISTS (
+        SELECT 1 FROM ${timelineEvents}
+        WHERE ${timelineEvents.caseId} = ${cases.id}
+          AND ${timelineEvents.eventType} = 'status_change'
+          AND ${timelineEvents.payload}->>'from' = 'closed'
+          AND ${timelineEvents.occurredAt} >= now() - interval '7 days'
+      )
+    `);
+  }
 
   const slaRisk = sql<boolean>`(
     ${cases.status} <> 'closed'
@@ -270,11 +349,13 @@ export default async function CasesPage({
       tags: cases.tags,
       dataClassificationTags: cases.dataClassificationTags,
       assigneeName: users.name,
+      queueName: teams.name,
       openedAt: cases.openedAt,
       slaRisk,
     })
     .from(cases)
     .leftJoin(users, eq(users.id, cases.assigneeId))
+    .leftJoin(teams, eq(teams.id, cases.queueId))
     .where(where)
     .orderBy(...orderBy)
     .limit(PAGE_SIZE)
@@ -290,10 +371,12 @@ export default async function CasesPage({
     params.classification,
     params.tlp,
     params.assignee,
+    params.queue,
     params.tag,
     params.dataTag,
     params.source,
     params.sla,
+    params.view,
   ].filter(Boolean).length;
   const firstResult = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const lastResult = Math.min(page * PAGE_SIZE, total);
@@ -328,9 +411,22 @@ export default async function CasesPage({
         </div>
       </header>
 
+      <nav aria-label="Built-in operational views" className="flex flex-wrap gap-2">
+        {OPERATIONAL_VIEWS.map((view) => (
+          <Link
+            key={view.label}
+            href={`/cases${view.href}`}
+            className="kelpie-btn kelpie-btn-ghost text-xs"
+          >
+            {view.label}
+          </Link>
+        ))}
+      </nav>
+
       <QueueFilters
         params={params}
         team={team}
+        teamQueues={teamQueues}
         sourceOptions={sourceSystemOptions}
         activeFilters={activeFilters}
       />
@@ -343,85 +439,103 @@ export default async function CasesPage({
         <p>Page {page} of {totalPages}</p>
       </div>
 
-      <div className="kelpie-panel kelpie-scroll-x" tabIndex={0} aria-label="Cases table">
-        <table className="kelpie-table">
-          <thead>
-            <tr>
-              <th>Number</th>
-              <th>Title</th>
-              <th>Status</th>
-              <th>Severity</th>
-              <th>SLA</th>
-              <th>TLP</th>
-              <th>Classification</th>
-              <th>Tags</th>
-              <th>Assignee</th>
-              <th>Opened</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
+      <CaseSelectionProvider>
+        <div className="kelpie-panel kelpie-scroll-x" tabIndex={0} aria-label="Cases table">
+          <table className="kelpie-table">
+            <thead>
               <tr>
-                <td colSpan={10} className="py-10 text-center text-slate-400">
-                  <p>No cases match these filters.</p>
-                  {activeFilters > 0 ? (
-                    <Link href="/cases" className="kelpie-link mt-2 inline-block">
-                      Clear filters
-                    </Link>
-                  ) : (
-                    <Link href="/cases/new" className="kelpie-link mt-2 inline-block">
-                      Open the first case
-                    </Link>
-                  )}
-                </td>
+                {canBulkEdit ? (
+                  <th>
+                    <SelectAllCheckbox caseIds={rows.map((c) => c.id)} />
+                  </th>
+                ) : null}
+                <th>Number</th>
+                <th>Title</th>
+                <th>Status</th>
+                <th>Severity</th>
+                <th>SLA</th>
+                <th>TLP</th>
+                <th>Classification</th>
+                <th>Tags</th>
+                <th>Queue</th>
+                <th>Assignee</th>
+                <th>Opened</th>
               </tr>
-            ) : (
-              rows.map((c) => (
-                <tr key={c.id}>
-                  <td className="font-mono text-xs text-slate-400">{c.caseNumber}</td>
-                  <td className="max-w-sm">
-                    <Link href={`/cases/${c.id}`} className="kelpie-link font-medium">
-                      {c.title}
-                    </Link>
-                  </td>
-                  <td><StatusBadge value={c.status} /></td>
-                  <td><SeverityBadge value={c.severity} /></td>
-                  <td>
-                    {c.slaRisk ? (
-                      <span className="kelpie-badge text-amber-300">at risk</span>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={canBulkEdit ? 12 : 11} className="py-10 text-center text-slate-400">
+                    <p>No cases match these filters.</p>
+                    {activeFilters > 0 ? (
+                      <Link href="/cases" className="kelpie-link mt-2 inline-block">
+                        Clear filters
+                      </Link>
                     ) : (
-                      <span className="text-xs text-slate-500">clear</span>
+                      <Link href="/cases/new" className="kelpie-link mt-2 inline-block">
+                        Open the first case
+                      </Link>
                     )}
                   </td>
-                  <td><TlpBadge value={c.tlp} /></td>
-                  <td className="text-xs capitalize text-slate-300">
-                    {c.classification.replace(/_/g, " ")}
-                  </td>
-                  <td>
-                    <div className="flex max-w-64 flex-wrap gap-1">
-                      {(Array.isArray(c.dataClassificationTags)
-                        ? (c.dataClassificationTags as string[])
-                        : []
-                      ).map((tag) => (
-                        <TagBadge key={`data-${tag}`} value={tag} tone="classification" />
-                      ))}
-                      {(Array.isArray(c.tags) ? (c.tags as string[]) : []).map((tag) => (
-                        <TagBadge key={tag} value={tag} />
-                      ))}
-                    </div>
-                  </td>
-                  <td className="text-xs text-slate-300">
-                    {c.assigneeName ?? <span className="text-slate-500">Unassigned</span>}
-                  </td>
-                  <td className="whitespace-nowrap text-xs text-slate-400">
-                    {formatDistanceToNow(c.openedAt, { addSuffix: true })}
-                  </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              ) : (
+                rows.map((c) => (
+                  <tr key={c.id}>
+                    {canBulkEdit ? (
+                      <td>
+                        <CaseRowCheckbox caseId={c.id} label={c.caseNumber} />
+                      </td>
+                    ) : null}
+                    <td className="font-mono text-xs text-slate-400">{c.caseNumber}</td>
+                    <td className="max-w-sm">
+                      <Link href={`/cases/${c.id}`} className="kelpie-link font-medium">
+                        {c.title}
+                      </Link>
+                    </td>
+                    <td><StatusBadge value={c.status} /></td>
+                    <td><SeverityBadge value={c.severity} /></td>
+                    <td>
+                      {c.slaRisk ? (
+                        <span className="kelpie-badge text-amber-300">at risk</span>
+                      ) : (
+                        <span className="text-xs text-slate-500">clear</span>
+                      )}
+                    </td>
+                    <td><TlpBadge value={c.tlp} /></td>
+                    <td className="text-xs capitalize text-slate-300">
+                      {c.classification.replace(/_/g, " ")}
+                    </td>
+                    <td>
+                      <div className="flex max-w-64 flex-wrap gap-1">
+                        {(Array.isArray(c.dataClassificationTags)
+                          ? (c.dataClassificationTags as string[])
+                          : []
+                        ).map((tag) => (
+                          <TagBadge key={`data-${tag}`} value={tag} tone="classification" />
+                        ))}
+                        {(Array.isArray(c.tags) ? (c.tags as string[]) : []).map((tag) => (
+                          <TagBadge key={tag} value={tag} />
+                        ))}
+                      </div>
+                    </td>
+                    <td className="text-xs text-slate-300">
+                      {c.queueName ?? <span className="text-slate-500">No queue</span>}
+                    </td>
+                    <td className="text-xs text-slate-300">
+                      {c.assigneeName ?? <span className="text-slate-500">Unassigned</span>}
+                    </td>
+                    <td className="whitespace-nowrap text-xs text-slate-400">
+                      {formatDistanceToNow(c.openedAt, { addSuffix: true })}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {canBulkEdit ? <BulkActionBar teams={teamQueues} users={team} /> : null}
+      </CaseSelectionProvider>
 
       {totalPages > 1 ? (
         <nav className="flex items-center justify-between gap-3" aria-label="Case pages">
@@ -450,11 +564,13 @@ export default async function CasesPage({
 function QueueFilters({
   params,
   team,
+  teamQueues,
   sourceOptions,
   activeFilters,
 }: {
   params: QueueParams;
   team: TeamMember[];
+  teamQueues: TeamMember[];
   sourceOptions: SourceOption[];
   activeFilters: number;
 }) {
@@ -524,6 +640,13 @@ function QueueFilters({
           <option value="unassigned">Unassigned</option>
           {team.map((member) => (
             <option key={member.id} value={member.id}>{member.name}</option>
+          ))}
+        </SelectFilter>
+        <SelectFilter label="Queue" name="queue" value={params.queue}>
+          <option value="">Any queue</option>
+          <option value="unassigned">No queue</option>
+          {teamQueues.map((t) => (
+            <option key={t.id} value={t.id}>{t.name}</option>
           ))}
         </SelectFilter>
         <SelectFilter label="Source" name="source" value={params.source}>

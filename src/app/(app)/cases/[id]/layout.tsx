@@ -14,6 +14,7 @@ import { CaseCollaborationProvider } from "@/components/case-collaboration";
 
 const tabs = [
   { key: "overview", label: "Overview", path: "" },
+  { key: "queue", label: "Queue & watchers", path: "/queue" },
   { key: "tasks", label: "Tasks", path: "/tasks" },
   { key: "observables", label: "Observables", path: "/observables" },
   { key: "timeline", label: "Timeline", path: "/timeline" },

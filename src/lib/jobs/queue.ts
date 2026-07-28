@@ -14,7 +14,8 @@ export type KelpieJobName =
   | "prune-presence"
   | "scan-evidence"
   | "export-audit-events"
-  | "purge-audit-events";
+  | "purge-audit-events"
+  | "escalation-check";
 
 export type KelpieJobData = {
   feedId?: string;
