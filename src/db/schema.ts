@@ -414,6 +414,33 @@ export const investigationGraphProvenanceEnum = pgEnum(
   ["provider", "analyst", "rule"],
 );
 
+/** Read vs write classification for investigation console commands (issue #62). */
+export const investigationAccessClassEnum = pgEnum(
+  "investigation_access_class",
+  ["read", "write"],
+);
+
+export const investigationExecutionStatusEnum = pgEnum(
+  "investigation_execution_status",
+  [
+    "queued",
+    "running",
+    "awaiting_approval",
+    "succeeded",
+    "failed",
+    "cancelled",
+    "rejected",
+    "timed_out",
+  ],
+);
+
+export const investigationResultRendererEnum = pgEnum(
+  "investigation_result_renderer",
+  ["table", "json", "markdown"],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+
 /**
  * Case visibility / need-to-know compartments (issue #61).
  * `organisation` is the default open-within-tenant mode; the other three
@@ -3702,6 +3729,197 @@ export const reviewImprovementProposals = pgTable(
   ],
 );
 
+/* Investigation console executions + result storage (issue #62)              */
+/* Commands themselves live in a trusted in-code handler registry. These     */
+/* tables record every execution, bounded results, and evidence links.        */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * One governed run of a registered investigation command. Parameters are
+ * stored only after redaction. Large results land in object storage via
+ * `resultStorageKey` + `resultSha256`; small results may also keep a
+ * size-capped inline summary for the UI.
+ */
+export const investigationExecutions = pgTable(
+  "investigation_executions",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    /** Case context when the command was run from a case workspace. */
+    caseId: text("case_id").references(() => cases.id, { onDelete: "set null" }),
+    /** Optional entity / evidence / alert context (org-scoped ids only). */
+    entityId: text("entity_id").references(() => entities.id, {
+      onDelete: "set null",
+    }),
+    evidenceId: text("evidence_id").references(() => attachments.id, {
+      onDelete: "set null",
+    }),
+    alertId: text("alert_id").references(() => alerts.id, {
+      onDelete: "set null",
+    }),
+    /** Stable handler name from the trusted registry (e.g. kelpie.previous_cases). */
+    commandName: text("command_name").notNull(),
+    /** Handler version string at execution time (reproducibility). */
+    commandVersion: text("command_version").notNull(),
+    accessClass: investigationAccessClassEnum("access_class").notNull(),
+    status: investigationExecutionStatusEnum("status")
+      .notNull()
+      .default("queued"),
+    resultRenderer: investigationResultRendererEnum("result_renderer")
+      .notNull()
+      .default("json"),
+    /** Parameters after redaction — never raw secrets. Public API only. */
+    paramsRedacted: jsonb("params_redacted")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    /**
+     * Sealed pre-approval params for write dual-control. Never returned on
+     * public APIs. Cleared once the execution leaves awaiting_approval.
+     */
+    paramsSealed: jsonb("params_sealed"),
+    /**
+     * Size-bounded, redacted result summary for list/detail UI. Full payload
+     * may live in result storage when larger than the inline cap.
+     */
+    resultSummary: jsonb("result_summary"),
+    /** Object-storage key for the full result payload (org-scoped). */
+    resultStorageKey: text("result_storage_key"),
+    resultSha256: text("result_sha256"),
+    resultSizeBytes: integer("result_size_bytes"),
+    /** Provider correlation id when the handler returns one. */
+    providerRequestId: text("provider_request_id"),
+    requestedBy: text("requested_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    approvedBy: text("approved_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    rejectedBy: text("rejected_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    rejectedAt: timestamp("rejected_at", { withTimezone: true }),
+    rejectionReason: text("rejection_reason"),
+    /** Approval window expiry for write-class commands. */
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    cancelRequestedAt: timestamp("cancel_requested_at", {
+      withTimezone: true,
+    }),
+    cancelRequestedBy: text("cancel_requested_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    errorSummary: text("error_summary"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    /** When the result was saved as case evidence (attachments row). */
+    savedEvidenceId: text("saved_evidence_id").references(() => attachments.id, {
+      onDelete: "set null",
+    }),
+    /** Linked entity ids (org-scoped) after analyst attach. */
+    linkedEntityIds: jsonb("linked_entity_ids")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** Linked alert ids (org-scoped) after analyst attach. */
+    linkedAlertIds: jsonb("linked_alert_ids")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    startedAt: timestamp("started_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("investigation_executions_org_started_idx").on(
+      t.organisationId,
+      t.startedAt,
+    ),
+    index("investigation_executions_case_idx").on(t.caseId),
+    index("investigation_executions_org_status_idx").on(
+      t.organisationId,
+      t.status,
+    ),
+    index("investigation_executions_command_idx").on(
+      t.organisationId,
+      t.commandName,
+    ),
+    uniqueIndex("investigation_executions_org_idempotency_idx").on(
+      t.organisationId,
+      t.idempotencyKey,
+    ),
+  ],
+);
+
+/**
+ * Durable pointer to a stored investigation result blob. Separated so the
+ * execution row can stay lean while still retaining hash/size provenance for
+ * evidence save and audit. One row per stored payload (execution may share).
+ */
+export const investigationResultRefs = pgTable(
+  "investigation_result_refs",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    executionId: text("execution_id")
+      .notNull()
+      .references(() => investigationExecutions.id, { onDelete: "cascade" }),
+    storageKey: text("storage_key").notNull(),
+    sha256: text("sha256").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    contentType: text("content_type")
+      .notNull()
+      .default("application/json"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("investigation_result_refs_execution_idx").on(t.executionId),
+    index("investigation_result_refs_org_idx").on(t.organisationId),
+    uniqueIndex("investigation_result_refs_storage_key_idx").on(t.storageKey),
+  ],
+);
+
+/**
+ * Per-user favourites / suggested query templates for the investigation
+ * console. Params are stored redacted and re-validated on next execute.
+ */
+export const investigationCommandFavourites = pgTable(
+  "investigation_command_favourites",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    commandName: text("command_name").notNull(),
+    label: text("label").notNull(),
+    paramsTemplate: jsonb("params_template")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("investigation_command_favourites_user_idx").on(
+      t.organisationId,
+      t.userId,
+    ),
+    uniqueIndex("investigation_command_favourites_user_label_idx").on(
+      t.organisationId,
+      t.userId,
+      t.label,
+    ),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Mobile devices + push delivery outbox                                      */
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -5684,6 +5902,12 @@ export type ReviewFollowUpAction = typeof reviewFollowUpActions.$inferSelect;
 export type KnowledgeArticle = typeof knowledgeArticles.$inferSelect;
 export type ReviewImprovementProposal =
   typeof reviewImprovementProposals.$inferSelect;
+export type InvestigationExecution =
+  typeof investigationExecutions.$inferSelect;
+export type InvestigationResultRef =
+  typeof investigationResultRefs.$inferSelect;
+export type InvestigationCommandFavourite =
+  typeof investigationCommandFavourites.$inferSelect;
 export type TiFeed = typeof tiFeeds.$inferSelect;
 export type TiIndicator = typeof tiIndicators.$inferSelect;
 export type CaseSource = typeof caseSources.$inferSelect;

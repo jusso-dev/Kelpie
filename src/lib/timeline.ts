@@ -54,6 +54,7 @@ export type TimelineEventType =
   | "correlation_suggestion_accepted"
   | "correlation_suggestion_rejected"
   | "source_sync"
+  | "investigation_command"
   | "custom";
 
 export async function writeTimelineEvent(opts: {

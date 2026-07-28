@@ -135,6 +135,16 @@ export const KNOWN_SCOPES = [
     label:
       "Manage review templates, org review policy, and approve reviews (sensitive; admin-issued tokens)",
   },
+  {
+    value: "investigation:read",
+    label:
+      "List investigation console commands, execution history, and results",
+  },
+  {
+    value: "investigation:execute",
+    label:
+      "Execute registered investigation commands, cancel in-flight runs, and save results as evidence",
+  },
 ] as const;
 
 export type ScopeValue = (typeof KNOWN_SCOPES)[number]["value"];

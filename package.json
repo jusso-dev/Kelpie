@@ -77,7 +77,8 @@
     "test:access-core": "tsx scripts/test-access-core.ts",
     "test:report-templates": "tsx scripts/test-report-templates.ts",
     "test:post-incident-review": "tsx scripts/test-post-incident-review.ts",
-    "test:investigation-graph": "tsx scripts/test-investigation-graph.ts"
+    "test:investigation-graph": "tsx scripts/test-investigation-graph.ts",
+    "test:investigation-console": "tsx scripts/test-investigation-console.ts"
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "^3.1095.0",

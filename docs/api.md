@@ -38,6 +38,8 @@ Errors return `{ "error": "..." }` with an appropriate HTTP status (`400` invali
 | `reviews:read` | Read post-incident reviews, revisions, follow-ups, knowledge articles, and improvement proposals |
 | `reviews:write` | Create and edit post-incident reviews, follow-ups, knowledge articles, and improvement proposals |
 | `reviews:admin` | Manage review templates, org review policy, and approve reviews (sensitive; admin-issued tokens) |
+| `investigation:read` | List investigation console commands, execution history, and results |
+| `investigation:execute` | Execute registered investigation commands, cancel runs, approve/reject writes, and save results as evidence |
 
 **Empty scopes grant nothing.** A token whose `scopes` array is empty fails every scope check (`403`). Sensitive scopes (`alerts:raw_payload:read`, `evidence:override`, `audit:read`, `cases:override_closure`, `reports:admin`, `reviews:admin`) are never implied. Migration `0026_empty_token_scopes` rewrites any pre-existing empty-scope tokens to an explicit non-sensitive set so ordinary integrations keep working without retaining those sensitive powers — re-issue tokens that intentionally need sensitive scopes from Settings after upgrading.
 
@@ -1131,6 +1133,65 @@ Personal default only via API tokens. Body: `{ "scope": "personal", "viewId": "c
 | `integrations:write` | Pause/resume connections, run connection tests, resolve sync conflicts, toggle outbound writes |
 | `case_views:read` | Read saved case views, complete counts, widgets, and bulk-preset previews |
 | `case_views:write` | Create, update, delete, duplicate, and set personal defaults for saved case views |
+| `investigation:read` | List investigation console commands, execution history, and results |
+| `investigation:execute` | Execute registered investigation commands, cancel runs, approve/reject writes, and save results as evidence |
 
 **Empty scopes grant nothing.** A token whose `scopes` array is empty fails every scope check (`403`). Sensitive scopes (`alerts:raw_payload:read`, `evidence:override`, `audit:read`) are never implied. Migration `0026_empty_token_scopes` rewrites any pre-existing empty-scope tokens to an explicit non-sensitive set so ordinary integrations keep working without retaining those sensitive powers — re-issue tokens that intentionally need sensitive scopes from Settings after upgrading.
+
+## Investigation console
+
+Governed analyst investigation queries and connector commands (issue #62). Only trusted, code-registered handlers may run. Arbitrary shell, user scripts, executable code, and free-form destination URLs are prohibited. Parameters are schema-validated server-side. Results are redacted, size-bounded, and tenant-scoped. Write-class commands require dual-control approval (a different user must approve).
+
+Registered handlers (initial set):
+
+| Command | Class | Notes |
+| --- | --- | --- |
+| `kelpie.previous_cases` | read | Previous org cases sharing an observable value |
+| `virustotal.report` | read | VirusTotal summary (mock when unconfigured); fixed VT API paths only |
+| `kelpie.flag_entity_reviewed` | write | Append entity review note; requires approval |
+
+### `GET /api/v1/investigation/commands`
+List registered command descriptors (name, version, parameters, scopes, limits, approval). Scope: `investigation:read`.
+
+### `GET /api/v1/investigation/executions`
+History. Query: `caseId`, `commandName`, `limit`. When `caseId` is set, case compartment access is required. Scope: `investigation:read`.
+
+### `POST /api/v1/investigation/executions`
+```json
+{
+  "commandName": "kelpie.previous_cases",
+  "params": { "value": "203.0.113.10", "type": "ip", "limit": 10 },
+  "caseId": "case_...",
+  "entityId": "ent_...",
+  "idempotencyKey": "optional-client-key"
+}
+```
+Executes a registered command in case/entity/evidence/alert context. Read commands run immediately; write commands enter `awaiting_approval`. Scope: `investigation:execute` plus each handler's `requiredScopes`. Case context uses `authorizeCase(..., "edit")`.
+
+### `GET /api/v1/investigation/executions/{id}`
+Optional `?includeResult=1` for full stored result payload. Scope: `investigation:read`.
+
+### `POST /api/v1/investigation/executions/{id}/cancel`
+Cancel queued/awaiting approval, or best-effort cancel a running execution. Scope: `investigation:execute`.
+
+### `POST /api/v1/investigation/executions/{id}/approve`
+Approve a write-class execution (approver must differ from requester). Scope: `investigation:execute`.
+
+### `POST /api/v1/investigation/executions/{id}/reject`
+```json
+{ "reason": "Not needed" }
+```
+Scope: `investigation:execute`.
+
+### `POST /api/v1/investigation/executions/{id}/save-evidence`
+```json
+{ "caseId": "case_..." }
+```
+Saves the result as case evidence, preserving command name/version, redacted params, provider request id, timestamps, and SHA-256. Scopes: `investigation:execute` and `evidence:write`.
+
+### `POST /api/v1/investigation/executions/{id}/links`
+```json
+{ "entityIds": ["ent_..."], "alertIds": ["alert_..."] }
+```
+Link result to org-scoped entities/alerts. Scope: `investigation:execute`.
 
