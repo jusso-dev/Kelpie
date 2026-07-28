@@ -4172,6 +4172,260 @@ export type EntityContextMatchReview =
 export type ContextImportRun = typeof contextImportRuns.$inferSelect;
 export type CasePriorityScore = typeof casePriorityScores.$inferSelect;
 
+
+/* Integration health, credentials, bidirectional sync (issue #60)            */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Durable per-connection health and control plane shared by case sources,
+ * TI feeds, webhooks, inbound push producers, enrichers, and response-action
+ * connectors. Never stores secrets — only typed status, redacted summaries,
+ * rate-limit/lag counters, cursor markers, and pause/test audit stamps.
+ *
+ * `connectionKind` + `connectionId` are polymorphic refs into the existing
+ * connector tables (or a stable slug for push producers such as `tawny`).
+ */
+export const integrationConnectionStates = pgTable(
+  "integration_connection_states",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    connectionKind: text("connection_kind").notNull(),
+    connectionId: text("connection_id").notNull(),
+    displayName: text("display_name").notNull().default(""),
+    status: text("status").notNull().default("unknown"),
+    errorCategory: text("error_category"),
+    errorSummary: text("error_summary"),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+    lastSuccessAt: timestamp("last_success_at", { withTimezone: true }),
+    rateLimitRemaining: integer("rate_limit_remaining"),
+    rateLimitResetAt: timestamp("rate_limit_reset_at", { withTimezone: true }),
+    queueDepth: integer("queue_depth"),
+    pollingLagSeconds: integer("polling_lag_seconds"),
+    webhookSubscriptionExpiresAt: timestamp("webhook_subscription_expires_at", {
+      withTimezone: true,
+    }),
+    backfillState: text("backfill_state").notNull().default("idle"),
+    lastSourceCursor: text("last_source_cursor"),
+    readPermissionOk: boolean("read_permission_ok"),
+    writePermissionOk: boolean("write_permission_ok"),
+    /** Explicit admin enablement for outbound provider writes. Default off. */
+    writeEnabled: boolean("write_enabled").notNull().default(false),
+    isPaused: boolean("is_paused").notNull().default(false),
+    pausedAt: timestamp("paused_at", { withTimezone: true }),
+    pausedBy: text("paused_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    lastTestAt: timestamp("last_test_at", { withTimezone: true }),
+    lastTestResult: text("last_test_result"),
+    lastTestErrorCategory: text("last_test_error_category"),
+    lastTestErrorSummary: text("last_test_error_summary"),
+    /** Non-secret diagnostic bag only (counts, ids, flags). Never credentials. */
+    metadata: jsonb("metadata").notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("integration_connection_states_org_kind_id_idx").on(
+      t.organisationId,
+      t.connectionKind,
+      t.connectionId,
+    ),
+    index("integration_connection_states_org_status_idx").on(
+      t.organisationId,
+      t.status,
+    ),
+  ],
+);
+
+/**
+ * Credential *references* for a connection. Plaintext secrets never land
+ * here — only opaque reference ids, fingerprints (e.g. last-4 / hash prefix),
+ * consented scopes, expiry, and rotation state for advance warnings.
+ */
+export const integrationCredentials = pgTable(
+  "integration_credentials",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    connectionKind: text("connection_kind").notNull(),
+    connectionId: text("connection_id").notNull(),
+    label: text("label").notNull(),
+    reference: text("reference").notNull(),
+    fingerprint: text("fingerprint"),
+    consentedScopes: jsonb("consented_scopes")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    rotatedAt: timestamp("rotated_at", { withTimezone: true }),
+    rotationState: text("rotation_state").notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("integration_credentials_org_kind_id_label_idx").on(
+      t.organisationId,
+      t.connectionKind,
+      t.connectionId,
+      t.label,
+    ),
+    index("integration_credentials_org_expires_idx").on(
+      t.organisationId,
+      t.expiresAt,
+    ),
+  ],
+);
+
+/**
+ * Per-field bidirectional sync policy for a connection. Outbound is always
+ * off unless `outboundEnabled` is true *and* the field policy permits a
+ * write direction. Default policies live in application code and are
+ * materialised on first use.
+ */
+export const integrationSyncPolicies = pgTable(
+  "integration_sync_policies",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    connectionKind: text("connection_kind").notNull(),
+    connectionId: text("connection_id").notNull(),
+    fieldPolicies: jsonb("field_policies").notNull().default(sql`'{}'::jsonb`),
+    outboundEnabled: boolean("outbound_enabled").notNull().default(false),
+    outboundScopes: jsonb("outbound_scopes")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    freshnessThresholdMinutes: integer("freshness_threshold_minutes")
+      .notNull()
+      .default(60),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("integration_sync_policies_org_kind_id_idx").on(
+      t.organisationId,
+      t.connectionKind,
+      t.connectionId,
+    ),
+  ],
+);
+
+/** Review queue for fields under `manual_conflict` (or last-write race). */
+export const integrationSyncConflicts = pgTable(
+  "integration_sync_conflicts",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    connectionKind: text("connection_kind").notNull(),
+    connectionId: text("connection_id").notNull(),
+    caseId: text("case_id").references(() => cases.id, { onDelete: "cascade" }),
+    fieldName: text("field_name").notNull(),
+    kelpieValue: jsonb("kelpie_value"),
+    sourceValue: jsonb("source_value"),
+    kelpieUpdatedAt: timestamp("kelpie_updated_at", { withTimezone: true }),
+    sourceUpdatedAt: timestamp("source_updated_at", { withTimezone: true }),
+    kelpieProvenance: text("kelpie_provenance"),
+    sourceProvenance: text("source_provenance"),
+    status: text("status").notNull().default("open"),
+    resolvedBy: text("resolved_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("integration_sync_conflicts_org_status_idx").on(
+      t.organisationId,
+      t.status,
+    ),
+    index("integration_sync_conflicts_case_idx").on(t.caseId),
+  ],
+);
+
+/**
+ * Outbound (and future inbound-ack) write lineage. Every provider write keeps
+ * idempotency key, provider request id, redacted request/response summaries,
+ * attempt chain, and resulting source version. Never stores secrets.
+ */
+export const integrationSyncWrites = pgTable(
+  "integration_sync_writes",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    connectionKind: text("connection_kind").notNull(),
+    connectionId: text("connection_id").notNull(),
+    caseId: text("case_id").references(() => cases.id, { onDelete: "set null" }),
+    fieldName: text("field_name").notNull(),
+    direction: text("direction").notNull().default("outbound"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    providerRequestId: text("provider_request_id"),
+    requestSummary: jsonb("request_summary")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    responseSummary: jsonb("response_summary")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    status: text("status").notNull().default("pending"),
+    attempt: integer("attempt").notNull().default(1),
+    parentWriteId: text("parent_write_id"),
+    rootWriteId: text("root_write_id"),
+    sourceVersion: text("source_version"),
+    lastErrorCategory: text("last_error_category"),
+    lastErrorSummary: text("last_error_summary"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("integration_sync_writes_org_idempotency_idx").on(
+      t.organisationId,
+      t.idempotencyKey,
+    ),
+    index("integration_sync_writes_org_status_idx").on(
+      t.organisationId,
+      t.status,
+    ),
+    index("integration_sync_writes_case_idx").on(t.caseId),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Vendor news watchlist                                                      */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+
+export type IntegrationConnectionState =
+  typeof integrationConnectionStates.$inferSelect;
+export type IntegrationCredential = typeof integrationCredentials.$inferSelect;
+export type IntegrationSyncPolicy = typeof integrationSyncPolicies.$inferSelect;
+export type IntegrationSyncConflict =
+  typeof integrationSyncConflicts.$inferSelect;
+export type IntegrationSyncWrite = typeof integrationSyncWrites.$inferSelect;
+
 export type User = typeof users.$inferSelect;
 export type TwoFactor = typeof twoFactors.$inferSelect;
 export type Case = typeof cases.$inferSelect;

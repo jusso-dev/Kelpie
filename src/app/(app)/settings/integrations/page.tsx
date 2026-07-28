@@ -4,7 +4,6 @@ import {
   caseSources,
   cases,
   inboundSourceStatus,
-  mailboxConnections,
   responseActions,
   tiFeeds,
   webhooks,
@@ -14,19 +13,22 @@ import { requireUser } from "@/lib/session";
 import { availableActionKinds } from "@/actions/response-actions";
 import ResponseActionSettings from "@/components/response-action-settings";
 import CaseSourceSettings from "@/components/case-source-settings";
-import MailboxSettings from "@/components/mailbox-settings";
 import AutomationSchedules from "@/components/automation-schedules";
 import VirusTotalSettings from "@/components/virustotal-settings";
 import WebhookSettings from "@/components/webhook-settings";
 import TawnySettings from "@/components/tawny-settings";
+import IntegrationHealthPanel from "@/components/integration-health-panel";
+import SyncConflictQueue from "@/components/sync-conflict-queue";
 import { getVirusTotalConfiguration } from "@/lib/enrichment/providers/virustotal";
 import { TAWNY_SOURCE_SYSTEM } from "@/lib/case-source-identity";
-import { publicMailboxConnection } from "@/lib/mailbox/core";
+import { listOrganisationHealth } from "@/lib/integrations/health";
+import { listOpenConflicts } from "@/lib/integrations/conflicts";
 import { Globe2 } from "lucide-react";
 
 export default async function IntegrationsSettingsPage() {
   const user = await requireUser();
   const isAdmin = user.role === "admin";
+  const canResolveConflicts = isAdmin || user.role === "analyst";
   const [
     sources,
     feeds,
@@ -36,7 +38,8 @@ export default async function IntegrationsSettingsPage() {
     virusTotal,
     tawnyStatusRows,
     tawnyCaseCountRows,
-    mailboxRows,
+    healthConnections,
+    openConflicts,
   ] = await Promise.all([
     db
       .select({
@@ -95,11 +98,8 @@ export default async function IntegrationsSettingsPage() {
           eq(cases.sourceSystem, TAWNY_SOURCE_SYSTEM),
         ),
       ),
-    db
-      .select()
-      .from(mailboxConnections)
-      .where(eq(mailboxConnections.organisationId, user.organisationId))
-      .orderBy(desc(mailboxConnections.createdAt)),
+    listOrganisationHealth(user.organisationId),
+    listOpenConflicts(user.organisationId, { limit: 50 }),
   ]);
   const tawnyStatus = tawnyStatusRows[0] ?? null;
   const tawnyImportedCaseCount = Number(tawnyCaseCountRows[0]?.total ?? 0);
@@ -127,6 +127,47 @@ export default async function IntegrationsSettingsPage() {
 
       <section className="kelpie-section">
         <div className="kelpie-section-header">
+          <h2>Connection health</h2>
+          <p>
+            Status, rate limits, credential expiry, cursors, and pause/test
+            controls for every connector. Credentials never appear in plaintext.
+          </p>
+        </div>
+        <IntegrationHealthPanel
+          connections={healthConnections}
+          isAdmin={isAdmin}
+        />
+      </section>
+
+      <section className="kelpie-section">
+        <div className="kelpie-section-header">
+          <h2>Sync conflict queue</h2>
+          <p>
+            Fields under manual conflict resolution wait here with both values,
+            provenance, and timestamps before anything is overwritten.
+          </p>
+        </div>
+        <SyncConflictQueue
+          conflicts={openConflicts.map((c) => ({
+            id: c.id,
+            connectionKind: c.connectionKind,
+            connectionId: c.connectionId,
+            caseId: c.caseId,
+            fieldName: c.fieldName,
+            kelpieValue: c.kelpieValue,
+            sourceValue: c.sourceValue,
+            kelpieUpdatedAt: c.kelpieUpdatedAt?.toISOString() ?? null,
+            sourceUpdatedAt: c.sourceUpdatedAt?.toISOString() ?? null,
+            kelpieProvenance: c.kelpieProvenance,
+            sourceProvenance: c.sourceProvenance,
+            createdAt: c.createdAt.toISOString(),
+          }))}
+          canResolve={canResolveConflicts}
+        />
+      </section>
+
+      <section className="kelpie-section">
+        <div className="kelpie-section-header">
           <h2>Case sources</h2>
           <p>
             Import Microsoft Sentinel or Defender XDR incidents directly as
@@ -138,41 +179,6 @@ export default async function IntegrationsSettingsPage() {
             ...source,
             lastPolledAt: source.lastPolledAt?.toISOString() ?? null,
           }))}
-          isAdmin={isAdmin}
-        />
-      </section>
-
-      <section className="kelpie-section">
-        <div className="kelpie-section-header">
-          <h2>Inbound mailbox</h2>
-          <p>
-            Poll IMAP over TLS or Microsoft Graph mailboxes. Credentials are
-            encrypted at rest and never shown after save. Attachments use the
-            evidence pipeline; messages can auto-create cases or wait for review.
-          </p>
-        </div>
-        <MailboxSettings
-          connections={mailboxRows.map((row) => {
-            const pub = publicMailboxConnection(row);
-            return {
-              id: pub.id,
-              name: pub.name,
-              provider: pub.provider,
-              folder: pub.folder,
-              pollIntervalMinutes: pub.pollIntervalMinutes,
-              intakeMode: pub.intakeMode,
-              isActive: pub.isActive,
-              lastPolledAt: pub.lastPolledAt?.toISOString() ?? null,
-              lastSuccessAt: pub.lastSuccessAt?.toISOString() ?? null,
-              lastError: pub.lastError,
-              importedMessageCount: pub.importedMessageCount,
-              connectionMeta: (pub.connectionMeta ?? {}) as Record<
-                string,
-                unknown
-              >,
-              hasCredentials: pub.hasCredentials,
-            };
-          })}
           isAdmin={isAdmin}
         />
       </section>

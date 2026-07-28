@@ -208,6 +208,18 @@ export async function pollFeed(feedId: string): Promise<{
         lastRunSkippedByType: skippedByType,
       })
       .where(eq(tiFeeds.id, feed.id));
+    const { touchConnectionSuccess } = await import(
+      "@/lib/integrations/state"
+    );
+    await touchConnectionSuccess({
+      organisationId: feed.organisationId,
+      connectionKind: "ti_feed",
+      connectionId: feed.id,
+      displayName: feed.name,
+      metadata: { ingested, skipped },
+    }).catch(() => {
+      /* health telemetry best-effort */
+    });
     return { ingested, skipped, skippedByType, error: null };
   } catch (e) {
     const error = conciseError(e);
@@ -215,6 +227,22 @@ export async function pollFeed(feedId: string): Promise<{
       .update(tiFeeds)
       .set({ lastPolledAt: new Date(), lastError: error })
       .where(eq(tiFeeds.id, feed.id));
+    const { touchConnectionFailure } = await import(
+      "@/lib/integrations/state"
+    );
+    const { classifyHealthError } = await import(
+      "@/lib/integrations/error-category"
+    );
+    await touchConnectionFailure({
+      organisationId: feed.organisationId,
+      connectionKind: "ti_feed",
+      connectionId: feed.id,
+      displayName: feed.name,
+      errorCategory: classifyHealthError(error) ?? "provider_error",
+      errorSummary: error,
+    }).catch(() => {
+      /* health telemetry best-effort */
+    });
     return { ingested: 0, skipped: 0, skippedByType: {}, error };
   }
 }

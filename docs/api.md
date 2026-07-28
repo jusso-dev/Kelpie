@@ -803,3 +803,28 @@ Organisation scoring settings: `enabled`, bounded `weights`, `staleContextPolicy
 
 **Empty scopes grant nothing.** A token whose `scopes` array is empty fails every scope check (`403`). Sensitive scopes (`alerts:raw_payload:read`, `evidence:override`, `audit:read`) are never implied. Migration `0026_empty_token_scopes` rewrites any pre-existing empty-scope tokens to an explicit non-sensitive set so ordinary integrations keep working without retaining those sensitive powers — re-issue tokens that intentionally need sensitive scopes from Settings after upgrading.
 
+## Scopes
+
+| Scope | Allows |
+| --- | --- |
+| `cases:read` / `cases:write` | Read or create/update cases |
+| `tasks:read` / `tasks:write` | Read or create/update tasks |
+| `observables:read` / `observables:write` | Search or add observables |
+| `comments:read` / `comments:write` | Read or post comments |
+| `threat_intelligence:read` | Search TI indicators and inspect feed state |
+| `threat_landscape:read` | Read current Cloudflare Radar Threat landscape data |
+| `briefing:read` | Read Cyber brief, watched vendors, and vendor matches |
+| `case_relationships:read` | Read case relationships and duplicate/related suggestions |
+| `case_relationships:write` | Link, unlink, and dismiss case relationships |
+| `playbooks:read` | Read the playbook catalogue (baseline and custom) |
+| `audit:read` | Search the organisation audit trail and read individual audit event detail (sensitive; only grant to admin-issued tokens) |
+| `alerts:read` | Read alerts, linked entities, and evidence items |
+| `alerts:write` | Create/link alerts, change alert disposition, link entities, and create/update evidence items |
+| `alerts:raw_payload:read` | Read raw provider payload references behind alerts and evidence (sensitive; only grant to admin-issued tokens) |
+| `attack:read` | Read the ATT&CK technique catalog, technique mappings, attack stories, and coverage |
+| `attack:write` | Attach, update, and remove ATT&CK technique mappings and attack-story entries |
+| `integrations:read` | Read integration health, open sync conflicts, and support-safe diagnostics |
+| `integrations:write` | Pause/resume connections, run connection tests, resolve sync conflicts, toggle outbound writes |
+
+**Empty scopes grant nothing.** A token whose `scopes` array is empty fails every scope check (`403`). Sensitive scopes (`alerts:raw_payload:read`, `evidence:override`, `audit:read`) are never implied. Migration `0026_empty_token_scopes` rewrites any pre-existing empty-scope tokens to an explicit non-sensitive set so ordinary integrations keep working without retaining those sensitive powers — re-issue tokens that intentionally need sensitive scopes from Settings after upgrading.
+
