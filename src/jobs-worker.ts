@@ -42,6 +42,7 @@ async function processJob(job: Job<KelpieJobData, unknown, string>) {
       }
       return processAuditExportJob(job.data.auditExportJobId);
     case "sla-check":
+    case "escalation-check":
     case "deliver-webhooks":
     case "deliver-automations":
     case "deliver-mobile-push":

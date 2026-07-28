@@ -18,6 +18,7 @@ import {
   Radar,
   Settings,
   ShieldCheck,
+  Users,
   X,
 } from "lucide-react";
 import SignOutButton from "./sign-out-button";
@@ -25,6 +26,7 @@ import SignOutButton from "./sign-out-button";
 const links = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
   { href: "/cases", label: "Cases", icon: BriefcaseBusiness },
+  { href: "/queues", label: "Queues", icon: Users },
   { href: "/tasks", label: "Tasks", icon: ListChecks },
   { href: "/observables", label: "Observables", icon: Database },
   { href: "/ti", label: "Threat intel", icon: Radar },

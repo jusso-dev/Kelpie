@@ -41,7 +41,7 @@ async function main() {
     await page.goto(`${baseUrl}/sign-in`);
     await page.getByLabel("Email").fill("admin@acme.local");
     await page.getByLabel("Password").fill("kelpieadmin");
-    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page.waitForURL("**/dashboard");
 
     await page.goto(`${baseUrl}/cases?q=Queue%20needle`);
@@ -49,6 +49,7 @@ async function main() {
     assert.match(await page.locator("body").innerText(), /Showing 1-1 of 1 matching case/);
 
     await page.goto(`${baseUrl}/cases?sort=recent`);
+    await page.getByText(/Showing \d+-\d+ of \d+ matching case/).waitFor();
     assert.match(await page.locator("body").innerText(), /Showing 1-50 of 56 matching cases/);
     await page.getByRole("link", { name: "Next" }).click();
     await page.getByText("Showing 51-56 of 56 matching cases").waitFor();
@@ -62,6 +63,7 @@ async function main() {
     await page.getByText("QUEUE-TEST-0023", { exact: true }).waitFor();
 
     await page.goto(`${baseUrl}/cases?status=invalid&page=abc&sort=unknown`);
+    await page.getByText(/Showing \d+-\d+ of \d+ matching case/).waitFor();
     assert.equal(await page.locator('select[name="sort"]').inputValue(), "priority");
     assert.match(await page.locator("body").innerText(), /Showing 1-50 of 56 matching cases/);
 

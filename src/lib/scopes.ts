@@ -46,6 +46,11 @@ export const KNOWN_SCOPES = [
     label:
       "Read raw provider payload references behind alerts and evidence (sensitive; only grant to admin-issued tokens)",
   },
+  { value: "queues:read", label: "Read teams, queues, and queue health" },
+  {
+    value: "queues:write",
+    label: "Create teams/queues and assign cases to a queue or analyst",
+  },
 ] as const;
 
 export type ScopeValue = (typeof KNOWN_SCOPES)[number]["value"];

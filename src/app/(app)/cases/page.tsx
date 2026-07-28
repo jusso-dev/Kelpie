@@ -6,16 +6,20 @@ import {
   desc,
   eq,
   ilike,
+  inArray,
   isNotNull,
   isNull,
   or,
   sql,
 } from "drizzle-orm";
 import { formatDistanceToNow } from "date-fns";
-import { ArrowUpRight, Filter, Search, ShieldAlert, X } from "lucide-react";
+import { ArrowUpRight, Filter, Search, X } from "lucide-react";
 import { db } from "@/db";
-import { cases, slaPolicies, users } from "@/db/schema";
+import { cases, queues, users } from "@/db/schema";
 import { requireUser } from "@/lib/session";
+import { caseSlaAtRiskSql, caseSlaBreachedSql, caseSlaWarningSql } from "@/lib/sla";
+import { listQueuesCore } from "@/lib/queues-core";
+import { listWatchedCaseIdsCore } from "@/lib/watchers-core";
 import {
   SeverityBadge,
   StatusBadge,
@@ -26,6 +30,7 @@ import {
   KNOWN_PUSH_SOURCE_SYSTEMS,
   sourceSystemLabel,
 } from "@/lib/case-source-identity";
+import { BulkActionsBar } from "@/components/bulk-actions-bar";
 
 const PAGE_SIZE = 50;
 const STATUSES = [
@@ -49,6 +54,31 @@ const CLASSIFICATIONS = [
 const TLPS = ["clear", "green", "amber", "amber_strict", "red"] as const;
 const SORTS = ["priority", "recent", "oldest", "severity"] as const;
 
+// Built-in operational views (#54). Each maps to an indexed predicate below;
+// picking one composes with, rather than replaces, the other filters.
+const VIEWS = [
+  "unassigned",
+  "mine",
+  "watched",
+  "sla_warning",
+  "sla_breached",
+  "awaiting_third_party",
+  "awaiting_approval",
+  "stale_investigation",
+  "recently_reopened",
+] as const;
+const VIEW_LABELS: Record<(typeof VIEWS)[number], string> = {
+  unassigned: "Unassigned",
+  mine: "My cases",
+  watched: "Watched cases",
+  sla_warning: "SLA warning",
+  sla_breached: "SLA breached",
+  awaiting_third_party: "Awaiting third party",
+  awaiting_approval: "Awaiting approval",
+  stale_investigation: "Stale investigation",
+  recently_reopened: "Recently reopened",
+};
+
 type RawSearchParams = Promise<Record<string, string | string[] | undefined>>;
 type TeamMember = { id: string; name: string };
 type SourceOption = { value: string; label: string };
@@ -59,6 +89,8 @@ type QueueParams = {
   classification?: (typeof CLASSIFICATIONS)[number];
   tlp?: (typeof TLPS)[number];
   assignee?: string;
+  queueId?: string;
+  view?: (typeof VIEWS)[number];
   tag?: string;
   dataTag?: string;
   source?: string;
@@ -98,6 +130,7 @@ function normaliseSource(raw: string | undefined): string | undefined {
 function normaliseParams(
   raw: Record<string, string | string[] | undefined>,
   team: TeamMember[],
+  queueOptions: Array<{ id: string }>,
 ): QueueParams {
   const rawAssignee = first(raw.assignee);
   const assignee =
@@ -106,6 +139,11 @@ function normaliseParams(
       : team.some((member) => member.id === rawAssignee)
         ? rawAssignee
         : undefined;
+  const rawQueueId = first(raw.queueId);
+  const queueId =
+    rawQueueId === "none" || queueOptions.some((q) => q.id === rawQueueId)
+      ? rawQueueId
+      : undefined;
   const rawPage = Number(first(raw.page));
   return {
     q: cleanText(first(raw.q), 120),
@@ -114,6 +152,8 @@ function normaliseParams(
     classification: pick(CLASSIFICATIONS, first(raw.classification)),
     tlp: pick(TLPS, first(raw.tlp)),
     assignee,
+    queueId,
+    view: pick(VIEWS, first(raw.view)),
     tag: cleanText(first(raw.tag), 60),
     dataTag: cleanText(first(raw.dataTag), 60),
     source: normaliseSource(first(raw.source)),
@@ -147,26 +187,30 @@ export default async function CasesPage({
   searchParams: RawSearchParams;
 }) {
   const user = await requireUser();
-  const [rawParams, team, sourceSystemRows] = await Promise.all([
-    searchParams,
-    db
-      .select({ id: users.id, name: users.name })
-      .from(users)
-      .where(eq(users.organisationId, user.organisationId))
-      .orderBy(asc(users.name)),
-    db
-      .selectDistinct({ sourceSystem: cases.sourceSystem })
-      .from(cases)
-      .where(
-        and(
-          eq(cases.organisationId, user.organisationId),
-          isNotNull(cases.sourceSystem),
-        ),
-      )
-      .orderBy(asc(cases.sourceSystem))
-      .limit(50),
-  ]);
-  const params = normaliseParams(rawParams, team);
+  const canBulk = user.role === "admin" || user.role === "analyst";
+  const [rawParams, team, sourceSystemRows, queueOptions, watchedCaseIds] =
+    await Promise.all([
+      searchParams,
+      db
+        .select({ id: users.id, name: users.name })
+        .from(users)
+        .where(eq(users.organisationId, user.organisationId))
+        .orderBy(asc(users.name)),
+      db
+        .selectDistinct({ sourceSystem: cases.sourceSystem })
+        .from(cases)
+        .where(
+          and(
+            eq(cases.organisationId, user.organisationId),
+            isNotNull(cases.sourceSystem),
+          ),
+        )
+        .orderBy(asc(cases.sourceSystem))
+        .limit(50),
+      listQueuesCore(user.organisationId),
+      listWatchedCaseIdsCore(user.organisationId, user.id),
+    ]);
+  const params = normaliseParams(rawParams, team, queueOptions);
   // Known push producers (e.g. Tawny) are always offered even if this org has
   // no cases yet; managed connectors are only offered once observed, since
   // their identifiers are per-org connection ids.
@@ -208,22 +252,57 @@ export default async function CasesPage({
     filters.push(sql`${cases.dataClassificationTags} ? ${params.dataTag}`);
   }
   if (params.source) filters.push(eq(cases.sourceSystem, params.source));
+  if (params.queueId === "none") {
+    filters.push(isNull(cases.queueId));
+  } else if (params.queueId) {
+    filters.push(eq(cases.queueId, params.queueId));
+  }
 
-  const slaRisk = sql<boolean>`(
-    ${cases.status} <> 'closed'
-    AND EXISTS (
-      SELECT 1
-      FROM ${slaPolicies}
-      WHERE ${slaPolicies.organisationId} = ${cases.organisationId}
-        AND ${slaPolicies.severity} = ${cases.severity}
-        AND (
-          (${cases.acknowledgedAt} IS NULL AND ${cases.openedAt} + (${slaPolicies.timeToAcknowledgeMinutes} * interval '1 minute') <= now() + interval '15 minutes')
-          OR (${cases.containedAt} IS NULL AND ${cases.openedAt} + (${slaPolicies.timeToContainMinutes} * interval '1 minute') <= now() + interval '15 minutes')
-          OR (${cases.resolvedAt} IS NULL AND ${cases.openedAt} + (${slaPolicies.timeToResolveMinutes} * interval '1 minute') <= now() + interval '15 minutes')
-        )
-    )
-  )`;
+  const slaRisk = caseSlaAtRiskSql();
   if (params.sla === "risk") filters.push(slaRisk);
+
+  // Built-in operational views (#54): each is an indexed predicate, not a
+  // client-side filter, so counts/pagination stay correct for the whole view.
+  switch (params.view) {
+    case "unassigned":
+      filters.push(isNull(cases.assigneeId));
+      break;
+    case "mine":
+      filters.push(
+        or(
+          eq(cases.assigneeId, user.id),
+          sql`exists (select 1 from case_assignees ca where ca.case_id = ${cases.id} and ca.user_id = ${user.id})`,
+        )!,
+      );
+      break;
+    case "watched":
+      filters.push(
+        watchedCaseIds.length > 0 ? inArray(cases.id, watchedCaseIds) : sql`false`,
+      );
+      break;
+    case "sla_warning":
+      filters.push(caseSlaWarningSql());
+      break;
+    case "sla_breached":
+      filters.push(caseSlaBreachedSql());
+      break;
+    case "awaiting_third_party":
+      filters.push(eq(cases.waitingReason, "third_party"));
+      break;
+    case "awaiting_approval":
+      filters.push(eq(cases.waitingReason, "approval"));
+      break;
+    case "stale_investigation":
+      filters.push(
+        sql`${cases.status} = 'in_progress' and now() - ${cases.lastActivityAt} > interval '3 days'`,
+      );
+      break;
+    case "recently_reopened":
+      filters.push(
+        sql`${cases.lastReopenedAt} is not null and now() - ${cases.lastReopenedAt} < interval '7 days'`,
+      );
+      break;
+  }
 
   const where = and(...filters);
   const [metrics] = await db
@@ -270,11 +349,13 @@ export default async function CasesPage({
       tags: cases.tags,
       dataClassificationTags: cases.dataClassificationTags,
       assigneeName: users.name,
+      queueName: queues.name,
       openedAt: cases.openedAt,
       slaRisk,
     })
     .from(cases)
     .leftJoin(users, eq(users.id, cases.assigneeId))
+    .leftJoin(queues, eq(queues.id, cases.queueId))
     .where(where)
     .orderBy(...orderBy)
     .limit(PAGE_SIZE)
@@ -290,6 +371,8 @@ export default async function CasesPage({
     params.classification,
     params.tlp,
     params.assignee,
+    params.queueId,
+    params.view,
     params.tag,
     params.dataTag,
     params.source,
@@ -328,12 +411,39 @@ export default async function CasesPage({
         </div>
       </header>
 
+      <nav aria-label="Built-in views" className="flex flex-wrap gap-2">
+        {VIEWS.map((view) => (
+          <Link
+            key={view}
+            href={`/cases${queryString(params, { view: params.view === view ? undefined : view, page: undefined })}`}
+            className={
+              "kelpie-badge " +
+              (params.view === view
+                ? "border border-[color:var(--color-tan-400)] text-[color:var(--color-tan-300)]"
+                : "text-slate-300")
+            }
+            aria-current={params.view === view ? "true" : undefined}
+          >
+            {VIEW_LABELS[view]}
+          </Link>
+        ))}
+      </nav>
+
       <QueueFilters
         params={params}
         team={team}
+        queueOptions={queueOptions}
         sourceOptions={sourceSystemOptions}
         activeFilters={activeFilters}
       />
+
+      {canBulk ? (
+        <BulkActionsBar
+          formId="bulk-case-form"
+          queues={queueOptions}
+          members={team}
+        />
+      ) : null}
 
       <div className="flex flex-col gap-2 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between">
         <p aria-live="polite">
@@ -347,6 +457,7 @@ export default async function CasesPage({
         <table className="kelpie-table">
           <thead>
             <tr>
+              {canBulk ? <th><span className="sr-only">Select</span></th> : null}
               <th>Number</th>
               <th>Title</th>
               <th>Status</th>
@@ -355,6 +466,7 @@ export default async function CasesPage({
               <th>TLP</th>
               <th>Classification</th>
               <th>Tags</th>
+              <th>Queue</th>
               <th>Assignee</th>
               <th>Opened</th>
             </tr>
@@ -362,7 +474,7 @@ export default async function CasesPage({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={10} className="py-10 text-center text-slate-400">
+                <td colSpan={canBulk ? 12 : 11} className="py-10 text-center text-slate-400">
                   <p>No cases match these filters.</p>
                   {activeFilters > 0 ? (
                     <Link href="/cases" className="kelpie-link mt-2 inline-block">
@@ -378,6 +490,17 @@ export default async function CasesPage({
             ) : (
               rows.map((c) => (
                 <tr key={c.id}>
+                  {canBulk ? (
+                    <td>
+                      <input
+                        type="checkbox"
+                        name="caseIds"
+                        value={c.id}
+                        form="bulk-case-form"
+                        aria-label={`Select case ${c.caseNumber}`}
+                      />
+                    </td>
+                  ) : null}
                   <td className="font-mono text-xs text-slate-400">{c.caseNumber}</td>
                   <td className="max-w-sm">
                     <Link href={`/cases/${c.id}`} className="kelpie-link font-medium">
@@ -409,6 +532,9 @@ export default async function CasesPage({
                         <TagBadge key={tag} value={tag} />
                       ))}
                     </div>
+                  </td>
+                  <td className="text-xs text-slate-300">
+                    {c.queueName ?? <span className="text-slate-500">No queue</span>}
                   </td>
                   <td className="text-xs text-slate-300">
                     {c.assigneeName ?? <span className="text-slate-500">Unassigned</span>}
@@ -450,16 +576,19 @@ export default async function CasesPage({
 function QueueFilters({
   params,
   team,
+  queueOptions,
   sourceOptions,
   activeFilters,
 }: {
   params: QueueParams;
   team: TeamMember[];
+  queueOptions: Array<{ id: string; name: string; teamName: string }>;
   sourceOptions: SourceOption[];
   activeFilters: number;
 }) {
   return (
     <form className="kelpie-panel space-y-4 p-4" aria-label="Case filters">
+      {params.view ? <input type="hidden" name="view" value={params.view} /> : null}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <label className="min-w-0 flex-1 text-xs font-medium text-slate-300" htmlFor="case-search">
           Search
@@ -524,6 +653,13 @@ function QueueFilters({
           <option value="unassigned">Unassigned</option>
           {team.map((member) => (
             <option key={member.id} value={member.id}>{member.name}</option>
+          ))}
+        </SelectFilter>
+        <SelectFilter label="Queue" name="queueId" value={params.queueId}>
+          <option value="">Any queue</option>
+          <option value="none">No queue</option>
+          {queueOptions.map((queue) => (
+            <option key={queue.id} value={queue.id}>{queue.teamName} / {queue.name}</option>
           ))}
         </SelectFilter>
         <SelectFilter label="Source" name="source" value={params.source}>
