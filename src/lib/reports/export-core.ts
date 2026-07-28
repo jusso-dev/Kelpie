@@ -20,11 +20,17 @@ import {
   type ReportExport,
   type ReportExportApproval,
 } from "@/db/schema";
+import {
+  authorizeCase,
+  resolveUserActor,
+  type AccessActor,
+} from "@/lib/access";
 import { putFile, readFile } from "@/lib/storage";
 import { newId } from "@/lib/utils";
 import {
   buildCaseReportForTemplate,
   caseExistsInOrg,
+  CasePapCeilingError,
   CaseTlpCeilingError,
 } from "./build";
 import {
@@ -64,6 +70,38 @@ export class ReportExportError extends Error {
 
 const DOWNLOADABLE = new Set(["completed", "released"]);
 
+/**
+ * Case-compartment export gate. Restricted / team-scoped cases must not
+ * dump via reports:* alone. Missing creator → unprivileged system actor
+ * (organisation-visible only). Fail closed.
+ */
+export async function requireCaseExportAccess(
+  organisationId: string,
+  caseId: string,
+  userId: string | null,
+  required: "export" | "view_metadata" | "know_exists" = "export",
+): Promise<void> {
+  let actor: AccessActor;
+  if (userId) {
+    const resolved = await resolveUserActor(organisationId, userId);
+    if (!resolved) {
+      throw new ReportExportError("Case not found", 404);
+    }
+    actor = resolved;
+  } else {
+    actor = {
+      organisationId,
+      userId: null,
+      role: "system",
+      teamIds: [],
+    };
+  }
+  const gate = await authorizeCase(organisationId, caseId, actor, required);
+  if (!gate.ok) {
+    throw new ReportExportError(gate.error, gate.status);
+  }
+}
+
 export type PreviewResult = {
   templateId: string;
   templateName: string;
@@ -91,14 +129,33 @@ export async function previewReportCore(opts: {
   templateVersion?: number;
   overrides?: SectionOverrideMap;
   format?: ReportExportFormat;
+  /** Actor for compartment export checks. */
+  actorUserId?: string | null;
 }): Promise<PreviewResult> {
+  await requireCaseExportAccess(
+    opts.organisationId,
+    opts.caseId,
+    opts.actorUserId ?? null,
+    "export",
+  );
+
+  // New previews always use the current template version so an admin
+  // tightening maxTlp/maxPap cannot be bypassed by pinning a historical row.
   const template = await getReportTemplateCore(
     opts.organisationId,
     opts.templateId,
-    opts.templateVersion,
   );
   if (!template || !template.isActive) {
     throw new ReportExportError("Report template not found", 404);
+  }
+  if (
+    opts.templateVersion !== undefined &&
+    opts.templateVersion !== template.currentVersion
+  ) {
+    throw new ReportExportError(
+      "Historical template versions cannot be used for new previews or exports",
+      400,
+    );
   }
 
   const maxTlp = (template.version.maxTlp as ReportTlp) ?? "amber";
@@ -183,16 +240,29 @@ export async function createReportExportCore(opts: {
   if (!isReportExportFormat(opts.format)) {
     throw new ReportExportError("format must be pdf or json");
   }
-  if (!(await caseExistsInOrg(opts.organisationId, opts.caseId))) {
-    throw new ReportExportError("Case not found", 404);
-  }
+  await requireCaseExportAccess(
+    opts.organisationId,
+    opts.caseId,
+    opts.requestedBy,
+    "export",
+  );
+  // Always pin current template version for new exports (immutable history
+  // remains on already-generated rows via templateVersionId).
   const template = await getReportTemplateCore(
     opts.organisationId,
     opts.templateId,
-    opts.templateVersion,
   );
   if (!template || !template.isActive) {
     throw new ReportExportError("Report template not found", 404);
+  }
+  if (
+    opts.templateVersion !== undefined &&
+    opts.templateVersion !== template.currentVersion
+  ) {
+    throw new ReportExportError(
+      "Historical template versions cannot be used for new exports",
+      400,
+    );
   }
 
   const maxTlp = template.version.maxTlp as ReportTlp;
@@ -255,19 +325,37 @@ export async function processReportExportJob(exportId: string): Promise<void> {
   if (
     job.status === "completed" ||
     job.status === "released" ||
-    job.status === "awaiting_approval"
+    job.status === "awaiting_approval" ||
+    job.status === "processing"
   ) {
     return;
   }
 
-  await db
+  // Atomic claim — second worker aborts if 0 rows.
+  const claimed = await db
     .update(reportExports)
     .set({ status: "processing" })
     .where(
       and(eq(reportExports.id, exportId), eq(reportExports.status, "pending")),
-    );
+    )
+    .returning({ id: reportExports.id });
+  if (claimed.length === 0) return;
+
+  // Preserve section overrides across process (must not drop from summary).
+  const pending = (job.redactionSummary ?? {}) as {
+    pendingOverrides?: SectionOverrideMap;
+  };
+  const overrides = pending.pendingOverrides ?? {};
 
   try {
+    // Re-check compartment at process time (creator may have lost access).
+    await requireCaseExportAccess(
+      job.organisationId,
+      job.caseId,
+      job.requestedBy,
+      "export",
+    );
+
     if (!job.templateVersionId) {
       throw new Error("Export is missing template version");
     }
@@ -281,13 +369,9 @@ export async function processReportExportJob(exportId: string): Promise<void> {
     const inclusionRules = normaliseInclusionRules(version.inclusionRules);
     const sections = normaliseSectionConfigs(version.sections);
 
-    const pending = (job.redactionSummary ?? {}) as {
-      pendingOverrides?: SectionOverrideMap;
-    };
-    const overrides = pending.pendingOverrides ?? {};
-
-    const maxTlp = version.maxTlp as ReportTlp;
-    const maxPap = version.maxPap as ReportPap;
+    // Freeze ceilings from the export row (snapshotted at create).
+    const maxTlp = job.maxTlp as ReportTlp;
+    const maxPap = job.maxPap as ReportPap;
 
     let built;
     try {
@@ -304,6 +388,11 @@ export async function processReportExportJob(exportId: string): Promise<void> {
       if (error instanceof CaseTlpCeilingError) {
         throw new Error(
           `Case classification ${classifyLabel(error.caseTlp)} exceeds template audience ceiling ${classifyLabel(error.maxTlp)}`,
+        );
+      }
+      if (error instanceof CasePapCeilingError) {
+        throw new Error(
+          `Case PAP ${error.casePap} exceeds template audience ceiling ${error.maxPap}`,
         );
       }
       throw error;
@@ -371,6 +460,7 @@ export async function processReportExportJob(exportId: string): Promise<void> {
         dataRevision: built.dataRevision,
         selectedSections: built.includedKeys,
         redactionSummary: {
+          pendingOverrides: overrides,
           maxTlp: built.redaction.maxTlp,
           maxPap: built.redaction.maxPap,
           includedCount: built.redaction.includedCount,
@@ -381,7 +471,12 @@ export async function processReportExportJob(exportId: string): Promise<void> {
         completedAt: new Date(),
         error: null,
       })
-      .where(eq(reportExports.id, exportId));
+      .where(
+        and(
+          eq(reportExports.id, exportId),
+          eq(reportExports.status, "processing"),
+        ),
+      );
 
     if (requireApproval) {
       await db.insert(reportExportApprovals).values({
@@ -403,13 +498,22 @@ export async function processReportExportJob(exportId: string): Promise<void> {
     await db
       .update(reportExports)
       .set({ status: "failed", error: message })
-      .where(eq(reportExports.id, exportId));
+      .where(
+        and(
+          eq(reportExports.id, exportId),
+          eq(reportExports.status, "processing"),
+        ),
+      );
   }
 }
 
 function friendlyExportError(raw: string): string {
-  if (/exceeds template audience ceiling|Case classification|Case TLP exceeds/i.test(raw)) {
-    return "This case's classification exceeds the template audience ceiling. Use a higher-TLP template or lower the case TLP.";
+  if (
+    /exceeds template audience ceiling|Case classification|Case TLP exceeds|Case PAP exceeds/i.test(
+      raw,
+    )
+  ) {
+    return "This case's classification exceeds the template audience ceiling. Use a higher-ceiling template or lower the case classification.";
   }
   if (/not found/i.test(raw)) return "The case or template could not be found.";
   if (/template/i.test(raw)) return "The report template is no longer available.";
@@ -423,6 +527,12 @@ function mapBuildError(error: unknown): ReportExportError {
   if (error instanceof CaseTlpCeilingError) {
     return new ReportExportError(
       `Case classification ${classifyLabel(error.caseTlp)} exceeds template audience ceiling ${classifyLabel(error.maxTlp)}`,
+      403,
+    );
+  }
+  if (error instanceof CasePapCeilingError) {
+    return new ReportExportError(
+      `Case PAP exceeds template audience ceiling (case=${error.casePap}, max=${error.maxPap})`,
       403,
     );
   }
@@ -515,16 +625,31 @@ export async function approveReportExportCore(opts: {
   }
 
   // Separation of duties: requester cannot approve their own release.
-  if (
-    opts.decision === "approve" &&
-    approval.requestedBy &&
-    approval.requestedBy === opts.actorId
-  ) {
-    throw new ReportExportError(
-      "Approver cannot be the same user who requested this export",
-      403,
-    );
+  // Fail closed when requestedBy is null — otherwise a write token with no
+  // creator identity and an admin token can both be used by the same human.
+  if (opts.decision === "approve") {
+    if (!approval.requestedBy) {
+      throw new ReportExportError(
+        "This export has no identifiable requester; cannot approve under separation of duties",
+        403,
+      );
+    }
+    if (approval.requestedBy === opts.actorId) {
+      throw new ReportExportError(
+        "Approver cannot be the same user who requested this export",
+        403,
+      );
+    }
   }
+
+  // Approver must still have export access to the case (no rubber-stamp on
+  // restricted cases they cannot see).
+  await requireCaseExportAccess(
+    opts.organisationId,
+    exp.caseId,
+    opts.actorId,
+    "export",
+  );
 
   // Binding must still match the export snapshot.
   if (
@@ -600,35 +725,76 @@ export async function approveReportExportCore(opts: {
   }
 
   if (opts.decision === "reject") {
-    await db
+    const rejected = await db
       .update(reportExportApprovals)
       .set({
         status: "rejected",
         decidedBy: opts.actorId,
         decidedAt: new Date(),
       })
-      .where(eq(reportExportApprovals.id, approval.id));
+      .where(
+        and(
+          eq(reportExportApprovals.id, approval.id),
+          eq(reportExportApprovals.status, "pending"),
+        ),
+      )
+      .returning({ id: reportExportApprovals.id });
+    if (rejected.length === 0) {
+      throw new ReportExportError(
+        "This export is not awaiting approval",
+        409,
+      );
+    }
     await db
       .update(reportExports)
       .set({ status: "failed", error: "Release rejected by approver" })
-      .where(eq(reportExports.id, opts.exportId));
+      .where(
+        and(
+          eq(reportExports.id, opts.exportId),
+          eq(reportExports.status, "awaiting_approval"),
+        ),
+      );
   } else {
-    await db
+    const approved = await db
       .update(reportExportApprovals)
       .set({
         status: "approved",
         decidedBy: opts.actorId,
         decidedAt: new Date(),
       })
-      .where(eq(reportExportApprovals.id, approval.id));
-    await db
+      .where(
+        and(
+          eq(reportExportApprovals.id, approval.id),
+          eq(reportExportApprovals.status, "pending"),
+        ),
+      )
+      .returning({ id: reportExportApprovals.id });
+    if (approved.length === 0) {
+      throw new ReportExportError(
+        "This export is not awaiting approval",
+        409,
+      );
+    }
+    const released = await db
       .update(reportExports)
       .set({
         status: "released",
         releasedBy: opts.actorId,
         releasedAt: new Date(),
       })
-      .where(eq(reportExports.id, opts.exportId));
+      .where(
+        and(
+          eq(reportExports.id, opts.exportId),
+          eq(reportExports.status, "awaiting_approval"),
+        ),
+      )
+      .returning({ id: reportExports.id });
+    if (released.length === 0) {
+      throw new ReportExportError(
+        "This export is not awaiting approval",
+        409,
+      );
+    }
   }
 
   const updated = await getReportExportCore(opts.organisationId, opts.exportId);
@@ -658,11 +824,20 @@ export type DownloadResult = {
 export async function downloadReportExportCore(
   organisationId: string,
   exportId: string,
+  actorUserId?: string | null,
 ): Promise<DownloadResult> {
   const exp = await getReportExportCore(organisationId, exportId);
   if (!exp || !DOWNLOADABLE.has(exp.status) || !exp.storageKey) {
     throw new ReportExportError("Export not available for download", 404);
   }
+  // Restricted-case reports must not be downloadable by any peer with only
+  // reports:read who guesses the export id.
+  await requireCaseExportAccess(
+    organisationId,
+    exp.caseId,
+    actorUserId ?? null,
+    "export",
+  );
   // Defence in depth: refuse path traversal / cross-tenant storage keys.
   const expectedPrefix = `${organisationId}/`;
   if (!exp.storageKey.startsWith(expectedPrefix)) {
@@ -708,9 +883,12 @@ export async function createReportScheduleCore(opts: {
   overrides?: SectionOverrideMap;
   createdBy: string | null;
 }): Promise<typeof reportSchedules.$inferSelect> {
-  if (!(await caseExistsInOrg(opts.organisationId, opts.caseId))) {
-    throw new ReportExportError("Case not found", 404);
-  }
+  await requireCaseExportAccess(
+    opts.organisationId,
+    opts.caseId,
+    opts.createdBy,
+    "export",
+  );
   const template = await getReportTemplateCore(
     opts.organisationId,
     opts.templateId,
@@ -747,6 +925,7 @@ export async function createReportScheduleCore(opts: {
  * Run due schedules. Re-checks at run time (fail closed):
  * - creator still active in org, not banned/locked
  * - creator still has reports:write equivalent (admin or analyst)
+ * - creator still has case export / compartment membership
  * - template still active
  * - case still accessible in org
  * Never trusts schedule-time grants alone.
@@ -781,6 +960,14 @@ export async function processDueReportSchedules(limit = 20): Promise<{
       await assertScheduleCreatorMayRun(
         schedule.organisationId,
         schedule.createdBy,
+      );
+
+      // Re-check case export permission (compartment membership may have changed).
+      await requireCaseExportAccess(
+        schedule.organisationId,
+        schedule.caseId,
+        schedule.createdBy,
+        "export",
       );
 
       // Re-check template + case

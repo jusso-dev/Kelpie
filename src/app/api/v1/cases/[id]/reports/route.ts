@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
+import {
+  authorizeCase,
+  resolveTokenActor,
+} from "@/lib/access";
 import { enqueueKelpieJob } from "@/lib/jobs/enqueue";
 import {
   createReportExportCore,
@@ -32,6 +36,16 @@ export async function GET(req: Request, { params }: Params) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
   const { id: caseId } = await params;
+  const actor = await resolveTokenActor(auth.token);
+  const gate = await authorizeCase(
+    auth.token.organisationId,
+    caseId,
+    actor,
+    "view_metadata",
+  );
+  if (!gate.ok) {
+    return NextResponse.json({ error: gate.error }, { status: gate.status });
+  }
   const limit = Number(new URL(req.url).searchParams.get("limit") ?? 50);
   const exports = await listReportExportsCore(
     auth.token.organisationId,
@@ -50,6 +64,16 @@ export async function POST(req: Request, { params }: Params) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
   const { id: caseId } = await params;
+  const actor = await resolveTokenActor(auth.token);
+  const gate = await authorizeCase(
+    auth.token.organisationId,
+    caseId,
+    actor,
+    "export",
+  );
+  if (!gate.ok) {
+    return NextResponse.json({ error: gate.error }, { status: gate.status });
+  }
   let body: unknown;
   try {
     body = await req.json();

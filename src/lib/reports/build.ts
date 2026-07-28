@@ -29,7 +29,7 @@ import type {
   SectionOverrideMap,
   SelectedSection,
 } from "./types";
-import { withinTlpCeiling } from "./types";
+import { withinPapCeiling, withinTlpCeiling } from "./types";
 
 export type BuiltReport = {
   data: CaseReportData;
@@ -70,6 +70,19 @@ export class CaseTlpCeilingError extends Error {
   }
 }
 
+export class CasePapCeilingError extends Error {
+  readonly casePap: string;
+  readonly maxPap: ReportPap;
+  constructor(casePap: string, maxPap: ReportPap) {
+    super(
+      `Case PAP exceeds template audience ceiling (case=${casePap}, max=${maxPap})`,
+    );
+    this.name = "CasePapCeilingError";
+    this.casePap = casePap;
+    this.maxPap = maxPap;
+  }
+}
+
 export async function buildCaseReportForTemplate(opts: {
   organisationId: string;
   caseId: string;
@@ -85,10 +98,13 @@ export async function buildCaseReportForTemplate(opts: {
   const maxTlp = opts.maxTlp;
   const maxPap = opts.maxPap;
 
-  // Case-level TLP is a hard ceiling: never ship a redder case under a
+  // Case-level TLP/PAP are hard ceilings: never ship a redder case under a
   // lower-audience template (e.g. TLP:RED case with amber executive).
   if (!withinTlpCeiling(raw.case.tlp, maxTlp)) {
     throw new CaseTlpCeilingError(raw.case.tlp, maxTlp);
+  }
+  if (!withinPapCeiling(raw.case.pap, maxPap)) {
+    throw new CasePapCeilingError(raw.case.pap, maxPap);
   }
 
   const selected = selectSections(
@@ -213,24 +229,37 @@ export async function buildCaseReportForTemplate(opts: {
   const attackMappings = includeSet.has("ttp_mappings") ? raw.attackMappings : [];
   const attackStory = includeSet.has("attack_story") ? raw.attackStory : [];
 
-  // Evidence inventory (metadata only — no storage keys, no binary)
+  // Evidence inventory (metadata only — no storage keys, no binary).
+  // Sensitive attachments are excluded unless the template explicitly opts in
+  // via includeSensitiveBlocks (fail closed without a view_sensitive actor).
   let evidenceInventory: BuiltReport["evidenceInventory"] = [];
   if (includeSet.has("evidence_inventory")) {
     const evidence = await listEvidenceForCase(opts.caseId, opts.organisationId);
-    evidenceInventory = evidence.map((e) => ({
-      id: e.id,
-      filename: e.filename,
-      status: e.status,
-      contentType: e.contentType,
-      sizeBytes: Number(e.sizeBytes ?? 0),
-      sha256: e.sha256,
-      relevance: e.relevance,
-    }));
-    for (const e of evidenceInventory) {
+    for (const e of evidence) {
+      if (e.sensitive && !includeSensitive) {
+        redaction.items.push({
+          section: "evidence_inventory",
+          itemId: e.id,
+          label: "[REDACTED — sensitive evidence]",
+          status: "excluded",
+          reason: "Sensitive evidence requires view_sensitive",
+        });
+        redaction.excludedCount += 1;
+        continue;
+      }
+      evidenceInventory.push({
+        id: e.id,
+        filename: sanitizeReportText(e.filename),
+        status: e.status,
+        contentType: e.contentType,
+        sizeBytes: Number(e.sizeBytes ?? 0),
+        sha256: e.sha256,
+        relevance: e.relevance,
+      });
       redaction.items.push({
         section: "evidence_inventory",
         itemId: e.id,
-        label: e.filename,
+        label: sanitizeReportText(e.filename),
         status: "included",
       });
       redaction.includedCount += 1;
@@ -272,11 +301,29 @@ export async function buildCaseReportForTemplate(opts: {
         .from(customFieldValues)
         .where(eq(customFieldValues.entityId, opts.caseId));
       const byField = new Map(values.map((v) => [v.fieldId, v.value]));
-      customFields = defs.map((d) => ({
-        key: d.key,
-        label: d.label,
-        value: byField.get(d.id) ?? null,
-      }));
+      for (const d of defs) {
+        if (d.sensitive && !includeSensitive) {
+          customFields.push({
+            key: d.key,
+            label: d.label,
+            value: "[REDACTED — sensitive field]",
+          });
+          redaction.items.push({
+            section: "custom_fields",
+            itemId: d.id,
+            label: d.label,
+            status: "excluded",
+            reason: "Sensitive custom field requires view_sensitive",
+          });
+          redaction.excludedCount += 1;
+          continue;
+        }
+        customFields.push({
+          key: d.key,
+          label: d.label,
+          value: byField.get(d.id) ?? null,
+        });
+      }
     }
   }
 

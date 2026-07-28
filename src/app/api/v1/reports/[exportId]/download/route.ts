@@ -20,6 +20,7 @@ export async function GET(req: Request, { params }: Params) {
     const result = await downloadReportExportCore(
       auth.token.organisationId,
       exportId,
+      auth.token.createdBy,
     );
     return new NextResponse(new Uint8Array(result.buffer), {
       status: 200,

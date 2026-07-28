@@ -486,6 +486,7 @@ async function main() {
       caseId: caseA,
       templateId: custom.id,
       format: "json",
+      actorUserId: userAId,
     });
     assert.ok(preview.includedKeys.includes("summary"));
     assert.ok(preview.markdownPreview.includes("I47A-"));
@@ -505,6 +506,7 @@ async function main() {
           caseId: caseRed,
           templateId: custom.id,
           format: "json",
+          actorUserId: userAId,
         }),
       (err: unknown) =>
         err instanceof ReportExportError &&
@@ -555,7 +557,7 @@ async function main() {
       undefined,
       "storageKey never in public view",
     );
-    const dl = await downloadReportExportCore(orgAId, exp.id);
+    const dl = await downloadReportExportCore(orgAId, exp.id, userAId);
     assert.ok(dl.buffer.length > 0);
     assert.equal(dl.sha256, exp.sha256);
     const json = JSON.parse(dl.buffer.toString("utf8")) as {
@@ -573,7 +575,7 @@ async function main() {
       .set({ storageKey: "other-org/not-yours.json" })
       .where(eq(reportExports.id, exp.id));
     await assert.rejects(
-      () => downloadReportExportCore(orgAId, exp.id),
+      () => downloadReportExportCore(orgAId, exp.id, userAId),
       (err: unknown) =>
         err instanceof ReportExportError && err.status === 404,
     );
@@ -595,7 +597,7 @@ async function main() {
     });
     assert.equal(gated.status, "awaiting_approval");
     await assert.rejects(
-      () => downloadReportExportCore(orgAId, gated.id),
+      () => downloadReportExportCore(orgAId, gated.id, userAId),
       (err: unknown) =>
         err instanceof ReportExportError && err.status === 404,
     );
@@ -620,7 +622,7 @@ async function main() {
       decision: "approve",
     });
     assert.equal(released.status, "released");
-    const dl2 = await downloadReportExportCore(orgAId, gated.id);
+    const dl2 = await downloadReportExportCore(orgAId, gated.id, userAId);
     assert.ok(dl2.buffer.length > 0);
     assert.ok(
       !dl2.buffer.toString("utf8").includes("evil-redacted.example"),
@@ -668,7 +670,7 @@ async function main() {
     const cross = await getReportExportCore(orgBId, exp.id);
     assert.equal(cross, null, "org B cannot see org A export");
     await assert.rejects(
-      () => downloadReportExportCore(orgBId, exp.id),
+      () => downloadReportExportCore(orgBId, exp.id, userBId),
       (err: unknown) =>
         err instanceof ReportExportError && err.status === 404,
     );
@@ -678,6 +680,7 @@ async function main() {
           organisationId: orgBId,
           caseId: caseA,
           templateId: custom.id,
+          actorUserId: userBId,
         }),
       (err: unknown) =>
         err instanceof ReportExportError &&
@@ -709,6 +712,7 @@ async function main() {
       organisationId: orgAId,
       caseId: caseA,
       templateId: custom.id,
+      actorUserId: userAId,
     });
     const overTlp = techPreview.redaction.items.find(
       (i) => i.status === "masked" || i.status === "excluded",

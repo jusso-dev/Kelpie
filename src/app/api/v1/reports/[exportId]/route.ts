@@ -3,6 +3,8 @@ import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
 import {
   getReportExportApprovalCore,
   getReportExportCore,
+  ReportExportError,
+  requireCaseExportAccess,
   toPublicExport,
 } from "@/lib/reports/export-core";
 
@@ -19,6 +21,19 @@ export async function GET(req: Request, { params }: Params) {
   const exp = await getReportExportCore(auth.token.organisationId, exportId);
   if (!exp) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  try {
+    await requireCaseExportAccess(
+      auth.token.organisationId,
+      exp.caseId,
+      auth.token.createdBy,
+      "view_metadata",
+    );
+  } catch (err) {
+    if (err instanceof ReportExportError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
+    throw err;
   }
   const approval = await getReportExportApprovalCore(
     auth.token.organisationId,

@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
 import {
+  authorizeCase,
+  resolveTokenActor,
+} from "@/lib/access";
+import {
   createReportScheduleCore,
   ReportExportError,
 } from "@/lib/reports/export-core";
@@ -23,7 +27,7 @@ const scheduleSchema = z.object({
 /**
  * Create a scheduled report for a case. Destination is always organisation
  * export history — arbitrary external destinations are out of scope.
- * Execution re-checks template activity and case membership.
+ * Execution re-checks template activity, creator status, and case export ACL.
  */
 export async function POST(req: Request, { params }: Params) {
   const auth = await authenticateApiTokenWithScope(req, "reports:write");
@@ -31,6 +35,16 @@ export async function POST(req: Request, { params }: Params) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
   const { id: caseId } = await params;
+  const actor = await resolveTokenActor(auth.token);
+  const gate = await authorizeCase(
+    auth.token.organisationId,
+    caseId,
+    actor,
+    "export",
+  );
+  if (!gate.ok) {
+    return NextResponse.json({ error: gate.error }, { status: gate.status });
+  }
   let body: unknown;
   try {
     body = await req.json();
