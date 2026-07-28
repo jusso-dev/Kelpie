@@ -518,14 +518,28 @@ export async function acceptSuggestionCore(opts: {
     );
   }
 
-  const suggestion = await getSuggestionInOrg(
-    opts.suggestionId,
-    opts.organisationId,
-  );
-  if (!suggestion) throw new CorrelationError("Suggestion not found", 404);
-  if (suggestion.status !== "pending") {
+  // Claim pending first so concurrent accepts cannot both mutate membership.
+  const [suggestion] = await db
+    .update(correlationSuggestions)
+    .set({
+      status: "accepting",
+    })
+    .where(
+      and(
+        eq(correlationSuggestions.id, opts.suggestionId),
+        eq(correlationSuggestions.organisationId, opts.organisationId),
+        eq(correlationSuggestions.status, "pending"),
+      ),
+    )
+    .returning();
+  if (!suggestion) {
+    const existing = await getSuggestionInOrg(
+      opts.suggestionId,
+      opts.organisationId,
+    );
+    if (!existing) throw new CorrelationError("Suggestion not found", 404);
     throw new CorrelationError(
-      `Suggestion is already ${suggestion.status}`,
+      `Suggestion is already ${existing.status}`,
       409,
     );
   }
@@ -539,6 +553,7 @@ export async function acceptSuggestionCore(opts: {
 
   let result: Record<string, unknown> = {};
 
+  try {
   if (suggestion.kind === "group_alerts") {
     result = await createCaseFromAlertsCore({
       organisationId: opts.organisationId,
@@ -613,6 +628,19 @@ export async function acceptSuggestionCore(opts: {
   } else {
     throw new CorrelationError("Unknown suggestion kind", 400);
   }
+  } catch (error) {
+    // Release the accepting claim so a later retry can proceed.
+    await db
+      .update(correlationSuggestions)
+      .set({ status: "pending" })
+      .where(
+        and(
+          eq(correlationSuggestions.id, suggestion.id),
+          eq(correlationSuggestions.status, "accepting"),
+        ),
+      );
+    throw error;
+  }
 
   const newStatus = opts.autoApplied ? "auto_applied" : "accepted";
   const [updated] = await db
@@ -626,12 +654,12 @@ export async function acceptSuggestionCore(opts: {
     .where(
       and(
         eq(correlationSuggestions.id, suggestion.id),
-        eq(correlationSuggestions.status, "pending"),
+        eq(correlationSuggestions.status, "accepting"),
       ),
     )
     .returning();
   if (!updated) {
-    throw new CorrelationError("Suggestion is no longer pending", 409);
+    throw new CorrelationError("Suggestion is no longer accepting", 409);
   }
 
   await bumpRuleMetric({

@@ -1754,7 +1754,9 @@ export const correlationRuleStatusEnum = pgEnum("correlation_rule_status", [
 
 export const correlationSuggestionStatusEnum = pgEnum(
   "correlation_suggestion_status",
-  ["pending", "accepted", "rejected", "expired", "auto_applied"],
+  // `accepting` is a short-lived claim so concurrent accepts cannot both
+  // mutate membership before the suggestion is resolved.
+  ["pending", "accepting", "accepted", "rejected", "expired", "auto_applied"],
 );
 
 export const correlationSuggestionKindEnum = pgEnum(

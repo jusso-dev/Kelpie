@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { organisations, users } from "@/db/schema";
 import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
@@ -32,11 +32,34 @@ export async function GET(req: Request) {
 }
 
 export async function PATCH(req: Request) {
-  // Policy changes are write-scoped; production admins should issue tokens
-  // carefully. Session UI still requires admin via server actions.
+  // Org-wide auto-merge / threshold policy is admin-only. Membership writes
+  // use correlation:write separately; a compromised automation token must not
+  // be able to enable silent auto-merge.
   const auth = await authenticateApiTokenWithScope(req, "correlation:write");
   if (!auth.ok) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
+  }
+  if (!auth.token.createdBy) {
+    return NextResponse.json(
+      { error: "Policy updates require a user-backed admin token" },
+      { status: 403 },
+    );
+  }
+  const [actorRow] = await db
+    .select({ id: users.id, role: users.role })
+    .from(users)
+    .where(
+      and(
+        eq(users.id, auth.token.createdBy),
+        eq(users.organisationId, auth.token.organisationId),
+      ),
+    )
+    .limit(1);
+  if (!actorRow || actorRow.role !== "admin") {
+    return NextResponse.json(
+      { error: "Only organisation admins can update correlation policy" },
+      { status: 403 },
+    );
   }
   const body = await req.json().catch(() => null);
   const parsed = patchSchema.safeParse(body);

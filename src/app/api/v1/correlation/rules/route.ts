@@ -56,6 +56,29 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
+  // Activating a live (non-dry-run) rule can feed auto-merge. Require the
+  // token's creating user to be an org admin for activate or dryRun:false.
+  const wantsLive =
+    parsed.data.activate === true || parsed.data.dryRun === false;
+  if (wantsLive) {
+    if (!auth.token.createdBy) {
+      return NextResponse.json(
+        { error: "Activating live correlation rules requires a user-backed admin token" },
+        { status: 403 },
+      );
+    }
+    const [actor] = await db
+      .select({ id: users.id, role: users.role })
+      .from(users)
+      .where(eq(users.id, auth.token.createdBy))
+      .limit(1);
+    if (!actor || actor.role !== "admin") {
+      return NextResponse.json(
+        { error: "Only organisation admins can activate live correlation rules" },
+        { status: 403 },
+      );
+    }
+  }
   try {
     const rule = await createCorrelationRuleCore({
       organisationId: auth.token.organisationId,
