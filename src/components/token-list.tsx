@@ -74,7 +74,9 @@ export default function TokenList({
                   </td>
                   <td className="text-xs text-slate-400 font-mono">
                     {t.scopes.length === 0 ? (
-                      <span className="text-amber-400">any</span>
+                      <span className="text-amber-400" title="Empty scopes grant no API access">
+                        none (no access)
+                      </span>
                     ) : (
                       t.scopes.join(", ")
                     )}

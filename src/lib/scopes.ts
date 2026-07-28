@@ -63,11 +63,35 @@ export const KNOWN_SCOPES = [
 
 export type ScopeValue = (typeof KNOWN_SCOPES)[number]["value"];
 
+/**
+ * Scopes that must never be implied. Empty-scope legacy tokens used to
+ * satisfy every check (including these). Fail-closed `tokenHasScope` plus
+ * the data migration that rewrites empty arrays deliberately exclude them.
+ */
+export const SENSITIVE_SCOPES = [
+  "alerts:raw_payload:read",
+  "evidence:override",
+  "audit:read",
+] as const satisfies readonly ScopeValue[];
+
+export type SensitiveScopeValue = (typeof SENSITIVE_SCOPES)[number];
+
+/** Explicit scope set written onto tokens that previously had `[]`. */
+export function legacyDefaultScopes(): ScopeValue[] {
+  const sensitive = new Set<string>(SENSITIVE_SCOPES);
+  return KNOWN_SCOPES.map((s) => s.value).filter((v) => !sensitive.has(v));
+}
+
 export function isKnownScope(s: string): s is ScopeValue {
   return KNOWN_SCOPES.some((k) => k.value === s);
 }
 
+/**
+ * Fail closed: an empty scope array grants nothing. Callers that need
+ * unscoped authentication (rare) must pass `required: null` to
+ * `authenticateApiTokenWithScope` rather than relying on empty arrays.
+ */
 export function tokenHasScope(scopes: string[], required: ScopeValue): boolean {
-  if (scopes.length === 0) return true; // legacy: empty scopes means full access
+  if (scopes.length === 0) return false;
   return scopes.includes(required);
 }

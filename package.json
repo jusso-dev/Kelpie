@@ -59,7 +59,8 @@
     "test:attack-core": "tsx scripts/test-attack-core.ts",
     "test:attack-catalog-import": "tsx scripts/test-attack-catalog-import.ts",
     "test:attack-mapping-api": "tsx scripts/test-attack-mapping-api.ts",
-    "test:visual": "tsx scripts/visual-smoke.ts"
+    "test:visual": "tsx scripts/visual-smoke.ts",
+    "test:token-scopes": "tsx scripts/test-token-scopes.ts"
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "^3.1095.0",
