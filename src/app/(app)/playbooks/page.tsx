@@ -1,19 +1,53 @@
 import { db } from "@/db";
-import { caseTemplates, playbooks } from "@/db/schema";
+import { caseTemplates } from "@/db/schema";
 import { eq, asc } from "drizzle-orm";
 import { requireUser } from "@/lib/session";
 import { deleteCaseTemplate } from "@/actions/case-templates";
 import { ConfirmFormActionButton } from "@/components/confirm-dialog";
+import SyncCatalogueButton from "@/components/sync-catalogue-button";
+import { listPlaybooksCore } from "@/lib/playbooks-core";
+import { BASELINE_PLAYBOOKS } from "@/lib/playbook-catalogue";
+import { OBSERVABLE_TYPES } from "@/lib/observables-core";
 import Link from "next/link";
 
-export default async function PlaybooksPage() {
+const SEVERITIES = ["low", "medium", "high", "critical"] as const;
+const CLASSIFICATIONS = [
+  "malware",
+  "phishing",
+  "unauthorised_access",
+  "data_breach",
+  "dos",
+  "policy_violation",
+  "other",
+] as const;
+
+type RawSearchParams = Promise<Record<string, string | string[] | undefined>>;
+
+function first(raw: string | string[] | undefined): string | undefined {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return value?.trim() || undefined;
+}
+
+export default async function PlaybooksPage({
+  searchParams,
+}: {
+  searchParams: RawSearchParams;
+}) {
   const user = await requireUser();
+  const sp = await searchParams;
+  const filter = {
+    scenario: first(sp.scenario),
+    classification: first(sp.classification),
+    severity: first(sp.severity),
+    tag: first(sp.tag),
+    observableType: first(sp.observableType),
+    q: first(sp.q),
+    includeInactive: first(sp.includeInactive) === "true",
+  };
+  const hasFilter = Object.values(filter).some((v) => v !== undefined && v !== false);
+
   const [rows, templates] = await Promise.all([
-    db
-      .select()
-      .from(playbooks)
-      .where(eq(playbooks.organisationId, user.organisationId))
-      .orderBy(asc(playbooks.name)),
+    listPlaybooksCore(user.organisationId, filter),
     db
       .select()
       .from(caseTemplates)
@@ -29,10 +63,12 @@ export default async function PlaybooksPage() {
           <h1 className="text-2xl font-semibold">Playbooks & templates</h1>
           <p className="text-sm text-slate-400">
             Playbooks define ordered steps with cadence offsets. Templates
-            prefill a new case in one click.
+            prefill a new case in one click. Baseline playbooks ship with the
+            product; custom playbooks are authored by your team.
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
+          {isAdmin ? <SyncCatalogueButton /> : null}
           {isAdmin ? (
             <Link
               href="/playbooks/templates/new"
@@ -47,12 +83,127 @@ export default async function PlaybooksPage() {
         </div>
       </header>
 
+      <form
+        method="get"
+        className="kelpie-card grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-6"
+        aria-label="Filter playbooks"
+      >
+        <div className="lg:col-span-2">
+          <label htmlFor="pb-filter-q" className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+            Search
+          </label>
+          <input
+            id="pb-filter-q"
+            name="q"
+            className="kelpie-input"
+            placeholder="Name or description"
+            defaultValue={filter.q ?? ""}
+          />
+        </div>
+        <div>
+          <label htmlFor="pb-filter-scenario" className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+            Scenario
+          </label>
+          <select
+            id="pb-filter-scenario"
+            name="scenario"
+            className="kelpie-input"
+            defaultValue={filter.scenario ?? ""}
+          >
+            <option value="">All scenarios</option>
+            {BASELINE_PLAYBOOKS.map((p) => (
+              <option key={p.key} value={p.key}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="pb-filter-classification" className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+            Classification
+          </label>
+          <select
+            id="pb-filter-classification"
+            name="classification"
+            className="kelpie-input"
+            defaultValue={filter.classification ?? ""}
+          >
+            <option value="">All classifications</option>
+            {CLASSIFICATIONS.map((c) => (
+              <option key={c} value={c}>
+                {c.replace(/_/g, " ")}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="pb-filter-severity" className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+            Severity
+          </label>
+          <select
+            id="pb-filter-severity"
+            name="severity"
+            className="kelpie-input"
+            defaultValue={filter.severity ?? ""}
+          >
+            <option value="">Any severity</option>
+            {SEVERITIES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="pb-filter-observable" className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+            Required observable
+          </label>
+          <select
+            id="pb-filter-observable"
+            name="observableType"
+            className="kelpie-input"
+            defaultValue={filter.observableType ?? ""}
+          >
+            <option value="">Any type</option>
+            {OBSERVABLE_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t.replace(/_/g, " ")}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="pb-filter-tag" className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
+            Tag
+          </label>
+          <input
+            id="pb-filter-tag"
+            name="tag"
+            className="kelpie-input"
+            placeholder="e.g. endpoint"
+            defaultValue={filter.tag ?? ""}
+          />
+        </div>
+        <div className="flex items-end gap-2">
+          <button type="submit" className="kelpie-btn kelpie-btn-primary">
+            Apply filters
+          </button>
+          {hasFilter ? (
+            <Link href="/playbooks" className="kelpie-btn kelpie-btn-ghost text-sm">
+              Clear
+            </Link>
+          ) : null}
+        </div>
+      </form>
+
       <div className="kelpie-card kelpie-scroll-x" tabIndex={0} aria-label="Playbooks table">
         <table className="kelpie-table">
           <thead>
             <tr>
               <th>Name</th>
               <th>Classification</th>
+              <th>Severity</th>
+              <th>Provenance</th>
               <th>Steps</th>
               <th>Active</th>
               <th></th>
@@ -61,52 +212,79 @@ export default async function PlaybooksPage() {
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={5} className="text-center text-slate-500 py-8">
-                  No playbooks yet.
+                <td colSpan={7} className="text-center text-slate-500 py-8">
+                  {hasFilter
+                    ? "No playbooks match these filters."
+                    : "No playbooks yet."}
                 </td>
               </tr>
             ) : (
-              rows.map((p) => {
-                const steps = Array.isArray(p.steps) ? (p.steps as unknown[]) : [];
-                return (
-                  <tr key={p.id}>
-                    <td>
-                      <Link
-                        href={`/playbooks/${p.id}`}
-                        className="kelpie-link font-medium"
-                      >
-                        {p.name}
-                      </Link>
-                      {p.description ? (
-                        <div className="text-xs text-slate-500 mt-0.5">
-                          {p.description}
-                        </div>
-                      ) : null}
-                    </td>
-                    <td className="text-slate-300 text-xs capitalize">
-                      {p.classification.replace(/_/g, " ")}
-                    </td>
-                    <td className="text-slate-300 tabular-nums">{steps.length}</td>
-                    <td>
-                      <span
-                        className={
-                          "kelpie-badge " +
-                          (p.isActive
-                            ? "text-green-400"
-                            : "text-slate-500")
-                        }
-                      >
-                        {p.isActive ? "active" : "inactive"}
-                      </span>
-                    </td>
-                    <td className="text-right">
-                      <Link href={`/playbooks/${p.id}`} className="kelpie-link text-sm">
-                        Edit →
-                      </Link>
-                    </td>
-                  </tr>
-                );
-              })
+              rows.map((p) => (
+                <tr key={p.id}>
+                  <td>
+                    <Link
+                      href={`/playbooks/${p.id}`}
+                      className="kelpie-link font-medium"
+                    >
+                      {p.name}
+                    </Link>
+                    {p.description ? (
+                      <div className="text-xs text-slate-500 mt-0.5">
+                        {p.description}
+                      </div>
+                    ) : null}
+                    {p.tags.length > 0 ? (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {p.tags.map((tag) => (
+                          <span
+                            key={tag}
+                            className="kelpie-badge text-[10px] text-slate-400"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td className="text-slate-300 text-xs capitalize">
+                    {p.classification.replace(/_/g, " ")}
+                  </td>
+                  <td className="text-slate-300 text-xs capitalize">
+                    {p.defaultSeverity ?? "—"}
+                  </td>
+                  <td>
+                    <span
+                      className={
+                        "kelpie-badge text-xs " +
+                        (p.isBaseline ? "text-[color:var(--color-tan-300)]" : "text-slate-400")
+                      }
+                      title={
+                        p.isBaseline
+                          ? `Baseline catalogue v${p.catalogueVersion ?? 1} (${p.catalogueKey})`
+                          : "Custom playbook authored by your team"
+                      }
+                    >
+                      {p.isBaseline ? `Baseline v${p.catalogueVersion ?? 1}` : "Custom"}
+                    </span>
+                  </td>
+                  <td className="text-slate-300 tabular-nums">{p.stepCount}</td>
+                  <td>
+                    <span
+                      className={
+                        "kelpie-badge " +
+                        (p.isActive ? "text-green-400" : "text-slate-500")
+                      }
+                    >
+                      {p.isActive ? "active" : "inactive"}
+                    </span>
+                  </td>
+                  <td className="text-right">
+                    <Link href={`/playbooks/${p.id}`} className="kelpie-link text-sm">
+                      Edit →
+                    </Link>
+                  </td>
+                </tr>
+              ))
             )}
           </tbody>
         </table>
@@ -123,6 +301,7 @@ export default async function PlaybooksPage() {
               <th>Classification</th>
               <th>Default severity</th>
               <th>TLP</th>
+              <th>Provenance</th>
               <th>Default tasks</th>
               <th></th>
             </tr>
@@ -130,7 +309,7 @@ export default async function PlaybooksPage() {
           <tbody>
             {templates.length === 0 ? (
               <tr>
-                <td colSpan={6} className="text-center text-slate-500 py-8">
+                <td colSpan={7} className="text-center text-slate-500 py-8">
                   No case templates yet.
                 </td>
               </tr>
@@ -150,6 +329,16 @@ export default async function PlaybooksPage() {
                     </td>
                     <td className="text-slate-300 text-xs">
                       {t.defaultTlp.replace("_", "+")}
+                    </td>
+                    <td>
+                      <span
+                        className={
+                          "kelpie-badge text-xs " +
+                          (t.catalogueKey ? "text-[color:var(--color-tan-300)]" : "text-slate-400")
+                        }
+                      >
+                        {t.catalogueKey ? "Baseline" : "Custom"}
+                      </span>
                     </td>
                     <td className="tabular-nums text-slate-400">{tasks.length}</td>
                     <td className="text-right">

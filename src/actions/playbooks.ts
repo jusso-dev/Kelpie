@@ -14,6 +14,9 @@ import { requireRole } from "@/lib/session";
 import { newId } from "@/lib/utils";
 import { writeTimelineEvent } from "@/lib/timeline";
 import type { PlaybookStep } from "@/db/schema";
+import { seedBaselineOrganisationData } from "@/lib/baseline-data";
+import { OBSERVABLE_TYPES } from "@/lib/observables-core";
+import { parseTagsInput } from "@/lib/tags";
 
 const CLASSIFICATIONS = [
   "malware",
@@ -24,6 +27,28 @@ const CLASSIFICATIONS = [
   "policy_violation",
   "other",
 ] as const;
+
+const SEVERITIES = ["low", "medium", "high", "critical"] as const;
+
+function pickOptionalEnum<T extends readonly string[]>(
+  values: T,
+  raw: FormDataEntryValue | null,
+): T[number] | null {
+  const v = typeof raw === "string" ? raw.trim() : "";
+  return (values as readonly string[]).includes(v) ? (v as T[number]) : null;
+}
+
+function parseRequiredObservableTypes(formData: FormData): string[] {
+  const raw = formData.getAll("requiredObservableTypes");
+  const allowed = new Set<string>(OBSERVABLE_TYPES);
+  const out: string[] = [];
+  for (const value of raw) {
+    if (typeof value === "string" && allowed.has(value) && !out.includes(value)) {
+      out.push(value);
+    }
+  }
+  return out;
+}
 
 type ParsedStep = {
   title: string;
@@ -77,6 +102,9 @@ export async function createPlaybook(formData: FormData) {
     offsetMinutes: s.offsetMinutes,
     isRequired: s.isRequired,
   }));
+  const defaultSeverity = pickOptionalEnum(SEVERITIES, formData.get("defaultSeverity"));
+  const tags = parseTagsInput(String(formData.get("tags") ?? ""));
+  const requiredObservableTypes = parseRequiredObservableTypes(formData);
 
   const id = newId("pb");
   await db.insert(playbooks).values({
@@ -85,7 +113,10 @@ export async function createPlaybook(formData: FormData) {
     name,
     description,
     classification,
+    defaultSeverity,
     steps,
+    tags,
+    requiredObservableTypes,
   });
   revalidatePath("/playbooks");
   redirect(`/playbooks/${id}`);
@@ -109,10 +140,21 @@ export async function updatePlaybook(playbookId: string, formData: FormData) {
     offsetMinutes: s.offsetMinutes,
     isRequired: s.isRequired,
   }));
+  const defaultSeverity = pickOptionalEnum(SEVERITIES, formData.get("defaultSeverity"));
+  const tags = parseTagsInput(String(formData.get("tags") ?? ""));
+  const requiredObservableTypes = parseRequiredObservableTypes(formData);
 
   await db
     .update(playbooks)
-    .set({ name, description, classification, steps })
+    .set({
+      name,
+      description,
+      classification,
+      defaultSeverity,
+      steps,
+      tags,
+      requiredObservableTypes,
+    })
     .where(
       and(
         eq(playbooks.id, playbookId),
@@ -211,4 +253,28 @@ export async function startPlaybookOnCase(formData: FormData) {
 
   revalidatePath(`/cases/${caseId}`);
   revalidatePath(`/cases/${caseId}/tasks`);
+}
+
+/**
+ * Explicit, admin-triggered sync of the baseline playbook catalogue. Adding a
+ * new scenario to `src/lib/playbook-catalogue.ts` never appears automatically
+ * in an already-onboarded organisation — an admin runs this to pull in any
+ * baseline playbooks/templates the organisation does not have yet. It never
+ * touches an existing row (see `seedBaselineOrganisationData`), so it is safe
+ * to run at any time, including on organisations with customised baseline
+ * playbooks.
+ */
+export async function syncBaselineCatalogue(): Promise<{
+  playbooksAdded: number;
+  templatesAdded: number;
+  templatesRelinked: number;
+}> {
+  const user = await requireRole(["admin"]);
+  const result = await seedBaselineOrganisationData(user.organisationId);
+  revalidatePath("/playbooks");
+  return {
+    playbooksAdded: result.playbooksCreated,
+    templatesAdded: result.templatesCreated,
+    templatesRelinked: result.templatesRelinked,
+  };
 }

@@ -228,6 +228,31 @@ SSO sessions are BetterAuth-compatible: the callback creates a session row and s
 - **Presence**: opening a case shows the avatars of other analysts viewing it, plus a "typing a comment" indicator. Transport is a Postgres-backed roster streamed over server-sent events at `/api/cases/{id}/presence`, so it works across app replicas. Rows expire after 30s of inactivity and are pruned by the jobs worker.
 - **Version-guarded field saves**: guarded case fields (severity, classification, TLP, PAP, assignee, tags) carry an optimistic version stamp. A conflicting save is rejected with the current value so the analyst can reload and choose what to keep. The same version guard is enforced on `PATCH /api/v1/cases/{id}` (send `version`; a stale value returns `409 version_conflict`).
 
+### Playbook catalogue and agent prompt (LLM.txt)
+
+A versioned baseline catalogue of 16 common SOC scenarios (phishing, BEC,
+malware/ransomware, account takeover, malicious OAuth/token theft,
+privileged-account misuse, exposed secrets, data exfiltration/exposure, lost
+or stolen endpoints, insider threat, cloud workload compromise, web
+application/WAF attacks, denial of service, DNS/domain compromise,
+third-party/vendor compromise, and confirmed malicious IOC matches) ships
+under **Playbooks**, each with triggers, exclusions, severity guidance,
+evidence to preserve, decision points, actions requiring approval, closure
+criteria, and MITRE ATT&CK technique references. Seeding is idempotent and
+never overwrites an organisation's edits or custom playbooks; administrators
+can pull in newly-added baseline scenarios at any time via **Sync baseline
+catalogue**. Baseline vs. custom provenance is visible everywhere the
+catalogue is shown, and it is searchable/filterable by scenario,
+classification, severity, tag, and required observable type.
+
+Read-only discovery is available to scoped agents via `playbooks:read` —
+MCP tools `playbooks_list`/`playbooks_get`, or REST
+`GET /api/v1/playbooks`/`GET /api/v1/playbooks/{id}`. A copyable prompt for
+driving an agent against this catalogue safely is published at
+[`LLM.txt`](LLM.txt) (also under **Guides → Playbooks and agents** in the
+product). See [`docs/playbooks.md`](docs/playbooks.md) for the catalogue's
+structure, maintenance rules, and a worked example.
+
 ### Native iOS companion
 
 The SwiftUI companion under `apps/ios` is case-first: open cases, readable case detail, comments, assigned and team task queues, and task completion. It uses the same BetterAuth identities through dedicated least-privilege mobile bearer sessions stored in the iOS Keychain.

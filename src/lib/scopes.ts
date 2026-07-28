@@ -18,6 +18,10 @@ export const KNOWN_SCOPES = [
     value: "case_relationships:write",
     label: "Link, unlink, and dismiss case relationships",
   },
+  {
+    value: "playbooks:read",
+    label: "Read the playbook catalogue and case templates",
+  },
   { value: "evidence:read", label: "Read evidence metadata and custody history" },
   {
     value: "evidence:write",
