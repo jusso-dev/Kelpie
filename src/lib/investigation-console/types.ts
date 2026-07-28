@@ -1,3 +1,4 @@
+import type { AccessActor } from "@/lib/access";
 import type { ScopeValue } from "@/lib/scopes";
 import type { z } from "zod";
 
@@ -28,6 +29,11 @@ export type ParamField = {
 export type InvestigationContext = {
   organisationId: string;
   actorId: string | null;
+  /**
+   * Access actor for compartment filtering inside handlers (e.g. previous
+   * cases). Never a system_internal actor on user request paths.
+   */
+  accessActor: AccessActor;
   caseId?: string | null;
   entityId?: string | null;
   evidenceId?: string | null;

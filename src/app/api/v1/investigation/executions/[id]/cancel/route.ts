@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
+import { resolveTokenActor } from "@/lib/access";
 import {
+  assertExecutionCaseAccess,
   cancelInvestigationExecution,
+  getInvestigationExecution,
   InvestigationConsoleError,
   toPublicExecution,
 } from "@/lib/investigation-console/core";
@@ -27,6 +30,29 @@ export async function POST(req: Request, { params }: Params) {
     );
   }
   const { id } = await params;
+  const existing = await getInvestigationExecution(
+    auth.token.organisationId,
+    id,
+  );
+  if (!existing) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
+  const actor = await resolveTokenActor(auth.token);
+  try {
+    await assertExecutionCaseAccess(
+      auth.token.organisationId,
+      existing,
+      actor,
+      "edit",
+    );
+  } catch (err) {
+    if (err instanceof InvestigationConsoleError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
+    throw err;
+  }
+
   try {
     const result = await cancelInvestigationExecution({
       organisationId: auth.token.organisationId,

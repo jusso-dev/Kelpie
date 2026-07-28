@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
+import { resolveTokenActor } from "@/lib/access";
 import {
+  assertExecutionCaseAccess,
+  getInvestigationExecution,
   InvestigationConsoleError,
   rejectInvestigationExecution,
   toPublicExecution,
@@ -42,6 +45,29 @@ export async function POST(req: Request, { params }: Params) {
     return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
   }
   const { id } = await params;
+  const existing = await getInvestigationExecution(
+    auth.token.organisationId,
+    id,
+  );
+  if (!existing) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
+  const actor = await resolveTokenActor(auth.token);
+  try {
+    await assertExecutionCaseAccess(
+      auth.token.organisationId,
+      existing,
+      actor,
+      "edit",
+    );
+  } catch (err) {
+    if (err instanceof InvestigationConsoleError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
+    throw err;
+  }
+
   try {
     const execution = await rejectInvestigationExecution({
       organisationId: auth.token.organisationId,

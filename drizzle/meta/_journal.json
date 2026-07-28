@@ -267,6 +267,13 @@
       "when": 1785241011298,
       "tag": "0037_investigation_graph",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1785241000000,
+      "tag": "0037_investigation_console_acl",
+      "breakpoints": true
     }
   ]
 }

@@ -2,6 +2,7 @@ import { and, desc, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { cases, observables } from "@/db/schema";
+import { filterCasesForActor } from "@/lib/access";
 import {
   entityValueSchema,
   observableTypeSchema,
@@ -16,6 +17,7 @@ const paramSchema = z.object({
 
 /**
  * Search previous Kelpie cases that share an observable value (tenant-scoped).
+ * Results are compartment-filtered so restricted cases never leak.
  * Pure DB query — no outbound network, no shell.
  */
 export const previousCasesHandler: InvestigationCommandHandler = {
@@ -109,6 +111,8 @@ export const previousCasesHandler: InvestigationCommandHandler = {
       conditions.push(ne(cases.id, ctx.caseId));
     }
 
+    // Over-fetch then ACL-filter so restricted cases never appear.
+    const fetchLimit = Math.min(200, limit * 4);
     const rows = await db
       .select({
         caseId: cases.id,
@@ -124,15 +128,26 @@ export const previousCasesHandler: InvestigationCommandHandler = {
       .innerJoin(cases, eq(observables.caseId, cases.id))
       .where(and(...conditions))
       .orderBy(desc(cases.openedAt))
-      .limit(limit);
+      .limit(fetchLimit);
 
     // Deduplicate by case (an observable may appear once per type).
     const seen = new Set<string>();
-    const unique = [];
+    const unique: Array<{
+      id: string;
+      caseId: string;
+      caseNumber: string;
+      title: string;
+      status: string;
+      severity: string;
+      matchedType: string;
+      matchedValue: string;
+      openedAt: string | Date | null;
+    }> = [];
     for (const row of rows) {
       if (seen.has(row.caseId)) continue;
       seen.add(row.caseId);
       unique.push({
+        id: row.caseId,
         caseId: row.caseId,
         caseNumber: row.caseNumber,
         title: row.title,
@@ -144,10 +159,26 @@ export const previousCasesHandler: InvestigationCommandHandler = {
       });
     }
 
+    const allowed = await filterCasesForActor(
+      ctx.organisationId,
+      ctx.accessActor,
+      unique,
+    );
+    const visible = allowed.slice(0, limit).map((row) => ({
+      caseId: row.caseId,
+      caseNumber: row.caseNumber,
+      title: row.title,
+      status: row.status,
+      severity: row.severity,
+      matchedType: row.matchedType,
+      matchedValue: row.matchedValue,
+      openedAt: row.openedAt,
+    }));
+
     return {
       ok: true,
       renderer: "table",
-      summary: `Found ${unique.length} previous case(s) for ${value}`,
+      summary: `Found ${visible.length} previous case(s) for ${value}`,
       providerRequestId: `kelpie-db:${ctx.organisationId}:${Date.now()}`,
       data: {
         columns: [
@@ -158,7 +189,7 @@ export const previousCasesHandler: InvestigationCommandHandler = {
           "matchedType",
           "openedAt",
         ],
-        rows: unique,
+        rows: visible,
         query: { value, type: type ?? null, limit },
       },
     };

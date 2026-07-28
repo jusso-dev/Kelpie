@@ -19,6 +19,15 @@ import {
   investigationExecutions,
   type InvestigationExecution,
 } from "@/db/schema";
+import {
+  authorizeCase,
+  evaluateCasePermissions,
+  hasPermission,
+  loadCaseAccessContexts,
+  resolveUserActor,
+  type AccessActor,
+  type AccessPermission,
+} from "@/lib/access";
 import { newId } from "@/lib/utils";
 import { writeTimelineEvent } from "@/lib/timeline";
 import { tokenHasScope, type ScopeValue } from "@/lib/scopes";
@@ -84,6 +93,100 @@ async function assertCaseInOrg(
   if (!row) {
     throw new InvestigationConsoleError("Case not found", 404);
   }
+}
+
+/** Resolve a request-path AccessActor for handlers and list filters. */
+export async function resolveInvestigationActor(
+  organisationId: string,
+  actorId: string | null | undefined,
+): Promise<AccessActor> {
+  if (actorId) {
+    const actor = await resolveUserActor(organisationId, actorId);
+    if (actor) return actor;
+  }
+  return {
+    organisationId,
+    userId: null,
+    role: "system",
+    teamIds: [],
+  };
+}
+
+/**
+ * When an execution is bound to a case, require the given permission.
+ * Missing/unauthorised cases share the same 404 shape.
+ */
+export async function assertExecutionCaseAccess(
+  organisationId: string,
+  execution: InvestigationExecution,
+  actor: AccessActor,
+  required: AccessPermission = "know_exists",
+): Promise<void> {
+  if (!execution.caseId) return;
+  const gate = await authorizeCase(
+    organisationId,
+    execution.caseId,
+    actor,
+    required,
+  );
+  if (!gate.ok) {
+    throw new InvestigationConsoleError(gate.error, gate.status);
+  }
+}
+
+/** True when a params tree still contains the redaction placeholder. */
+export function paramsContainRedactedMarker(value: unknown): boolean {
+  if (value === "[redacted]") return true;
+  if (Array.isArray(value)) {
+    return value.some((v) => paramsContainRedactedMarker(v));
+  }
+  if (value && typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).some((v) =>
+      paramsContainRedactedMarker(v),
+    );
+  }
+  return false;
+}
+
+/**
+ * Filter executions so case-bound rows require know_exists. Rows without a
+ * caseId stay visible to org members with investigation:read (caller-gated).
+ */
+export async function filterExecutionsForActor(
+  organisationId: string,
+  actor: AccessActor,
+  rows: InvestigationExecution[],
+): Promise<InvestigationExecution[]> {
+  if (rows.length === 0) return [];
+  const caseIds = [
+    ...new Set(
+      rows
+        .map((r) => r.caseId)
+        .filter((id): id is string => typeof id === "string" && id.length > 0),
+    ),
+  ];
+  if (caseIds.length === 0) return rows;
+
+  const contexts = await loadCaseAccessContexts(organisationId, caseIds);
+  const allowed = new Set<string>();
+  for (const caseId of caseIds) {
+    const ctx = contexts.get(caseId);
+    if (!ctx) continue;
+    const perms = evaluateCasePermissions(ctx, actor);
+    if (hasPermission(perms, "know_exists")) allowed.add(caseId);
+  }
+
+  return rows.filter((row) => {
+    if (!row.caseId) return true;
+    return allowed.has(row.caseId);
+  });
+}
+
+async function clearSealedParams(executionId: string): Promise<void> {
+  await db
+    .update(investigationExecutions)
+    .set({ paramsSealed: null })
+    .where(eq(investigationExecutions.id, executionId));
 }
 
 async function assertOptionalRefs(
@@ -255,6 +358,8 @@ export async function executeInvestigationCommand(
       status: initialStatus,
       resultRenderer: handler.resultRenderers[0] ?? "json",
       paramsRedacted,
+      // Keep full params only while dual-control is pending; never public.
+      paramsSealed: needsApproval ? params : null,
       requestedBy: input.actorId,
       expiresAt,
       idempotencyKey,
@@ -335,6 +440,7 @@ async function runExecution(opts: {
         status: "cancelled",
         completedAt: new Date(),
         errorSummary: "Cancelled before execution",
+        paramsSealed: null,
       })
       .where(eq(investigationExecutions.id, claimed.id))
       .returning();
@@ -361,9 +467,19 @@ async function runExecution(opts: {
   }, 250);
 
   try {
+    // Drop sealed params as soon as execution starts (write dual-control).
+    if (claimed.paramsSealed != null) {
+      await clearSealedParams(claimed.id);
+    }
+
+    const accessActor = await resolveInvestigationActor(
+      claimed.organisationId,
+      actorId,
+    );
     const result = await handler.execute(params, {
       organisationId: claimed.organisationId,
       actorId,
+      accessActor,
       caseId: claimed.caseId,
       entityId: claimed.entityId,
       evidenceId: claimed.evidenceId,
@@ -525,12 +641,35 @@ export async function approveInvestigationExecution(opts: {
   }
   assertScopes(opts.tokenScopes, handler.requiredScopes);
 
-  // Re-validate stored redacted params cannot re-run raw secrets; use stored
-  // params (already validated at request time). For write handlers the
-  // redacted note is still the applied note content (notes are not secrets).
-  const params = (row.paramsRedacted as Record<string, unknown>) ?? {};
+  // Prefer sealed params stored at request time. Never re-run from redacted
+  // placeholders — if sealed is missing and redacted markers remain, fail.
+  const sealed = row.paramsSealed;
+  let rawParams: Record<string, unknown>;
+  if (sealed && typeof sealed === "object" && !Array.isArray(sealed)) {
+    rawParams = sealed as Record<string, unknown>;
+  } else {
+    const fallback =
+      (row.paramsRedacted as Record<string, unknown> | null) ?? {};
+    if (paramsContainRedactedMarker(fallback)) {
+      throw new InvestigationConsoleError(
+        "Cannot approve: sealed parameters unavailable (redacted keys present). Re-submit the command.",
+        409,
+      );
+    }
+    const redactKeys = [
+      ...(handler.redactParamKeys ?? []),
+      ...handler.parameters.filter((p) => p.redact).map((p) => p.key),
+    ];
+    if (redactKeys.length > 0) {
+      throw new InvestigationConsoleError(
+        "Cannot approve: sealed parameters unavailable for redacted write params. Re-submit the command.",
+        409,
+      );
+    }
+    rawParams = fallback;
+  }
   // Re-run schema validation so version/schema drift cannot slip through.
-  const validated = validateCommandParams(handler, params);
+  const validated = validateCommandParams(handler, rawParams);
 
   const [claimed] = await db
     .update(investigationExecutions)
@@ -538,6 +677,7 @@ export async function approveInvestigationExecution(opts: {
       status: "running",
       approvedBy: opts.approverId,
       approvedAt: new Date(),
+      paramsSealed: null,
     })
     .where(
       and(
@@ -599,6 +739,7 @@ export async function rejectInvestigationExecution(opts: {
       rejectedAt: new Date(),
       rejectionReason: opts.reason?.slice(0, 500) ?? null,
       completedAt: new Date(),
+      paramsSealed: null,
     })
     .where(
       and(
@@ -652,6 +793,7 @@ export async function cancelInvestigationExecution(opts: {
         cancelRequestedBy: opts.actorId,
         completedAt: new Date(),
         errorSummary: "Cancelled",
+        paramsSealed: null,
       })
       .where(
         and(
@@ -753,7 +895,18 @@ export async function saveExecutionAsEvidence(opts: {
       409,
     );
   }
-  const caseId = opts.caseId ?? execution.caseId;
+  // Never allow saving into a different case than the execution context.
+  if (
+    opts.caseId &&
+    execution.caseId &&
+    opts.caseId !== execution.caseId
+  ) {
+    throw new InvestigationConsoleError(
+      "caseId must match the execution case",
+      400,
+    );
+  }
+  const caseId = execution.caseId ?? opts.caseId;
   if (!caseId) {
     throw new InvestigationConsoleError(
       "A case id is required to save evidence",

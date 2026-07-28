@@ -53,7 +53,38 @@ export async function POST(req: Request, { params }: Params) {
   if (!existing) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
-  const caseId = parsed.data.caseId ?? existing.caseId;
+
+  const actor = await resolveTokenActor(auth.token);
+
+  // Source execution case: actor must be able to know it exists.
+  if (existing.caseId) {
+    const sourceGate = await authorizeCase(
+      auth.token.organisationId,
+      existing.caseId,
+      actor,
+      "view_metadata",
+    );
+    if (!sourceGate.ok) {
+      return NextResponse.json(
+        { error: sourceGate.error },
+        { status: sourceGate.status },
+      );
+    }
+  }
+
+  // Forbid attaching evidence to a different case than the execution.
+  if (
+    parsed.data.caseId &&
+    existing.caseId &&
+    parsed.data.caseId !== existing.caseId
+  ) {
+    return NextResponse.json(
+      { error: "caseId must match the execution case" },
+      { status: 400 },
+    );
+  }
+
+  const caseId = existing.caseId ?? parsed.data.caseId;
   if (!caseId) {
     return NextResponse.json(
       { error: "A case id is required to save evidence" },
@@ -61,7 +92,6 @@ export async function POST(req: Request, { params }: Params) {
     );
   }
 
-  const actor = await resolveTokenActor(auth.token);
   const gate = await authorizeCase(
     auth.token.organisationId,
     caseId,

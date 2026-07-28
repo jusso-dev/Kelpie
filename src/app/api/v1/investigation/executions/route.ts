@@ -7,6 +7,7 @@ import {
 } from "@/lib/access";
 import {
   executeInvestigationCommand,
+  filterExecutionsForActor,
   InvestigationConsoleError,
   listInvestigationExecutions,
   toPublicExecution,
@@ -34,10 +35,11 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const caseId = url.searchParams.get("caseId");
   const commandName = url.searchParams.get("commandName");
+  // Over-fetch when listing org-wide so ACL filter still yields up to limit.
   const limit = Number(url.searchParams.get("limit") ?? 50);
+  const actor = await resolveTokenActor(auth.token);
 
   if (caseId) {
-    const actor = await resolveTokenActor(auth.token);
     const gate = await authorizeCase(
       auth.token.organisationId,
       caseId,
@@ -49,14 +51,26 @@ export async function GET(req: Request) {
     }
   }
 
+  const fetchLimit = caseId
+    ? limit
+    : Math.min(100, Math.max(1, Math.floor(limit)) * 4);
   const rows = await listInvestigationExecutions({
     organisationId: auth.token.organisationId,
     caseId,
     commandName,
-    limit,
+    limit: fetchLimit,
   });
+  const visible = caseId
+    ? rows
+    : (
+        await filterExecutionsForActor(
+          auth.token.organisationId,
+          actor,
+          rows,
+        )
+      ).slice(0, Math.min(100, Math.max(1, Math.floor(limit) || 50)));
   return NextResponse.json(
-    { executions: rows.map(toPublicExecution) },
+    { executions: visible.map(toPublicExecution) },
     { headers: { "cache-control": "private, no-store" } },
   );
 }

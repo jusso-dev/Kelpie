@@ -32,12 +32,17 @@ import {
   approveInvestigationExecution,
   cancelInvestigationExecution,
   executeInvestigationCommand,
+  filterExecutionsForActor,
   getInvestigationExecution,
   InvestigationConsoleError,
+  listInvestigationExecutions,
   listPublicCommands,
+  paramsContainRedactedMarker,
   rejectInvestigationExecution,
+  resolveInvestigationActor,
   saveExecutionAsEvidence,
 } from "../src/lib/investigation-console/core";
+import { setCaseVisibility } from "../src/lib/access";
 import {
   rejectDangerousParams,
   validateCommandParams,
@@ -58,9 +63,11 @@ const orgAId = `org_i62a_${runId}`;
 const orgBId = `org_i62b_${runId}`;
 const userAId = `user_i62a_${runId}`;
 const userA2Id = `user_i62a2_${runId}`;
+const userAnalystId = `user_i62an_${runId}`;
 const userBId = `user_i62b_${runId}`;
 let caseA = "";
 let caseA2 = "";
+let caseRestricted = "";
 let caseB = "";
 let entityA = "";
 
@@ -92,6 +99,13 @@ async function setup() {
       role: "admin",
     },
     {
+      id: userAnalystId,
+      name: "Analyst limited",
+      email: `i62an-${runId}@example.com`,
+      organisationId: orgAId,
+      role: "analyst",
+    },
+    {
       id: userBId,
       name: "Analyst B",
       email: `i62b-${runId}@example.com`,
@@ -101,6 +115,7 @@ async function setup() {
   ]);
   caseA = newId("case");
   caseA2 = newId("case");
+  caseRestricted = newId("case");
   caseB = newId("case");
   await db.insert(cases).values([
     {
@@ -116,6 +131,13 @@ async function setup() {
       caseNumber: `I62A2-${runId}`,
       title: "Prior case same IP",
       severity: "medium",
+    },
+    {
+      id: caseRestricted,
+      organisationId: orgAId,
+      caseNumber: `I62AR-${runId}`,
+      title: "Restricted prior case",
+      severity: "critical",
     },
     {
       id: caseB,
@@ -139,11 +161,32 @@ async function setup() {
     },
     {
       id: newId("obs"),
+      caseId: caseRestricted,
+      type: "ip",
+      value: "203.0.113.62",
+    },
+    {
+      id: newId("obs"),
       caseId: caseB,
       type: "ip",
       value: "203.0.113.62",
     },
   ]);
+  // Compartment: restricted prior case invisible to plain analysts.
+  await setCaseVisibility(
+    orgAId,
+    {
+      organisationId: orgAId,
+      userId: userAId,
+      role: "admin",
+      teamIds: [],
+    },
+    caseRestricted,
+    {
+      visibilityMode: "restricted",
+      reason: "Need-to-know investigation console ACL test",
+    },
+  );
   entityA = newId("ent");
   await db.insert(entities).values({
     id: entityA,
@@ -177,12 +220,18 @@ async function cleanup() {
     .where(inArray(attachments.organisationId, [orgAId, orgBId]));
   await db
     .delete(observables)
-    .where(inArray(observables.caseId, [caseA, caseA2, caseB]));
+    .where(
+      inArray(observables.caseId, [caseA, caseA2, caseRestricted, caseB]),
+    );
   await db.delete(entities).where(eq(entities.organisationId, orgAId));
   await db
     .delete(cases)
-    .where(inArray(cases.id, [caseA, caseA2, caseB]));
-  await db.delete(users).where(inArray(users.id, [userAId, userA2Id, userBId]));
+    .where(inArray(cases.id, [caseA, caseA2, caseRestricted, caseB]));
+  await db
+    .delete(users)
+    .where(
+      inArray(users.id, [userAId, userA2Id, userAnalystId, userBId]),
+    );
   await db
     .delete(organisations)
     .where(inArray(organisations.id, [orgAId, orgBId]));
@@ -348,7 +397,35 @@ async function main() {
       !rows.some((r) => r.caseId === caseA),
       "excludes current case when case context set",
     );
-    console.log("ok: previous_cases + tenant isolation");
+    // Admin still knows restricted cases exist.
+    assert.ok(
+      rows.some((r) => r.caseId === caseRestricted),
+      "admin sees restricted prior case via know_exists",
+    );
+
+    // Analyst without grant must not see restricted prior case.
+    const runPrevAnalyst = await executeInvestigationCommand({
+      organisationId: orgAId,
+      actorId: userAnalystId,
+      tokenScopes: scopesFull,
+      commandName: "kelpie.previous_cases",
+      params: { value: "203.0.113.62", type: "ip", limit: 20 },
+      caseId: caseA,
+    });
+    assert.equal(runPrevAnalyst.execution.status, "succeeded");
+    const analystSummary = runPrevAnalyst.execution.resultSummary as {
+      data?: { rows?: Array<{ caseId: string }> };
+    };
+    const analystRows = analystSummary?.data?.rows ?? [];
+    assert.ok(
+      analystRows.some((r) => r.caseId === caseA2),
+      "analyst still sees organisation-visible prior case",
+    );
+    assert.ok(
+      !analystRows.some((r) => r.caseId === caseRestricted),
+      "analyst must not leak restricted case via previous_cases",
+    );
+    console.log("ok: previous_cases + tenant isolation + compartment filter");
 
     // ── VirusTotal mock path (no key) ─────────────────────────────────
     const runVt = await executeInvestigationCommand({
@@ -551,6 +628,124 @@ async function main() {
         err instanceof InvestigationConsoleError && err.status === 404,
     );
     console.log("ok: cross-tenant case execute rejected");
+
+    // ── save-evidence forbids cross-case body ─────────────────────────
+    await assert.rejects(
+      () =>
+        saveExecutionAsEvidence({
+          organisationId: orgAId,
+          actorId: userAId,
+          executionId: runPrev.execution.id,
+          caseId: caseA2,
+        }),
+      (err: unknown) =>
+        err instanceof InvestigationConsoleError &&
+        err.status === 400 &&
+        /must match the execution case/.test(err.message),
+    );
+    console.log("ok: save-evidence rejects caseId mismatch");
+
+    // ── list executions filters restricted cases for analyst ──────────
+    const allListed = await listInvestigationExecutions({
+      organisationId: orgAId,
+      limit: 50,
+    });
+    // Seed a restricted-case execution row the analyst must not see.
+    const restrictedExec = await executeInvestigationCommand({
+      organisationId: orgAId,
+      actorId: userAId,
+      tokenScopes: scopesFull,
+      commandName: "kelpie.previous_cases",
+      params: { value: "203.0.113.62", type: "ip" },
+      caseId: caseRestricted,
+    });
+    assert.equal(restrictedExec.execution.status, "succeeded");
+    const analystActor = await resolveInvestigationActor(
+      orgAId,
+      userAnalystId,
+    );
+    const filtered = await filterExecutionsForActor(
+      orgAId,
+      analystActor,
+      await listInvestigationExecutions({ organisationId: orgAId, limit: 50 }),
+    );
+    assert.ok(
+      !filtered.some((r) => r.id === restrictedExec.execution.id),
+      "list filter omits restricted-case execution for analyst",
+    );
+    assert.ok(
+      filtered.some((r) => r.caseId === caseA),
+      "list filter keeps organisation-visible executions",
+    );
+    assert.ok(allListed.length >= filtered.length);
+    console.log("ok: list executions know_exists filter");
+
+    // ── approve refuses redacted placeholders without sealed params ───
+    assert.equal(paramsContainRedactedMarker({ note: "ok" }), false);
+    assert.equal(
+      paramsContainRedactedMarker({ secret: "[redacted]" }),
+      true,
+    );
+    const writeSealed = await executeInvestigationCommand({
+      organisationId: orgAId,
+      actorId: userAId,
+      tokenScopes: scopesFull,
+      commandName: "kelpie.flag_entity_reviewed",
+      params: { entityId: entityA, note: "sealed params path" },
+      caseId: caseA,
+    });
+    assert.equal(writeSealed.execution.status, "awaiting_approval");
+    const [pending] = await db
+      .select()
+      .from(investigationExecutions)
+      .where(eq(investigationExecutions.id, writeSealed.execution.id))
+      .limit(1);
+    assert.ok(pending?.paramsSealed, "sealed params stored for approval");
+    assert.equal(
+      (pending?.paramsSealed as { note?: string })?.note,
+      "sealed params path",
+    );
+    // Clear sealed to simulate redacted-only storage, force fail path.
+    await db
+      .update(investigationExecutions)
+      .set({
+        paramsSealed: null,
+        paramsRedacted: { entityId: entityA, note: "[redacted]" },
+      })
+      .where(eq(investigationExecutions.id, writeSealed.execution.id));
+    await assert.rejects(
+      () =>
+        approveInvestigationExecution({
+          organisationId: orgAId,
+          approverId: userA2Id,
+          executionId: writeSealed.execution.id,
+          tokenScopes: scopesFull,
+        }),
+      /sealed parameters unavailable/,
+    );
+    // Restore sealed and approve successfully.
+    await db
+      .update(investigationExecutions)
+      .set({
+        paramsSealed: { entityId: entityA, note: "sealed params path" },
+        paramsRedacted: { entityId: entityA, note: "sealed params path" },
+        status: "awaiting_approval",
+      })
+      .where(eq(investigationExecutions.id, writeSealed.execution.id));
+    const approvedSealed = await approveInvestigationExecution({
+      organisationId: orgAId,
+      approverId: userA2Id,
+      executionId: writeSealed.execution.id,
+      tokenScopes: scopesFull,
+    });
+    assert.equal(approvedSealed.status, "succeeded");
+    const [afterApprove] = await db
+      .select({ paramsSealed: investigationExecutions.paramsSealed })
+      .from(investigationExecutions)
+      .where(eq(investigationExecutions.id, writeSealed.execution.id))
+      .limit(1);
+    assert.equal(afterApprove?.paramsSealed, null, "sealed cleared after run");
+    console.log("ok: sealed params approve path + redacted fail-closed");
 
     console.log("\nAll investigation console tests passed.");
   } finally {
