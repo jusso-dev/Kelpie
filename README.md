@@ -200,8 +200,9 @@ the signed-in user's configured timezone.
 
 REST consumers use `/api/v1/threat-intelligence`, `/api/v1/threat-landscape`,
 and `/api/v1/briefing`. Agents can connect to the stateless Streamable HTTP MCP
-endpoint at `/api/mcp`; create a scoped bearer token under **Settings → API
-tokens**. See [API and MCP documentation](docs/api.md).
+endpoint at `/api/mcp`; administrators use **Settings → MCP agent setup** for
+copyable endpoint, least-privilege scopes, client config, and AGENTS.md
+instructions (token secret shown once). See [API and MCP documentation](docs/api.md).
 
 ### Custom field builder
 

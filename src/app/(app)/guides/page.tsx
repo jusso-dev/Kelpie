@@ -178,9 +178,14 @@ export default function GuidesPage() {
               <p>
                 Administrators create tokens under{" "}
                 <LinkText href="/settings">Settings, API tokens</LinkText>.
-                REST endpoints are available below{" "}
-                <code className="text-xs text-slate-200">/api/v1</code>. MCP is
-                available at{" "}
+                For agents, use{" "}
+                <LinkText href="/settings#mcp-agent-setup">
+                  Settings, MCP agent setup
+                </LinkText>{" "}
+                for a copyable Streamable HTTP endpoint, least-privilege scopes,
+                client config, and AGENTS.md block. REST endpoints are available
+                below <code className="text-xs text-slate-200">/api/v1</code>.
+                MCP is available at{" "}
                 <code className="text-xs text-slate-200">/api/mcp</code>.
               </p>
               <pre className="kelpie-scroll-x rounded-lg bg-[color:var(--color-navy-900)] p-4 text-xs text-slate-300">

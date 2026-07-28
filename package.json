@@ -55,6 +55,7 @@
     "test:run-console": "tsx scripts/test-run-console.ts",
     "test:playbook-catalogue": "tsx scripts/test-playbook-catalogue.ts",
     "test:playbooks-api": "tsx scripts/test-playbooks-api.ts",
+    "test:mcp-onboarding": "tsx scripts/test-mcp-onboarding.ts",
     "test:team-queues": "tsx scripts/test-team-queues.ts",
     "test:attack-core": "tsx scripts/test-attack-core.ts",
     "test:attack-catalog-import": "tsx scripts/test-attack-catalog-import.ts",
