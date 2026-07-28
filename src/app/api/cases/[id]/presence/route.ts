@@ -5,7 +5,7 @@ import { db } from "@/db";
 import { cases, users } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { getRoster, heartbeat, leave } from "@/lib/presence";
-import { getRecentActivity } from "@/lib/case-activity";
+import { getRecentActivity, type CaseActivityCursor } from "@/lib/case-activity";
 
 async function resolve(id: string) {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -55,7 +55,12 @@ export async function GET(
       // restarted server or a dropped connection can never leave a client
       // stuck on stale data waiting for a gap-filling replay that never
       // comes.
-      let activityCursor = new Date();
+      let activityCursor: CaseActivityCursor = {
+        occurredAt: new Date(),
+        // Sorts before any real id, so an event written in the same
+        // millisecond this connection opened is still delivered.
+        id: "",
+      };
       const push = async () => {
         if (closed) return;
         try {
@@ -64,7 +69,11 @@ export async function GET(
             getRecentActivity(id, activityCursor),
           ]);
           if (activity.length > 0) {
-            activityCursor = new Date(activity[activity.length - 1].occurredAt);
+            const last = activity[activity.length - 1];
+            activityCursor = {
+              occurredAt: new Date(last.occurredAt),
+              id: last.id,
+            };
           }
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify({ roster, activity })}\n\n`),

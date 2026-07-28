@@ -179,7 +179,10 @@ async function testGetRecentActivityEnvelopeShape() {
     { id: markerB, caseId: record.id, actorId: null, eventType: "custom", payload: {}, occurredAt: t1 },
   ]);
   try {
-    const sinceNothing = await getRecentActivity(record.id, new Date(t0.getTime() - 1));
+    const sinceNothing = await getRecentActivity(record.id, {
+      occurredAt: new Date(t0.getTime() - 1),
+      id: "",
+    });
     const ids = sinceNothing.map((e) => e.id);
     assert.ok(ids.includes(markerA) && ids.includes(markerB), "both events are returned");
     const first = sinceNothing.find((e) => e.id === markerA);
@@ -188,7 +191,7 @@ async function testGetRecentActivityEnvelopeShape() {
     assert.equal(typeof first.occurredAt, "string");
     assert.equal(first.actorId, null);
 
-    const sinceT0 = await getRecentActivity(record.id, t0);
+    const sinceT0 = await getRecentActivity(record.id, { occurredAt: t0, id: markerA });
     assert.ok(
       !sinceT0.some((e) => e.id === markerA),
       "events at or before the cursor are excluded, not replayed",
@@ -199,6 +202,42 @@ async function testGetRecentActivityEnvelopeShape() {
     await db.delete(timelineEvents).where(eq(timelineEvents.id, markerB));
   }
   console.log("getRecentActivity: envelope shape and cursor exclusivity passed.");
+}
+
+/**
+ * Regression: a single transaction can write several timeline events sharing
+ * one `occurredAt` (bulk edits do this). An `occurredAt`-only cursor drops
+ * every event tied with the last one it delivered, so the composite
+ * `(occurredAt, id)` cursor must still return the rest of the tie.
+ */
+async function testTiedTimestampsAreNotSkipped() {
+  const { record } = await loadSeed();
+  const tied = new Date();
+  const tieA = "tle_tie_a";
+  const tieB = "tle_tie_b";
+  await db.insert(timelineEvents).values([
+    { id: tieA, caseId: record.id, actorId: null, eventType: "custom", payload: {}, occurredAt: tied },
+    { id: tieB, caseId: record.id, actorId: null, eventType: "custom", payload: {}, occurredAt: tied },
+  ]);
+  try {
+    const afterTieA = await getRecentActivity(record.id, { occurredAt: tied, id: tieA });
+    const ids = afterTieA.map((e) => e.id);
+    assert.ok(
+      ids.includes(tieB),
+      "an event sharing the cursor's timestamp but ordering after it is still delivered",
+    );
+    assert.ok(!ids.includes(tieA), "the cursor's own event is not replayed");
+
+    const afterTieB = await getRecentActivity(record.id, { occurredAt: tied, id: tieB });
+    assert.ok(
+      !afterTieB.some((e) => e.id === tieA || e.id === tieB),
+      "the tie is fully consumed once the cursor passes its last id",
+    );
+  } finally {
+    await db.delete(timelineEvents).where(eq(timelineEvents.id, tieA));
+    await db.delete(timelineEvents).where(eq(timelineEvents.id, tieB));
+  }
+  console.log("getRecentActivity: tied timestamps are not skipped at the page boundary.");
 }
 
 async function testVersionConflictEnvelope() {
@@ -390,6 +429,7 @@ async function main() {
   testFoldActivityBoundsIdCache();
   testReconnectBackoffIsCappedAndIncreasing();
   await testGetRecentActivityEnvelopeShape();
+  await testTiedTimestampsAreNotSkipped();
   await testVersionConflictEnvelope();
 
   const browser = await chromium.launch({ headless: true });
