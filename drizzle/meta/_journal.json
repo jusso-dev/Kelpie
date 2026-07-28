@@ -274,6 +274,13 @@
       "when": 1785241333930,
       "tag": "0038_investigation_console",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1785242050949,
+      "tag": "0039_stakeholder_portal",
+      "breakpoints": true
     }
   ]
 }
