@@ -10,6 +10,8 @@ import { newId } from "@/lib/utils";
 import { writeTimelineEvent } from "@/lib/timeline";
 import { getActionHandler } from "./registry";
 import type { ActionResult, CaseObservable } from "./types";
+import { checkKillSwitch, providerForActionKind } from "@/lib/run-console/kill-switch";
+import { isUniqueViolation } from "@/lib/db-errors";
 
 export const RESPONSE_ACTION_APPROVAL_WINDOW_MS = 15 * 60 * 1000;
 
@@ -231,20 +233,42 @@ async function executeApprovedRun(opts: {
     opts.actionId,
     opts.caseId,
   );
+
+  // Execution-time kill switch check: even once a run has been claimed
+  // (approved), a switch armed in the window before the provider call must
+  // still stop it (issue #67: "checked at both claim time and execution
+  // time"). The provider is never contacted when this trips.
+  const provider = providerForActionKind(action.kind);
+  const killSwitch = await checkKillSwitch(opts.organisationId, {
+    provider,
+    actionId: action.id,
+  });
   let result: ActionResult;
-  try {
-    result = await handler.execute({
-      organisationId: opts.organisationId,
-      caseId: opts.caseId,
-      config: (action.config as Record<string, unknown>) ?? {},
-      input: opts.input,
-    });
-  } catch (error) {
+  let errorCategory: string | null = null;
+  if (killSwitch.active) {
+    errorCategory = "kill_switch";
     result = {
       ok: false,
-      summary: "Response action provider call failed",
-      error: (error as Error).message,
+      summary: `Blocked by the ${killSwitch.scope} kill switch: ${killSwitch.reason}`,
+      error: "kill_switch",
     };
+  } else {
+    try {
+      result = await handler.execute({
+        organisationId: opts.organisationId,
+        caseId: opts.caseId,
+        config: (action.config as Record<string, unknown>) ?? {},
+        input: opts.input,
+      });
+      if (!result.ok) errorCategory = "provider_error";
+    } catch (error) {
+      errorCategory = "provider_error";
+      result = {
+        ok: false,
+        summary: "Response action provider call failed",
+        error: (error as Error).message,
+      };
+    }
   }
 
   await db
@@ -259,6 +283,7 @@ async function executeApprovedRun(opts: {
         data: result.data ?? null,
         error: result.error ?? null,
       },
+      errorCategory: result.ok ? null : errorCategory,
       completedAt: new Date(),
     })
     .where(eq(responseActionRuns.id, opts.runId));
@@ -308,6 +333,19 @@ export async function approveResponseAction(
   }
   if (!row.run.expiresAt || row.run.expiresAt <= new Date()) {
     throw new Error("Response action approval request has expired");
+  }
+  // Claim-time kill switch check: refuse to move a destructive action out of
+  // "awaiting_approval" at all while an organisation/provider/action switch
+  // is armed. The request stays queued (untouched) so it can proceed once
+  // the switch is cleared and it is re-approved before its own expiry.
+  const claimKillSwitch = await checkKillSwitch(organisationId, {
+    provider: providerForActionKind(row.action.kind),
+    actionId: row.action.id,
+  });
+  if (claimKillSwitch.active) {
+    throw new Error(
+      `Blocked by the ${claimKillSwitch.scope} kill switch: ${claimKillSwitch.reason}`,
+    );
   }
   const handler = getActionHandler(row.action.kind);
   if (!handler?.approvalRequired) throw new Error("Action approval policy changed");
@@ -361,6 +399,7 @@ export async function approveResponseAction(
       .set({
         status: "failed",
         response: { ok: false, summary, error: "pre_execution_revalidation_failed" },
+        errorCategory: "target_changed",
         completedAt: new Date(),
       })
       .where(eq(responseActionRuns.id, claimed.id));
@@ -451,4 +490,157 @@ export async function cancelResponseAction(
     eventType: "response_action",
     payload: { status: "cancelled", target: cancelled.target },
   });
+}
+
+/**
+ * Best-effort cancel for the run console (issue #67). A request still
+ * `awaiting_approval` is cancelled outright, identically to
+ * `cancelResponseAction` above. Anything already `running` only gets a
+ * `cancel_requested` marker: the provider call already in flight completes
+ * on its own and records its true outcome. This function never rewrites a
+ * terminal run and never claims a provider effect was reversed.
+ */
+export async function requestResponseActionCancel(
+  organisationId: string,
+  actorId: string,
+  runId: string,
+): Promise<{ status: string; bestEffort: boolean }> {
+  const [run] = await db
+    .select()
+    .from(responseActionRuns)
+    .where(
+      and(
+        eq(responseActionRuns.id, runId),
+        eq(responseActionRuns.organisationId, organisationId),
+      ),
+    )
+    .limit(1);
+  if (!run) throw new Error("Response action run not found");
+  if (run.status === "awaiting_approval") {
+    const [cancelled] = await db
+      .update(responseActionRuns)
+      .set({ status: "cancelled", completedAt: new Date(), cancelRequestedAt: new Date(), cancelRequestedBy: actorId })
+      .where(and(eq(responseActionRuns.id, runId), eq(responseActionRuns.status, "awaiting_approval")))
+      .returning();
+    if (!cancelled) throw new Error("Response action is no longer awaiting approval");
+    await writeTimelineEvent({
+      caseId: cancelled.caseId,
+      actorId,
+      eventType: "response_action",
+      payload: { status: "cancelled", target: cancelled.target },
+    });
+    return { status: "cancelled", bestEffort: false };
+  }
+  if (run.status === "running") {
+    await db
+      .update(responseActionRuns)
+      .set({ cancelRequestedAt: new Date(), cancelRequestedBy: actorId })
+      .where(and(eq(responseActionRuns.id, runId), eq(responseActionRuns.status, "running")));
+    return { status: "running", bestEffort: true };
+  }
+  throw new Error("Response action run is already terminal");
+}
+
+/**
+ * Manual retry (issue #67). Only a terminal `failed` or `cancelled` run can
+ * be retried, and only into a brand new child row: the parent is never
+ * rewritten, so its history (who requested it, what the provider actually
+ * did) stays intact forever. The child reuses the parent's exact validated
+ * input/target verbatim (a retry can never expand scope or parameters) and
+ * always re-enters `awaiting_approval`, so the full destructive-action
+ * revalidation in `approveResponseAction` above (approval expiry, requester
+ * != approver, exact target, current target state) runs again before any
+ * provider is contacted a second time. A partial unique index on
+ * `parent_run_id` makes a concurrent double-retry fail with a unique
+ * violation rather than create two children.
+ */
+export async function retryResponseAction(
+  organisationId: string,
+  actorId: string,
+  runId: string,
+): Promise<{ runId: string; status: "awaiting_approval" }> {
+  const [prior] = await db
+    .select()
+    .from(responseActionRuns)
+    .where(
+      and(
+        eq(responseActionRuns.id, runId),
+        eq(responseActionRuns.organisationId, organisationId),
+      ),
+    )
+    .limit(1);
+  if (!prior) throw new Error("Response action run not found");
+  if (prior.status !== "failed" && prior.status !== "cancelled") {
+    throw new Error("Only a failed or cancelled response action can be retried");
+  }
+
+  const { action, handler } = await findRunnableAction(organisationId, prior.actionId, prior.caseId);
+  const request = (prior.request as { input?: Record<string, string> }) ?? {};
+  const input = request.input ?? {};
+  const validationError = handler.validate(input);
+  const target = handler.target(input);
+  if (validationError || !target || target !== prior.target) {
+    throw new Error("Response action target is no longer valid for retry");
+  }
+  if (handler.requiresObservableTypes.length > 0) {
+    const currentObservables = await caseObservables(prior.caseId);
+    const evidenceTarget = handler.evidenceTarget?.(input) ?? target;
+    const targetIsEvidence = currentObservables.some(
+      (observable) =>
+        handler.requiresObservableTypes.includes(observable.type) &&
+        observable.value === evidenceTarget,
+    );
+    if (!targetIsEvidence) {
+      throw new Error("Response action target is no longer evidence on this case");
+    }
+  }
+
+  const killSwitch = await checkKillSwitch(organisationId, {
+    provider: providerForActionKind(action.kind),
+    actionId: action.id,
+  });
+  if (killSwitch.active) {
+    throw new Error(`Blocked by the ${killSwitch.scope} kill switch: ${killSwitch.reason}`);
+  }
+
+  const rootRunId = prior.rootRunId ?? prior.id;
+  const childId = newId("car");
+  const expiresAt = responseActionApprovalExpiry();
+  try {
+    await db.insert(responseActionRuns).values({
+      id: childId,
+      organisationId,
+      actionId: action.id,
+      caseId: prior.caseId,
+      requestedBy: actorId,
+      status: "awaiting_approval",
+      idempotencyKey: newId("rai"),
+      target,
+      request: { input, target, action: { id: action.id, kind: action.kind, name: action.name } },
+      expiresAt,
+      parentRunId: prior.id,
+      rootRunId,
+      attempt: prior.attempt + 1,
+    });
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw new Error("A retry has already been requested for this run");
+    }
+    throw error;
+  }
+  await writeTimelineEvent({
+    caseId: prior.caseId,
+    actorId,
+    eventType: "response_action",
+    payload: {
+      action: action.name,
+      kind: action.kind,
+      target,
+      status: "awaiting_approval",
+      retryOf: prior.id,
+      attempt: prior.attempt + 1,
+      expiresAt: expiresAt.toISOString(),
+    },
+  });
+  return { runId: childId, status: "awaiting_approval" };
 }

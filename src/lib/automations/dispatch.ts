@@ -4,6 +4,8 @@ import { automationRules, automationRuns } from "@/db/schema";
 import { safeFetch } from "@/lib/outbound-request";
 import { writeTimelineEvent } from "@/lib/timeline";
 import { signAutomationEnvelope } from "./envelope";
+import { checkKillSwitch, MUSTER_AUTOMATION_PROVIDER } from "@/lib/run-console/kill-switch";
+import { classifyErrorMessage } from "@/lib/run-console/error-category";
 
 const RETRY_MINUTES = [1, 5, 30];
 
@@ -62,6 +64,44 @@ export async function processPendingAutomationRuns(limit = 25): Promise<{
       continue;
     }
 
+    // Claim-time kill switch check: right after this run is claimed
+    // (transitioned to "running") but before Muster is ever contacted.
+    const claimKillSwitch = await checkKillSwitch(claimed.organisationId, {
+      provider: MUSTER_AUTOMATION_PROVIDER,
+      actionId: rule.id,
+    });
+    if (claimKillSwitch.active) {
+      await db
+        .update(automationRuns)
+        .set({
+          status: "cancelled",
+          lastError: `Blocked by the ${claimKillSwitch.scope} kill switch: ${claimKillSwitch.reason}`,
+          errorCategory: "kill_switch",
+          completedAt: new Date(),
+        })
+        .where(eq(automationRuns.id, claimed.id));
+      continue;
+    }
+
+    // Execution-time kill switch check: re-checked immediately before the
+    // outbound call in case a switch was armed in the gap since claiming.
+    const executionKillSwitch = await checkKillSwitch(claimed.organisationId, {
+      provider: MUSTER_AUTOMATION_PROVIDER,
+      actionId: rule.id,
+    });
+    if (executionKillSwitch.active) {
+      await db
+        .update(automationRuns)
+        .set({
+          status: "cancelled",
+          lastError: `Blocked by the ${executionKillSwitch.scope} kill switch: ${executionKillSwitch.reason}`,
+          errorCategory: "kill_switch",
+          completedAt: new Date(),
+        })
+        .where(eq(automationRuns.id, claimed.id));
+      continue;
+    }
+
     const body = JSON.stringify(claimed.request);
     let responseCode: number | null = null;
     let responseBody = "";
@@ -112,7 +152,7 @@ export async function processPendingAutomationRuns(limit = 25): Promise<{
     }
 
     const retryDelay = RETRY_MINUTES[claimed.attemptCount - 1];
-    if (retryDelay !== undefined) {
+    if (retryDelay !== undefined && !claimed.cancelRequestedAt) {
       retried++;
       await db
         .update(automationRuns)
@@ -123,6 +163,21 @@ export async function processPendingAutomationRuns(limit = 25): Promise<{
           lastError: error,
         })
         .where(eq(automationRuns.id, claimed.id));
+    } else if (retryDelay !== undefined && claimed.cancelRequestedAt) {
+      // A cancel was requested while this delivery was in flight. The
+      // attempt that already ran keeps its true (failed) outcome; we only
+      // stop scheduling further automatic retries.
+      failed++;
+      await db
+        .update(automationRuns)
+        .set({
+          status: "cancelled",
+          response: { status: responseCode, body: responseBody },
+          lastError: error,
+          errorCategory: classifyErrorMessage(error),
+          completedAt: new Date(),
+        })
+        .where(eq(automationRuns.id, claimed.id));
     } else {
       failed++;
       await db
@@ -131,6 +186,7 @@ export async function processPendingAutomationRuns(limit = 25): Promise<{
           status: "failed",
           response: { status: responseCode, body: responseBody },
           lastError: error,
+          errorCategory: classifyErrorMessage(error),
           completedAt: new Date(),
         })
         .where(eq(automationRuns.id, claimed.id));

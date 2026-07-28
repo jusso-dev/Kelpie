@@ -52,6 +52,7 @@
     "test:audit-redaction": "tsx scripts/test-audit-redaction.ts",
     "test:audit-events-api": "tsx scripts/test-audit-events-api.ts",
     "test:investigations-core": "tsx scripts/test-investigations-core.ts",
+    "test:run-console": "tsx scripts/test-run-console.ts",
     "test:visual": "tsx scripts/visual-smoke.ts"
   },
   "dependencies": {
