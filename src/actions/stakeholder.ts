@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/session";
-import { resolveUserActor } from "@/lib/access";
+import { authorizeCase, resolveUserActor } from "@/lib/access";
 import {
   createEvidenceRequest,
   createStakeholderApprovalRequest,
@@ -75,10 +75,22 @@ export async function revokeStakeholderInviteAction(input: {
   reason?: string;
 }) {
   const user = await requireRole(["admin", "analyst"]);
+  const actor = await resolveUserActor(user.organisationId, user.id);
+  if (!actor) throw new Error("Forbidden");
+  const gate = await authorizeCase(
+    user.organisationId,
+    input.caseId,
+    actor,
+    "edit",
+  );
+  if (!gate.ok) {
+    return { ok: false as const, error: gate.error };
+  }
   try {
     await revokeStakeholderInvite({
       organisationId: user.organisationId,
       invitationId: input.invitationId,
+      caseId: input.caseId,
       revokedByUserId: user.id,
       reason: input.reason,
     });
@@ -183,14 +195,18 @@ export async function createApprovalRequestAction(input: {
   }
 }
 
-export async function previewStakeholderViewAction(invitationId: string) {
+export async function previewStakeholderViewAction(input: {
+  invitationId: string;
+  caseId: string;
+}) {
   const user = await requireRole(["admin", "analyst", "read_only"]);
   const actor = await resolveUserActor(user.organisationId, user.id);
   if (!actor) throw new Error("Forbidden");
   try {
     const view = await previewExternalView({
       organisationId: user.organisationId,
-      invitationId,
+      invitationId: input.invitationId,
+      caseId: input.caseId,
       actor,
     });
     return { ok: true as const, view };
@@ -204,6 +220,17 @@ export async function previewStakeholderViewAction(invitationId: string) {
 
 export async function listStakeholderInvitesAction(caseId: string) {
   const user = await requireRole(["admin", "analyst", "read_only"]);
+  const actor = await resolveUserActor(user.organisationId, user.id);
+  if (!actor) throw new Error("Forbidden");
+  const gate = await authorizeCase(
+    user.organisationId,
+    caseId,
+    actor,
+    "view_metadata",
+  );
+  if (!gate.ok) {
+    return [];
+  }
   const invites = await listStakeholderInvites(user.organisationId, caseId);
   return invites.map((i) => ({
     id: i.id,

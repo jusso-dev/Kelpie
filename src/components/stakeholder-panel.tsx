@@ -241,7 +241,10 @@ export default function StakeholderPanel({
                     onClick={() => {
                       setError(null);
                       startTransition(async () => {
-                        const res = await previewStakeholderViewAction(inv.id);
+                        const res = await previewStakeholderViewAction({
+                          invitationId: inv.id,
+                          caseId,
+                        });
                         if (!res.ok) {
                           setError(res.error);
                           return;

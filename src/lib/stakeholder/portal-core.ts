@@ -103,7 +103,8 @@ export async function buildExternalPortalView(
     case: {
       caseNumber: caseRow.caseNumber,
       title: classificationRedacted ? "[classification restricted]" : caseRow.title,
-      status: caseRow.status,
+      // Status can signal incident phase; redact when over ceiling.
+      status: classificationRedacted ? "restricted" : caseRow.status,
       severity: classificationRedacted ? "unknown" : caseRow.severity,
       tlp: withinTlpCeiling(caseRow.tlp, maxTlp) ? caseRow.tlp : maxTlp,
       pap: withinPapCeiling(caseRow.pap, maxPap) ? caseRow.pap : maxPap,
@@ -390,6 +391,8 @@ export async function fulfillEvidenceRequest(
     examinerNotes: `Uploaded via stakeholder portal for request ${req.id}`,
   });
 
+  // Atomic fulfill: concurrent uploads cannot both mark the same request.
+  // Loser still leaves an attachment on the case (scanned); status stays single-winner.
   const now = new Date();
   const [updated] = await db
     .update(stakeholderEvidenceRequests)
@@ -399,9 +402,18 @@ export async function fulfillEvidenceRequest(
       fulfilledAt: now,
       updatedAt: now,
     })
-    .where(eq(stakeholderEvidenceRequests.id, requestId))
+    .where(
+      and(
+        eq(stakeholderEvidenceRequests.id, requestId),
+        eq(stakeholderEvidenceRequests.status, "open"),
+        eq(stakeholderEvidenceRequests.organisationId, ctx.organisationId),
+        eq(stakeholderEvidenceRequests.invitationId, ctx.invitation.id),
+      ),
+    )
     .returning();
-  if (!updated) throw new StakeholderError("Evidence request not found", 404);
+  if (!updated) {
+    throw new StakeholderError("Evidence request is no longer open", 409);
+  }
 
   await writeTimelineEvent({
     caseId: ctx.caseId,
@@ -461,6 +473,7 @@ export async function decideStakeholderApproval(
     throw new StakeholderError("Approval is no longer pending", 409);
   }
 
+  // Atomic decide: only one concurrent decision wins (status-conditional UPDATE).
   const now = new Date();
   const [updated] = await db
     .update(stakeholderApprovals)
@@ -470,9 +483,18 @@ export async function decideStakeholderApproval(
       decidedAt: now,
       updatedAt: now,
     })
-    .where(eq(stakeholderApprovals.id, approvalId))
+    .where(
+      and(
+        eq(stakeholderApprovals.id, approvalId),
+        eq(stakeholderApprovals.status, "pending"),
+        eq(stakeholderApprovals.organisationId, ctx.organisationId),
+        eq(stakeholderApprovals.invitationId, ctx.invitation.id),
+      ),
+    )
     .returning();
-  if (!updated) throw new StakeholderError("Approval request not found", 404);
+  if (!updated) {
+    throw new StakeholderError("Approval is no longer pending", 409);
+  }
 
   await writeTimelineEvent({
     caseId: ctx.caseId,
@@ -747,21 +769,28 @@ export async function previewExternalView(opts: {
   organisationId: string;
   invitationId: string;
   actor: AccessActor;
+  /** When set, invitation must belong to this case (path param binding). */
+  caseId?: string;
 }): Promise<ExternalPortalView> {
   const { stakeholderInvitations, externalCollaborators } = await import(
     "@/db/schema"
   );
+  const conditions = [
+    eq(stakeholderInvitations.id, opts.invitationId),
+    eq(stakeholderInvitations.organisationId, opts.organisationId),
+  ];
+  if (opts.caseId) {
+    conditions.push(eq(stakeholderInvitations.caseId, opts.caseId));
+  }
   const [inv] = await db
     .select()
     .from(stakeholderInvitations)
-    .where(
-      and(
-        eq(stakeholderInvitations.id, opts.invitationId),
-        eq(stakeholderInvitations.organisationId, opts.organisationId),
-      ),
-    )
+    .where(and(...conditions))
     .limit(1);
   if (!inv) throw new StakeholderError("Invitation not found", 404);
+  if (opts.caseId && inv.caseId !== opts.caseId) {
+    throw new StakeholderError("Invitation not found", 404);
+  }
 
   const decision = await authorizeCase(
     opts.organisationId,

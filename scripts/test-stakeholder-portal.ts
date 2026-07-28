@@ -209,6 +209,38 @@ async function main() {
     );
     console.log("ok: single-use invite token replay blocked");
 
+    // Concurrent single-use accept: atomic claim → exactly one session wins
+    const raceInvite = await createStakeholderInvite({
+      organisationId: orgAId,
+      caseId: caseA,
+      actor: actorA(),
+      invitedByUserId: userAId,
+      email: `race-${runId}@example.com`,
+      displayName: "Race Accept",
+      role: "update_reader",
+      purpose: "Concurrent accept TOCTOU check",
+      maxTlp: "amber",
+      maxPap: "amber",
+      singleUse: true,
+    });
+    const raceResults = await Promise.allSettled([
+      acceptStakeholderInvite({ inviteToken: raceInvite.token }),
+      acceptStakeholderInvite({ inviteToken: raceInvite.token }),
+      acceptStakeholderInvite({ inviteToken: raceInvite.token }),
+    ]);
+    const raceOk = raceResults.filter((r) => r.status === "fulfilled");
+    const raceFail = raceResults.filter((r) => r.status === "rejected");
+    assert.equal(raceOk.length, 1, "exactly one concurrent accept must win");
+    assert.equal(raceFail.length, 2, "losers must 401");
+    for (const f of raceFail) {
+      assert.ok(
+        f.status === "rejected" &&
+          f.reason instanceof StakeholderError &&
+          f.reason.status === 401,
+      );
+    }
+    console.log("ok: single-use concurrent accept is atomic");
+
     // Session auth works
     const auth = await authenticateStakeholderSession(accepted.sessionToken);
     assert.ok(auth);

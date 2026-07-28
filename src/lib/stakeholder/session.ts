@@ -46,8 +46,9 @@ function clientIp(req: Request): string | null {
 
 /**
  * Accept an invite token and mint a session token. Single-use invites burn
- * the invite token (status → accepted); multi-use keep pending/accepted
- * while still blocking after revoke/expiry.
+ * the invite token via atomic UPDATE status=accepted WHERE pending RETURNING
+ * *before* session mint (closes concurrent-accept TOCTOU). Multi-use keep
+ * pending/accepted while still blocking after revoke/expiry.
  */
 export async function acceptStakeholderInvite(opts: {
   inviteToken: string;
@@ -78,8 +79,8 @@ export async function acceptStakeholderInvite(opts: {
     }
     throw new StakeholderError("Invalid or expired invitation", 401);
   }
-  if (inv.singleUse && inv.status === "accepted") {
-    // Single-use invite already consumed — block token replay.
+  if (inv.singleUse && inv.status !== "pending") {
+    // Single-use already consumed / not usable — block token replay.
     throw new StakeholderError("Invalid or expired invitation", 401);
   }
 
@@ -93,17 +94,52 @@ export async function acceptStakeholderInvite(opts: {
   }
 
   const now = new Date();
-  if (inv.status === "pending") {
-    await db
+
+  if (inv.singleUse) {
+    // Atomic claim: only one concurrent accept wins and may mint a session.
+    const [claimed] = await db
       .update(stakeholderInvitations)
       .set({
         status: "accepted",
         acceptedAt: now,
         updatedAt: now,
       })
-      .where(eq(stakeholderInvitations.id, inv.id));
-    inv.status = "accepted";
-    inv.acceptedAt = now;
+      .where(
+        and(
+          eq(stakeholderInvitations.id, inv.id),
+          eq(stakeholderInvitations.status, "pending"),
+        ),
+      )
+      .returning();
+    if (!claimed) {
+      throw new StakeholderError("Invalid or expired invitation", 401);
+    }
+    inv.status = claimed.status;
+    inv.acceptedAt = claimed.acceptedAt;
+    inv.updatedAt = claimed.updatedAt;
+  } else if (inv.status === "pending") {
+    // Multi-use: first accept marks accepted; races still mint separate sessions.
+    const [marked] = await db
+      .update(stakeholderInvitations)
+      .set({
+        status: "accepted",
+        acceptedAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(stakeholderInvitations.id, inv.id),
+          eq(stakeholderInvitations.status, "pending"),
+        ),
+      )
+      .returning();
+    if (marked) {
+      inv.status = marked.status;
+      inv.acceptedAt = marked.acceptedAt;
+      inv.updatedAt = marked.updatedAt;
+    } else {
+      inv.status = "accepted";
+    }
   }
 
   const { plaintext, hash: sessionHash } = generateSessionToken();
@@ -245,26 +281,64 @@ export async function revokeStakeholderSession(
     );
 }
 
+/**
+ * Cookie Path strategy:
+ * - Portal UI lives under `/portal`; APIs under `/api/portal`.
+ * - A single `Path=/portal` cookie is never sent to `/api/portal/*`.
+ * - Emit dual cookies for both path prefixes so the secret is not scoped
+ *   site-wide (`Path=/`) while still covering UI + portal APIs.
+ * - Prefer `Authorization: Bearer` for API calls; cookies are a browser
+ *   convenience for same-origin portal navigation only.
+ */
+const STAKEHOLDER_COOKIE_PATHS = ["/portal", "/api/portal"] as const;
+
+function stakeholderCookieParts(
+  value: string,
+  expiresAt: Date | null,
+): string[] {
+  const secure =
+    process.env.NODE_ENV === "production" ||
+    (process.env.APP_URL ?? "").startsWith("https");
+  return STAKEHOLDER_COOKIE_PATHS.map((path) => {
+    const parts = [
+      `${STAKEHOLDER_SESSION_COOKIE}=${value}`,
+      `Path=${path}`,
+      "HttpOnly",
+      "SameSite=Lax",
+    ];
+    if (expiresAt) {
+      parts.push(`Expires=${expiresAt.toUTCString()}`);
+    } else {
+      parts.push("Max-Age=0");
+    }
+    if (secure) parts.push("Secure");
+    return parts.join("; ");
+  });
+}
+
+/** Dual Set-Cookie headers (Path=/portal and Path=/api/portal). */
+export function stakeholderSessionCookieHeaders(
+  sessionToken: string,
+  expiresAt: Date,
+): string[] {
+  return stakeholderCookieParts(encodeURIComponent(sessionToken), expiresAt);
+}
+
+/** @deprecated Prefer stakeholderSessionCookieHeaders (dual Path). */
 export function stakeholderSessionCookieHeader(
   sessionToken: string,
   expiresAt: Date,
 ): string {
-  const secure =
-    process.env.NODE_ENV === "production" ||
-    (process.env.APP_URL ?? "").startsWith("https");
-  const parts = [
-    `${STAKEHOLDER_SESSION_COOKIE}=${encodeURIComponent(sessionToken)}`,
-    "Path=/",
-    "HttpOnly",
-    "SameSite=Lax",
-    `Expires=${expiresAt.toUTCString()}`,
-  ];
-  if (secure) parts.push("Secure");
-  return parts.join("; ");
+  return stakeholderSessionCookieHeaders(sessionToken, expiresAt)[0]!;
 }
 
+export function clearStakeholderSessionCookieHeaders(): string[] {
+  return stakeholderCookieParts("", null);
+}
+
+/** @deprecated Prefer clearStakeholderSessionCookieHeaders (dual Path). */
 export function clearStakeholderSessionCookieHeader(): string {
-  return `${STAKEHOLDER_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+  return clearStakeholderSessionCookieHeaders()[0]!;
 }
 
 export { clientIp };

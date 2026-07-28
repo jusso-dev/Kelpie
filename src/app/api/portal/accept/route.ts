@@ -4,7 +4,7 @@ import {
   acceptStakeholderInvite,
   clientIp,
   StakeholderError,
-  stakeholderSessionCookieHeader,
+  stakeholderSessionCookieHeaders,
 } from "@/lib/stakeholder";
 
 const bodySchema = z.object({
@@ -14,6 +14,9 @@ const bodySchema = z.object({
 /**
  * Exchange an invite token for an external session. Does not use BetterAuth.
  * Identical 401 for invalid/expired/revoked/replayed tokens.
+ *
+ * Response omits raw caseId (internal UUID) — clients use /api/portal/me for
+ * the redacted case view (caseNumber, purpose, role).
  */
 export async function POST(req: Request) {
   let json: unknown;
@@ -35,15 +38,16 @@ export async function POST(req: Request) {
     });
     const res = NextResponse.json({
       ok: true,
-      caseId: context.caseId,
       role: context.role,
       expiresAt: context.session.expiresAt.toISOString(),
       sessionToken,
     });
-    res.headers.set(
-      "Set-Cookie",
-      stakeholderSessionCookieHeader(sessionToken, context.session.expiresAt),
-    );
+    for (const cookie of stakeholderSessionCookieHeaders(
+      sessionToken,
+      context.session.expiresAt,
+    )) {
+      res.headers.append("Set-Cookie", cookie);
+    }
     return res;
   } catch (e) {
     if (e instanceof StakeholderError) {

@@ -45,6 +45,9 @@ function PortalInner() {
       setBusy(true);
       setError(null);
       try {
+        // Invite secret arrives via query only as a one-shot bootstrap (email
+        // links). Prefer POST body exchange; strip token from the URL after
+        // accept so it is not retained in history, referrers, or screenshots.
         const res = await fetch("/api/portal/accept", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -59,6 +62,11 @@ function PortalInner() {
         }
         if (cancelled) return;
         setSessionToken(body.sessionToken);
+        if (typeof window !== "undefined") {
+          const url = new URL(window.location.href);
+          url.searchParams.delete("token");
+          window.history.replaceState({}, "", url.pathname + url.search + url.hash);
+        }
         await loadMe(body.sessionToken);
       } catch (e) {
         if (!cancelled) {

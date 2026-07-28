@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
-import { resolveTokenActor } from "@/lib/access";
+import { authorizeCase, resolveTokenActor } from "@/lib/access";
 import {
   createStakeholderInvite,
   listStakeholderInvites,
@@ -32,6 +32,16 @@ export async function GET(
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
   const { id: caseId } = await params;
+  const actor = await resolveTokenActor(auth.token);
+  const gate = await authorizeCase(
+    auth.token.organisationId,
+    caseId,
+    actor,
+    "view_metadata",
+  );
+  if (!gate.ok) {
+    return NextResponse.json({ error: gate.error }, { status: gate.status });
+  }
   const invites = await listStakeholderInvites(auth.token.organisationId, caseId);
   return NextResponse.json({
     invites: invites.map((i) => ({

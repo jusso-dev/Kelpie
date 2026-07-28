@@ -251,20 +251,27 @@ export async function listStakeholderInvites(
 export async function revokeStakeholderInvite(opts: {
   organisationId: string;
   invitationId: string;
+  /** When set, invitation must belong to this case (path param binding). */
+  caseId?: string;
   revokedByUserId: string | null;
   reason?: string | null;
 }): Promise<StakeholderInvitation> {
+  const conditions = [
+    eq(stakeholderInvitations.id, opts.invitationId),
+    eq(stakeholderInvitations.organisationId, opts.organisationId),
+  ];
+  if (opts.caseId) {
+    conditions.push(eq(stakeholderInvitations.caseId, opts.caseId));
+  }
   const [inv] = await db
     .select()
     .from(stakeholderInvitations)
-    .where(
-      and(
-        eq(stakeholderInvitations.id, opts.invitationId),
-        eq(stakeholderInvitations.organisationId, opts.organisationId),
-      ),
-    )
+    .where(and(...conditions))
     .limit(1);
   if (!inv) throw new StakeholderError("Invitation not found", 404);
+  if (opts.caseId && inv.caseId !== opts.caseId) {
+    throw new StakeholderError("Invitation not found", 404);
+  }
   if (inv.status === "revoked") {
     return inv;
   }

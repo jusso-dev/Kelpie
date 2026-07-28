@@ -6,7 +6,7 @@ import {
   revokeStakeholderInvite,
   StakeholderError,
 } from "@/lib/stakeholder";
-import { resolveTokenActor } from "@/lib/access";
+import { authorizeCase, resolveTokenActor } from "@/lib/access";
 
 const revokeSchema = z.object({
   reason: z.string().max(500).optional().nullable(),
@@ -20,12 +20,13 @@ export async function GET(
   if (!auth.ok) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
-  const { inviteId } = await params;
+  const { id: caseId, inviteId } = await params;
   const actor = await resolveTokenActor(auth.token);
   try {
     const view = await previewExternalView({
       organisationId: auth.token.organisationId,
       invitationId: inviteId,
+      caseId,
       actor,
     });
     return NextResponse.json({ preview: view });
@@ -45,7 +46,18 @@ export async function DELETE(
   if (!auth.ok) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
-  const { inviteId } = await params;
+  const { id: caseId, inviteId } = await params;
+  const actor = await resolveTokenActor(auth.token);
+  const gate = await authorizeCase(
+    auth.token.organisationId,
+    caseId,
+    actor,
+    "edit",
+  );
+  if (!gate.ok) {
+    return NextResponse.json({ error: gate.error }, { status: gate.status });
+  }
+
   let reason: string | null = null;
   try {
     const json = await req.json();
@@ -59,6 +71,7 @@ export async function DELETE(
     const updated = await revokeStakeholderInvite({
       organisationId: auth.token.organisationId,
       invitationId: inviteId,
+      caseId,
       revokedByUserId: auth.token.createdBy ?? "",
       reason,
     });

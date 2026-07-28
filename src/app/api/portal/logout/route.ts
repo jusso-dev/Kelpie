@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import {
-  clearStakeholderSessionCookieHeader,
+  clearStakeholderSessionCookieHeaders,
   extractStakeholderToken,
   authenticateStakeholderSession,
   revokeStakeholderSession,
@@ -13,6 +13,8 @@ export async function POST(req: Request) {
     await revokeStakeholderSession(ctx.session.id, ctx.organisationId);
   }
   const res = NextResponse.json({ ok: true });
-  res.headers.set("Set-Cookie", clearStakeholderSessionCookieHeader());
+  for (const cookie of clearStakeholderSessionCookieHeaders()) {
+    res.headers.append("Set-Cookie", cookie);
+  }
   return res;
 }
