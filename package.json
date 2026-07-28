@@ -65,7 +65,9 @@
     "test:content-blocks-core": "tsx scripts/test-content-blocks-core.ts",
     "test:visual": "tsx scripts/visual-smoke.ts",
     "test:token-scopes": "tsx scripts/test-token-scopes.ts",
-    "test:case-closure": "tsx scripts/test-case-closure.ts"
+    "test:case-closure": "tsx scripts/test-case-closure.ts",
+    "test:correlation-scoring": "tsx scripts/test-correlation-scoring.ts",
+    "test:correlation-core": "tsx scripts/test-correlation-core.ts"
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "^3.1095.0",

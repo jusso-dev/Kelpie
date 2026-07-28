@@ -374,6 +374,42 @@ Any subset of `verdict` (`unknown`, `clean`, `suspicious`, `malicious`), `remedi
 ### Migrating existing source-backed cases
 
 Cases created before this model existed (via `sourceSystem`/`sourceReference`, e.g. from Microsoft Sentinel/Defender XDR import) are backfilled by `npm run backfill:alerts`: for every such case with no alert yet, it creates (or reuses) an `alert_sources` row for that source, an `alerts` row that preserves the exact `sourceSystem` as `detectionSource` and `sourceReference` as the alert's immutable `externalId`, and links it into the case as the primary alert. The script is idempotent — re-running it after new source-backed cases appear only backfills the ones still missing an alert; it never creates a duplicate.
+
+## Alert correlation (grouping, move, merge, split)
+
+Analyst-governed correlation proposes transparent groupings; it never silently merges cases. Scopes: `correlation:read`, `correlation:write`.
+
+**Signals** (organisation rule config, versioned): shared canonical entities, shared observables, provider/source incident id, detection product/family, time window, tenant, ATT&CK techniques. Every suggestion stores score, contributing signals, rule key/version, generated time, and status (`pending` / `accepted` / `rejected` / `expired` / `auto_applied`).
+
+**Governance.** Rules default to `dryRun: true`. Organisation policy `settings.correlation.autoMergeEnabled` defaults to `false`. Automatic apply only when policy is on, the rule is not dry-run, and (optionally) score ≥ `autoAcceptThreshold`. Move, merge, split, and suggestion rejection **require a reason** and are audited. Case merge never deletes sources — they stay navigable with `supersededByCaseId` pointing at the canonical case. Reverse is allowed until `reverseDeadline` (default 24h) when no incompatible downstream mutation blocks it.
+
+**Concurrency.** Pass optional `expectedVersions: { "<caseId>": <version> }` on mutating calls. Mismatch returns `409 { "error": "version_conflict", "current": { ... } }`.
+
+### Rules and policy
+- `GET/POST /api/v1/correlation/rules` — list / create versioned rules
+- `GET/PATCH /api/v1/correlation/rules/{id}` — fetch / update (active material changes supersede and insert a new version)
+- `GET/PATCH /api/v1/correlation/policy` — `{ autoMergeEnabled, autoAcceptThreshold, mergeSafetyWindowHours }`
+- `GET /api/v1/correlation/metrics?ruleKey=` — suggestion / accept / reject / auto-applied counts
+- `POST /api/v1/correlation/dry-run` — preview pairs without persisting (`correlation:read`)
+- `POST /api/v1/correlation/evaluate` — persist suggestions (and auto-apply only if policy allows)
+
+### Suggestions
+- `GET /api/v1/correlation/suggestions?status=pending&caseId=`
+- `GET /api/v1/cases/{id}/correlation-suggestions`
+- `GET /api/v1/correlation/suggestions/{id}`
+- `POST /api/v1/correlation/suggestions/{id}` with `{ "action": "accept"|"reject", "reason": "..." }`
+
+### Membership operations (all require `reason`)
+- `POST /api/v1/correlation/attach` — `{ caseId, alertIds, reason }`
+- `POST /api/v1/correlation/moves` — `{ fromCaseId, toCaseId, alertIds, reason }`
+- `POST /api/v1/correlation/create-case` — `{ alertIds, reason, title? }`
+- `POST /api/v1/correlation/splits` — `{ fromCaseId, alertIds, reason, title? }`
+- `POST /api/v1/correlation/merges` — `{ canonicalCaseId, sourceCaseIds, reason }`
+- `POST /api/v1/correlation/merges/{id}/reverse` — `{ reason }`
+- `GET /api/v1/alerts/{id}/membership-history` — immutable lineage (`correlation:read` or `alerts:read`)
+
+Moves preserve alert source ids/entities; evidence items tied to moved alerts follow the destination case. Timeline events: `alert_linked_to_case` / `alert_unlinked_from_case` (with correlation payload), `case_merged`, `case_merge_reversed`, `correlation_suggestion_accepted`, `correlation_suggestion_rejected`.
+
 ## ATT&CK technique mapping
 
 Kelpie ships a versioned, organisation-independent ATT&CK Enterprise technique catalog (a bundled offline baseline snapshot by default; an administrator can refresh it from a configured URL under **Settings**, which runs through BullMQ and is rolled back automatically on failure). Analysts attach techniques to a case, alert, observable, evidence item, or task, recording confidence, source, notes, detection notes, response notes, and analyst-entered actor attribution as separate fields. Kelpie never infers actor attribution automatically. An alert mapping is linked to a case for timeline/audit purposes via its `case_alerts` link (preferring the alert's primary case, otherwise its most recently linked case); a mapping on an alert not yet linked to any case still succeeds — it is recorded on the organisation audit trail without a case timeline entry.

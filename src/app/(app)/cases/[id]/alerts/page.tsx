@@ -1,11 +1,19 @@
+import { and, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { caseMerges, cases } from "@/db/schema";
 import { requireUser } from "@/lib/session";
 import { createManualAlert, updateAlertDisposition } from "@/actions/alerts";
 import { listAlertsForCaseCore } from "@/lib/investigations/alerts-core";
+import { listSuggestionsCore } from "@/lib/correlation/evaluate-core";
 import {
   AlertStatusBadge,
   DeterminationBadge,
   SeverityBadge,
 } from "@/components/badges";
+import {
+  CorrelationPanel,
+  type CorrelationSuggestionRow,
+} from "@/components/correlation-panel";
 import { format } from "date-fns";
 
 type Props = { params: Promise<{ id: string }> };
@@ -23,16 +31,89 @@ export default async function CaseAlertsPage({ params }: Props) {
   const { id } = await params;
   const user = await requireUser();
 
+  const [caseRow] = await db
+    .select({
+      caseNumber: cases.caseNumber,
+      version: cases.version,
+      supersededByCaseId: cases.supersededByCaseId,
+    })
+    .from(cases)
+    .where(and(eq(cases.id, id), eq(cases.organisationId, user.organisationId)))
+    .limit(1);
+
   let alerts: Awaited<ReturnType<typeof listAlertsForCaseCore>>["items"] = [];
   let loadError: string | null = null;
+  let suggestions: CorrelationSuggestionRow[] = [];
+  let activeMergeId: string | null = null;
   try {
     const page = await listAlertsForCaseCore(user.organisationId, id, { limit: 50 });
     alerts = page.items;
+    const rawSuggestions = await listSuggestionsCore({
+      organisationId: user.organisationId,
+      caseId: id,
+      status: "pending",
+    });
+    suggestions = rawSuggestions.map((s) => ({
+      id: s.id,
+      kind: s.kind,
+      status: s.status,
+      score: s.score,
+      explanation: s.explanation,
+      alertIds: Array.isArray(s.alertIds) ? (s.alertIds as string[]) : [],
+      caseIds: Array.isArray(s.caseIds) ? (s.caseIds as string[]) : [],
+      targetCaseId: s.targetCaseId,
+      ruleKey: s.ruleKey,
+      ruleVersion: s.ruleVersion,
+      contributingSignals:
+        s.contributingSignals && typeof s.contributingSignals === "object"
+          ? (s.contributingSignals as Record<string, unknown>)
+          : {},
+      generatedAt: s.generatedAt.toISOString(),
+    }));
+    const [merge] = await db
+      .select({ id: caseMerges.id })
+      .from(caseMerges)
+      .where(
+        and(
+          eq(caseMerges.organisationId, user.organisationId),
+          eq(caseMerges.canonicalCaseId, id),
+          eq(caseMerges.status, "active"),
+        ),
+      )
+      .limit(1);
+    activeMergeId = merge?.id ?? null;
   } catch {
     loadError = "Alerts could not be loaded. Try reloading this page.";
   }
 
+  const canWrite = user.role === "admin" || user.role === "analyst";
+
   return (
+    <div className="space-y-4">
+      {caseRow?.supersededByCaseId ? (
+        <div className="kelpie-notice kelpie-notice-warning kelpie-notice-block text-sm">
+          This case was merged into another case and is superseded. Operate on the
+          canonical case instead.
+        </div>
+      ) : null}
+
+      {caseRow ? (
+        <CorrelationPanel
+          caseId={id}
+          caseNumber={caseRow.caseNumber}
+          caseVersion={caseRow.version}
+          alerts={alerts.map((a) => ({
+            id: a.id,
+            title: a.title,
+            severity: a.severity,
+            isPrimary: a.isPrimary,
+          }))}
+          suggestions={suggestions}
+          activeMergeId={activeMergeId}
+          canWrite={canWrite && !caseRow.supersededByCaseId}
+        />
+      ) : null}
+
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
       <div className="md:col-span-2 space-y-3">
         {loadError ? (
@@ -150,6 +231,7 @@ export default async function CaseAlertsPage({ params }: Props) {
           <button className="kelpie-btn kelpie-btn-primary w-full justify-center">Add alert</button>
         </form>
       </div>
+    </div>
     </div>
   );
 }

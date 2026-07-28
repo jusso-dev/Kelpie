@@ -47,6 +47,10 @@ export type TimelineEventType =
   | "attack_mapping_changed"
   | "attack_story_changed"
   | "content_block_changed"
+  | "case_merged"
+  | "case_merge_reversed"
+  | "correlation_suggestion_accepted"
+  | "correlation_suggestion_rejected"
   | "custom";
 
 export async function writeTimelineEvent(opts: {

@@ -211,6 +211,13 @@
       "when": 1785233574898,
       "tag": "0029_fearless_grim_reaper",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1785234298405,
+      "tag": "0030_real_thunderbolt_ross",
+      "breakpoints": true
     }
   ]
 }

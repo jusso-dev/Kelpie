@@ -73,6 +73,15 @@ export const KNOWN_SCOPES = [
     label:
       "Create, edit, archive, reorder, promote, and link structured investigation content blocks",
   },
+  {
+    value: "correlation:read",
+    label: "Read correlation rules, suggestions, and merge history",
+  },
+  {
+    value: "correlation:write",
+    label:
+      "Evaluate rules, accept/reject suggestions, move/merge/split alerts, and reverse merges",
+  },
 ] as const;
 
 export type ScopeValue = (typeof KNOWN_SCOPES)[number]["value"];
