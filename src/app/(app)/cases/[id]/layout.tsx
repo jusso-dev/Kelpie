@@ -10,7 +10,10 @@ import {
   TagBadge,
   TlpBadge,
 } from "@/components/badges";
-import { CaseCollaborationProvider } from "@/components/case-collaboration";
+import {
+  CaseCollaborationProvider,
+  ConnectionStatusIndicator,
+} from "@/components/case-collaboration";
 
 const tabs = [
   { key: "overview", label: "Overview", path: "" },
@@ -56,9 +59,12 @@ export default async function CaseLayout({ children, params }: Props) {
 
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <Link href="/cases" className="text-xs text-slate-400 hover:text-slate-200">
-            ← Back to cases
-          </Link>
+          <div className="flex items-center justify-between gap-3">
+            <Link href="/cases" className="text-xs text-slate-400 hover:text-slate-200">
+              ← Back to cases
+            </Link>
+            <ConnectionStatusIndicator />
+          </div>
           <h1 className="text-2xl font-semibold mt-1">
             <span className="font-mono text-base text-slate-400 mr-2">
               {c.caseNumber}

@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { cases, users } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { getRoster, heartbeat, leave } from "@/lib/presence";
+import { getRecentActivity } from "@/lib/case-activity";
 
 async function resolve(id: string) {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -28,7 +29,10 @@ async function resolve(id: string) {
   return { userId: u.id, userName: u.name };
 }
 
-// Server-sent events stream of the case roster.
+// Server-sent events stream of the case roster plus the case-activity
+// channel (case, task, comment, observable, and assignment changes). Both
+// share this one authorized-per-organisation-and-case connection rather than
+// opening a second transport.
 export async function GET(
   req: Request,
   context: { params: Promise<{ id: string }> },
@@ -43,12 +47,27 @@ export async function GET(
   const stream = new ReadableStream({
     async start(controller) {
       let closed = false;
+      // Starts at connection time: the page's initial server render already
+      // has full, authoritative data, so the channel only needs to announce
+      // activity from here on. This cursor lives only in this connection's
+      // closure and is discarded on reconnect; the client performs its own
+      // authoritative refetch whenever a connection (re)opens, so a
+      // restarted server or a dropped connection can never leave a client
+      // stuck on stale data waiting for a gap-filling replay that never
+      // comes.
+      let activityCursor = new Date();
       const push = async () => {
         if (closed) return;
         try {
-          const roster = await getRoster(id, me.userId);
+          const [roster, activity] = await Promise.all([
+            getRoster(id, me.userId),
+            getRecentActivity(id, activityCursor),
+          ]);
+          if (activity.length > 0) {
+            activityCursor = new Date(activity[activity.length - 1].occurredAt);
+          }
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ roster })}\n\n`),
+            encoder.encode(`data: ${JSON.stringify({ roster, activity })}\n\n`),
           );
         } catch {
           // Swallow transient DB errors; the next tick retries.
