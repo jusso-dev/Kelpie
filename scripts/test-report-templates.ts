@@ -19,8 +19,10 @@ import {
   organisations,
   reportExportApprovals,
   reportExports,
+  reportSchedules,
   reportTemplateVersions,
   reportTemplates,
+  timelineEvents,
   users,
 } from "../src/db/schema";
 import { newId } from "../src/lib/utils";
@@ -32,7 +34,9 @@ import {
 } from "../src/lib/reports/selection";
 import {
   buildRedactionPreview,
+  maskValue,
   previewLeaksRawValue,
+  redactTimelineEvents,
 } from "../src/lib/reports/redaction";
 import {
   approvalStillValid,
@@ -49,10 +53,12 @@ import {
 import {
   approveReportExportCore,
   createReportExportCore,
+  createReportScheduleCore,
   downloadReportExportCore,
   getReportExportCore,
   listReportExportsCore,
   previewReportCore,
+  processDueReportSchedules,
   ReportExportError,
   toPublicExport,
 } from "../src/lib/reports/export-core";
@@ -62,9 +68,13 @@ const runId = newId("i47test").slice("i47test_".length).slice(0, 10);
 const orgAId = `org_i47a_${runId}`;
 const orgBId = `org_i47b_${runId}`;
 const userAId = `user_i47a_${runId}`;
+const userA2Id = `user_i47a2_${runId}`;
 const userBId = `user_i47b_${runId}`;
+const redObsId = `obs_red_${runId}`;
+const greenObsId = `obs_grn_${runId}`;
 let caseA = "";
 let caseB = "";
+let caseRed = "";
 
 async function setup() {
   await db.insert(organisations).values([
@@ -80,6 +90,13 @@ async function setup() {
       role: "admin",
     },
     {
+      id: userA2Id,
+      name: "Approver A",
+      email: `i47a2-${runId}@example.com`,
+      organisationId: orgAId,
+      role: "admin",
+    },
+    {
       id: userBId,
       name: "Analyst B",
       email: `i47b-${runId}@example.com`,
@@ -89,6 +106,7 @@ async function setup() {
   ]);
   caseA = newId("case");
   caseB = newId("case");
+  caseRed = newId("case");
   await db.insert(cases).values([
     {
       id: caseA,
@@ -106,10 +124,20 @@ async function setup() {
       caseNumber: `I47B-${runId}`,
       title: "Report fixture B",
     },
+    {
+      id: caseRed,
+      organisationId: orgAId,
+      caseNumber: `I47R-${runId}`,
+      title: "Red case fixture",
+      summary: "Must not export under amber template",
+      tlp: "red",
+      pap: "red",
+      severity: "critical",
+    },
   ]);
   await db.insert(observables).values([
     {
-      id: newId("obs"),
+      id: greenObsId,
       caseId: caseA,
       type: "ip",
       value: "203.0.113.50",
@@ -117,12 +145,41 @@ async function setup() {
       isIoc: true,
     },
     {
-      id: newId("obs"),
+      id: redObsId,
       caseId: caseA,
       type: "domain",
       value: "evil-redacted.example",
       tlp: "red",
       isIoc: true,
+    },
+  ]);
+  // Timeline carries raw observable values — redaction must mask these too.
+  await db.insert(timelineEvents).values([
+    {
+      id: newId("tle"),
+      caseId: caseA,
+      eventType: "observable_added",
+      payload: {
+        observable_id: greenObsId,
+        type: "ip",
+        value: "203.0.113.50",
+        is_ioc: true,
+      },
+      actorId: userAId,
+      occurredAt: new Date("2026-01-01T00:00:00.000Z"),
+    },
+    {
+      id: newId("tle"),
+      caseId: caseA,
+      eventType: "observable_added",
+      payload: {
+        observable_id: redObsId,
+        type: "domain",
+        value: "evil-redacted.example",
+        is_ioc: true,
+      },
+      actorId: userAId,
+      occurredAt: new Date("2026-01-01T00:01:00.000Z"),
     },
   ]);
 }
@@ -221,6 +278,97 @@ const sampleSections: ReportSectionConfig[] = normaliseSectionConfigs([
   const masked = preview.items.find((i) => i.status === "masked");
   assert.ok(masked && !masked.label.includes(secret));
   console.log("ok: redaction preview masks over-TLP and excludes sensitive");
+}
+
+// ── timeline redaction (pure) ──────────────────────────────────────────
+
+{
+  const secret = "evil-redacted.example";
+  const events = [
+    {
+      eventType: "status_change",
+      payload: { from: "open", to: "in_progress" },
+    },
+    {
+      eventType: "observable_added",
+      payload: {
+        observable_id: "o-green",
+        type: "ip",
+        value: "203.0.113.50",
+      },
+    },
+    {
+      eventType: "observable_added",
+      payload: {
+        observable_id: "o-red",
+        type: "domain",
+        value: secret,
+      },
+    },
+    {
+      eventType: "observable_added",
+      payload: {
+        observable_id: "o-gone",
+        type: "domain",
+        value: "deleted-ioc.example",
+      },
+    },
+  ];
+  const redacted = redactTimelineEvents(events, {
+    maxTlp: "amber",
+    statusByObservableId: new Map([
+      ["o-green", "included"],
+      ["o-red", "masked"],
+    ]),
+    tlpByObservableId: new Map([
+      ["o-green", "green"],
+      ["o-red", "red"],
+    ]),
+  });
+  assert.equal(
+    redacted.length,
+    4,
+    "status_change + included + masked + unknown(fail-closed mask)",
+  );
+  const redEvt = redacted.find(
+    (e) =>
+      e.eventType === "observable_added" &&
+      (e.payload as { observable_id?: string }).observable_id === "o-red",
+  );
+  assert.ok(redEvt);
+  assert.equal(
+    (redEvt!.payload as { value: string }).value,
+    maskValue("red", "amber"),
+  );
+  assert.ok(
+    !(redEvt!.payload as { value: string }).value.includes(secret),
+    "timeline must not leak red value",
+  );
+  const gone = redacted.find(
+    (e) =>
+      e.eventType === "observable_added" &&
+      (e.payload as { observable_id?: string }).observable_id === "o-gone",
+  );
+  assert.ok(gone);
+  assert.ok(
+    !(gone!.payload as { value: string }).value.includes("deleted-ioc.example"),
+    "unknown observable fail-closed mask",
+  );
+  const excluded = redactTimelineEvents(
+    [
+      {
+        eventType: "observable_added",
+        payload: { observable_id: "x", type: "ip", value: "1.2.3.4" },
+      },
+    ],
+    {
+      maxTlp: "amber",
+      statusByObservableId: new Map([["x", "excluded"]]),
+      tlpByObservableId: new Map([["x", "red"]]),
+    },
+  );
+  assert.equal(excluded.length, 0, "excluded timeline events drop");
+  console.log("ok: timeline redaction masks/excludes observable_added");
 }
 
 // ── fingerprint / approval invalidation (pure) ─────────────────────────
@@ -342,13 +490,42 @@ async function main() {
     assert.ok(preview.includedKeys.includes("summary"));
     assert.ok(preview.markdownPreview.includes("I47A-"));
     assert.ok(
-      !preview.markdownPreview.includes("evil-redacted.example") ||
-        preview.redaction.maskedCount > 0,
-      "red TLP observable either masked or absent from preview body",
+      !preview.markdownPreview.includes("evil-redacted.example"),
+      "red TLP observable must not appear in preview markdown (obs or timeline)",
     );
     const leak = previewLeaksRawValue(preview.redaction, ["evil-redacted.example"]);
     assert.equal(leak, null, "preview redaction items never leak raw red value");
     console.log("ok: preview + redaction");
+
+    // Case-level TLP ceiling: red case cannot use amber template
+    await assert.rejects(
+      () =>
+        previewReportCore({
+          organisationId: orgAId,
+          caseId: caseRed,
+          templateId: custom.id,
+          format: "json",
+        }),
+      (err: unknown) =>
+        err instanceof ReportExportError &&
+        err.status === 403 &&
+        /exceeds template audience ceiling/i.test(err.message),
+    );
+    const redBlocked = await createReportExportCore({
+      organisationId: orgAId,
+      caseId: caseRed,
+      templateId: custom.id,
+      format: "json",
+      requestedBy: userAId,
+      processInline: true,
+    });
+    assert.equal(redBlocked.status, "failed");
+    assert.match(
+      redBlocked.error ?? "",
+      /classification|audience ceiling/i,
+      "process fails closed when case TLP exceeds template maxTlp",
+    );
+    console.log("ok: case TLP ceiling rejects over-ceiling case");
 
     // Generate JSON without approval (use technical v1 by pinning? technical is now v2 with approval)
     // Create a no-approval template for direct complete path.
@@ -384,11 +561,30 @@ async function main() {
     const json = JSON.parse(dl.buffer.toString("utf8")) as {
       stamp: { sha256: string | null; caseNumber: string };
       case: { caseNumber: string };
+      timeline: Array<{ eventType: string; payload: { value?: string } }>;
     };
     assert.equal(json.case.caseNumber, `I47A-${runId}`);
+    // free template maxTlp red includes raw values; amber custom path already checked non-leak
     console.log("ok: generate JSON + download + SHA-256");
 
-    // Approval path
+    // Cross-tenant storageKey prefix: corrupt key must 404
+    await db
+      .update(reportExports)
+      .set({ storageKey: "other-org/not-yours.json" })
+      .where(eq(reportExports.id, exp.id));
+    await assert.rejects(
+      () => downloadReportExportCore(orgAId, exp.id),
+      (err: unknown) =>
+        err instanceof ReportExportError && err.status === 404,
+    );
+    // restore valid key for any later use
+    await db
+      .update(reportExports)
+      .set({ storageKey: `${orgAId}/restored-key.json` })
+      .where(eq(reportExports.id, exp.id));
+    console.log("ok: download requires storageKey org prefix");
+
+    // Approval path + SoD
     const gated = await createReportExportCore({
       organisationId: orgAId,
       caseId: caseA,
@@ -403,16 +599,34 @@ async function main() {
       (err: unknown) =>
         err instanceof ReportExportError && err.status === 404,
     );
+    // Self-approve rejected (SoD)
+    await assert.rejects(
+      () =>
+        approveReportExportCore({
+          organisationId: orgAId,
+          exportId: gated.id,
+          actorId: userAId,
+          decision: "approve",
+        }),
+      (err: unknown) =>
+        err instanceof ReportExportError &&
+        err.status === 403 &&
+        /same user/i.test(err.message),
+    );
     const released = await approveReportExportCore({
       organisationId: orgAId,
       exportId: gated.id,
-      actorId: userAId,
+      actorId: userA2Id,
       decision: "approve",
     });
     assert.equal(released.status, "released");
     const dl2 = await downloadReportExportCore(orgAId, gated.id);
     assert.ok(dl2.buffer.length > 0);
-    console.log("ok: approval gate blocks then releases download");
+    assert.ok(
+      !dl2.buffer.toString("utf8").includes("evil-redacted.example"),
+      "released JSON must not leak red IOC via timeline or observables",
+    );
+    console.log("ok: approval gate blocks then releases download; SoD enforced");
 
     // Approval invalidation when case data changes
     const gated2 = await createReportExportCore({
@@ -434,7 +648,7 @@ async function main() {
         approveReportExportCore({
           organisationId: orgAId,
           exportId: gated2.id,
-          actorId: userAId,
+          actorId: userA2Id,
           decision: "approve",
         }),
       (err: unknown) =>
@@ -504,7 +718,65 @@ async function main() {
     }
     console.log("ok: classification labels in redaction reasons");
 
+    // Schedule re-auth: banned creator fails closed
+    const schedule = await createReportScheduleCore({
+      organisationId: orgAId,
+      templateId: free.id,
+      caseId: caseA,
+      format: "json",
+      intervalMinutes: 60,
+      createdBy: userAId,
+    });
+    // Force due now
+    await db
+      .update(reportSchedules)
+      .set({ nextRunAt: new Date(Date.now() - 60_000) })
+      .where(eq(reportSchedules.id, schedule.id));
+    await db
+      .update(users)
+      .set({ banned: true, lockedAt: new Date() })
+      .where(eq(users.id, userAId));
+    const ranBanned = await processDueReportSchedules(5);
+    assert.ok(ranBanned.failed >= 1, "banned creator schedule fails");
+    const [schAfterBan] = await db
+      .select()
+      .from(reportSchedules)
+      .where(eq(reportSchedules.id, schedule.id));
+    assert.match(
+      schAfterBan?.lastError ?? "",
+      /inactive|permission|creator/i,
+    );
+    // Restore creator and demote to read_only
+    await db
+      .update(users)
+      .set({ banned: false, lockedAt: null, role: "read_only" })
+      .where(eq(users.id, userAId));
+    await db
+      .update(reportSchedules)
+      .set({ nextRunAt: new Date(Date.now() - 60_000) })
+      .where(eq(reportSchedules.id, schedule.id));
+    const ranRo = await processDueReportSchedules(5);
+    assert.ok(ranRo.failed >= 1, "read_only creator schedule fails");
+    const [schAfterRo] = await db
+      .select()
+      .from(reportSchedules)
+      .where(eq(reportSchedules.id, schedule.id));
+    assert.match(schAfterRo?.lastError ?? "", /reports:write|permission/i);
+    // Restore admin + healthy run
+    await db
+      .update(users)
+      .set({ role: "admin" })
+      .where(eq(users.id, userAId));
+    await db
+      .update(reportSchedules)
+      .set({ nextRunAt: new Date(Date.now() - 60_000) })
+      .where(eq(reportSchedules.id, schedule.id));
+    const ranOk = await processDueReportSchedules(5);
+    assert.ok(ranOk.ran >= 1, "active admin creator schedule runs");
+    console.log("ok: schedule re-auth fail-closed + success");
+
     // Failed job friendly path — process already-completed is no-op
+    // Note: storageKey was corrupted earlier; reprocess still no-op on completed.
     const before = await getReportExportCore(orgAId, exp.id);
     const { processReportExportJob } = await import("../src/lib/reports/export-core");
     await processReportExportJob(exp.id);

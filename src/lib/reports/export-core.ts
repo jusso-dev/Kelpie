@@ -16,12 +16,17 @@ import {
   reportExportApprovals,
   reportExports,
   reportSchedules,
+  users,
   type ReportExport,
   type ReportExportApproval,
 } from "@/db/schema";
 import { putFile, readFile } from "@/lib/storage";
 import { newId } from "@/lib/utils";
-import { buildCaseReportForTemplate, caseExistsInOrg } from "./build";
+import {
+  buildCaseReportForTemplate,
+  caseExistsInOrg,
+  CaseTlpCeilingError,
+} from "./build";
 import {
   computeContentFingerprint,
   sha256Hex,
@@ -40,7 +45,7 @@ import type {
   ReportVariant,
   SectionOverrideMap,
 } from "./types";
-import { isReportExportFormat } from "./types";
+import { classifyLabel, isReportExportFormat } from "./types";
 import {
   includedSectionKeys,
   normaliseInclusionRules,
@@ -98,15 +103,20 @@ export async function previewReportCore(opts: {
 
   const maxTlp = (template.version.maxTlp as ReportTlp) ?? "amber";
   const maxPap = (template.version.maxPap as ReportPap) ?? "amber";
-  const built = await buildCaseReportForTemplate({
-    organisationId: opts.organisationId,
-    caseId: opts.caseId,
-    sections: template.sections,
-    inclusionRules: template.inclusionRules,
-    overrides: opts.overrides,
-    maxTlp,
-    maxPap,
-  });
+  let built;
+  try {
+    built = await buildCaseReportForTemplate({
+      organisationId: opts.organisationId,
+      caseId: opts.caseId,
+      sections: template.sections,
+      inclusionRules: template.inclusionRules,
+      overrides: opts.overrides,
+      maxTlp,
+      maxPap,
+    });
+  } catch (error) {
+    throw mapBuildError(error);
+  }
   if (!built) throw new ReportExportError("Case not found", 404);
 
   const format = opts.format ?? "pdf";
@@ -279,15 +289,25 @@ export async function processReportExportJob(exportId: string): Promise<void> {
     const maxTlp = version.maxTlp as ReportTlp;
     const maxPap = version.maxPap as ReportPap;
 
-    const built = await buildCaseReportForTemplate({
-      organisationId: job.organisationId,
-      caseId: job.caseId,
-      sections,
-      inclusionRules,
-      overrides,
-      maxTlp,
-      maxPap,
-    });
+    let built;
+    try {
+      built = await buildCaseReportForTemplate({
+        organisationId: job.organisationId,
+        caseId: job.caseId,
+        sections,
+        inclusionRules,
+        overrides,
+        maxTlp,
+        maxPap,
+      });
+    } catch (error) {
+      if (error instanceof CaseTlpCeilingError) {
+        throw new Error(
+          `Case classification ${classifyLabel(error.caseTlp)} exceeds template audience ceiling ${classifyLabel(error.maxTlp)}`,
+        );
+      }
+      throw error;
+    }
     if (!built) throw new Error("Case not found");
 
     const contentFingerprint = computeContentFingerprint({
@@ -388,12 +408,29 @@ export async function processReportExportJob(exportId: string): Promise<void> {
 }
 
 function friendlyExportError(raw: string): string {
+  if (/exceeds template audience ceiling|Case classification|Case TLP exceeds/i.test(raw)) {
+    return "This case's classification exceeds the template audience ceiling. Use a higher-TLP template or lower the case TLP.";
+  }
   if (/not found/i.test(raw)) return "The case or template could not be found.";
   if (/template/i.test(raw)) return "The report template is no longer available.";
   if (/storage|ENOSPC|EACCES/i.test(raw)) {
     return "Kelpie could not store the generated report. Try again later.";
   }
   return "Report generation failed. Retry creates a new export without releasing the previous one.";
+}
+
+function mapBuildError(error: unknown): ReportExportError {
+  if (error instanceof CaseTlpCeilingError) {
+    return new ReportExportError(
+      `Case classification ${classifyLabel(error.caseTlp)} exceeds template audience ceiling ${classifyLabel(error.maxTlp)}`,
+      403,
+    );
+  }
+  if (error instanceof ReportExportError) return error;
+  if (error instanceof Error) {
+    return new ReportExportError(error.message, 500);
+  }
+  return new ReportExportError("Report build failed", 500);
 }
 
 export async function listReportExportsCore(
@@ -477,6 +514,18 @@ export async function approveReportExportCore(opts: {
     throw new ReportExportError("No pending approval for this export", 409);
   }
 
+  // Separation of duties: requester cannot approve their own release.
+  if (
+    opts.decision === "approve" &&
+    approval.requestedBy &&
+    approval.requestedBy === opts.actorId
+  ) {
+    throw new ReportExportError(
+      "Approver cannot be the same user who requested this export",
+      403,
+    );
+  }
+
   // Binding must still match the export snapshot.
   if (
     !exp.contentFingerprint ||
@@ -515,15 +564,20 @@ export async function approveReportExportCore(opts: {
   const pending = (exp.redactionSummary ?? {}) as {
     pendingOverrides?: SectionOverrideMap;
   };
-  const built = await buildCaseReportForTemplate({
-    organisationId: opts.organisationId,
-    caseId: exp.caseId,
-    sections,
-    inclusionRules,
-    overrides: pending.pendingOverrides ?? {},
-    maxTlp: version.maxTlp as ReportTlp,
-    maxPap: version.maxPap as ReportPap,
-  });
+  let built;
+  try {
+    built = await buildCaseReportForTemplate({
+      organisationId: opts.organisationId,
+      caseId: exp.caseId,
+      sections,
+      inclusionRules,
+      overrides: pending.pendingOverrides ?? {},
+      maxTlp: version.maxTlp as ReportTlp,
+      maxPap: version.maxPap as ReportPap,
+    });
+  } catch (error) {
+    throw mapBuildError(error);
+  }
   if (!built) throw new ReportExportError("Case not found", 404);
 
   if (built.dataRevision !== approval.boundDataRevision) {
@@ -609,6 +663,11 @@ export async function downloadReportExportCore(
   if (!exp || !DOWNLOADABLE.has(exp.status) || !exp.storageKey) {
     throw new ReportExportError("Export not available for download", 404);
   }
+  // Defence in depth: refuse path traversal / cross-tenant storage keys.
+  const expectedPrefix = `${organisationId}/`;
+  if (!exp.storageKey.startsWith(expectedPrefix)) {
+    throw new ReportExportError("Export not available for download", 404);
+  }
   const buffer = await readFile(exp.storageKey);
   // Integrity check
   if (exp.sha256) {
@@ -685,7 +744,11 @@ export async function createReportScheduleCore(opts: {
 }
 
 /**
- * Run due schedules. Re-checks: template still active, case still in org.
+ * Run due schedules. Re-checks at run time (fail closed):
+ * - creator still active in org, not banned/locked
+ * - creator still has reports:write equivalent (admin or analyst)
+ * - template still active
+ * - case still accessible in org
  * Never trusts schedule-time grants alone.
  */
 export async function processDueReportSchedules(limit = 20): Promise<{
@@ -714,6 +777,12 @@ export async function processDueReportSchedules(limit = 20): Promise<{
       if (!schedule.caseId) {
         throw new Error("Schedule is missing caseId");
       }
+
+      await assertScheduleCreatorMayRun(
+        schedule.organisationId,
+        schedule.createdBy,
+      );
+
       // Re-check template + case
       const template = await getReportTemplateCore(
         schedule.organisationId,
@@ -771,4 +840,41 @@ export async function processDueReportSchedules(limit = 20): Promise<{
   }
 
   return { ran, failed };
+}
+
+/**
+ * Session-user equivalent of reports:write at schedule run time.
+ * API tokens use scopes; scheduled runs are attributed to a user creator.
+ * Fail closed if creator is missing, left the org, banned/locked, or
+ * demoted to read_only.
+ */
+async function assertScheduleCreatorMayRun(
+  organisationId: string,
+  creatorId: string | null,
+): Promise<void> {
+  if (!creatorId) {
+    throw new Error("Schedule creator is missing");
+  }
+  const [user] = await db
+    .select({
+      id: users.id,
+      role: users.role,
+      banned: users.banned,
+      lockedAt: users.lockedAt,
+      organisationId: users.organisationId,
+    })
+    .from(users)
+    .where(eq(users.id, creatorId))
+    .limit(1);
+
+  if (!user || user.organisationId !== organisationId) {
+    throw new Error("Schedule creator is no longer in organisation");
+  }
+  if (user.banned || user.lockedAt) {
+    throw new Error("Schedule creator is inactive");
+  }
+  // reports:write for users: admin or analyst (not read_only)
+  if (user.role !== "admin" && user.role !== "analyst") {
+    throw new Error("Schedule creator lacks reports:write permission");
+  }
 }

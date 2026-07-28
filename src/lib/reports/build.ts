@@ -12,12 +12,14 @@ import { loadCaseReport, type CaseReportData } from "@/lib/report";
 import {
   buildRedactionPreview,
   maskValue,
+  redactTimelineEvents,
   type ClassifiedItem,
 } from "./redaction";
 import { computeDataRevision } from "./fingerprint";
 import { includedSectionKeys, selectSections } from "./selection";
 import { sanitizeReportText } from "./sanitize";
 import type {
+  RedactionItemStatus,
   RedactionPreview,
   ReportInclusionRules,
   ReportPap,
@@ -27,6 +29,7 @@ import type {
   SectionOverrideMap,
   SelectedSection,
 } from "./types";
+import { withinTlpCeiling } from "./types";
 
 export type BuiltReport = {
   data: CaseReportData;
@@ -54,6 +57,19 @@ export type BuiltReport = {
   maxPap: ReportPap;
 };
 
+export class CaseTlpCeilingError extends Error {
+  readonly caseTlp: string;
+  readonly maxTlp: ReportTlp;
+  constructor(caseTlp: string, maxTlp: ReportTlp) {
+    super(
+      `Case TLP exceeds template audience ceiling (case=${caseTlp}, max=${maxTlp})`,
+    );
+    this.name = "CaseTlpCeilingError";
+    this.caseTlp = caseTlp;
+    this.maxTlp = maxTlp;
+  }
+}
+
 export async function buildCaseReportForTemplate(opts: {
   organisationId: string;
   caseId: string;
@@ -66,6 +82,15 @@ export async function buildCaseReportForTemplate(opts: {
   const raw = await loadCaseReport(opts.organisationId, opts.caseId);
   if (!raw) return null;
 
+  const maxTlp = opts.maxTlp;
+  const maxPap = opts.maxPap;
+
+  // Case-level TLP is a hard ceiling: never ship a redder case under a
+  // lower-audience template (e.g. TLP:RED case with amber executive).
+  if (!withinTlpCeiling(raw.case.tlp, maxTlp)) {
+    throw new CaseTlpCeilingError(raw.case.tlp, maxTlp);
+  }
+
   const selected = selectSections(
     opts.sections,
     opts.inclusionRules,
@@ -74,8 +99,6 @@ export async function buildCaseReportForTemplate(opts: {
   const includedKeys = includedSectionKeys(selected);
   const includeSet = new Set(includedKeys);
 
-  const maxTlp = opts.maxTlp;
-  const maxPap = opts.maxPap;
   const maskOverTlp = opts.inclusionRules.maskOverTlp !== false;
   const includeSensitive = Boolean(opts.inclusionRules.includeSensitiveBlocks);
 
@@ -161,7 +184,32 @@ export async function buildCaseReportForTemplate(opts: {
     : [];
 
   const tasks = includeSet.has("tasks") ? raw.tasks : [];
-  const timeline = includeSet.has("timeline") ? raw.timeline : [];
+
+  // Timeline: same TLP mask as observables so observable_added values
+  // cannot bypass redaction via MD/PDF/JSON payload dumps.
+  let timeline: BuiltReport["data"]["timeline"] = [];
+  if (includeSet.has("timeline")) {
+    const statusByObservableId = new Map<string, RedactionItemStatus>();
+    const tlpByObservableId = new Map<string, string>();
+    const statusByValue = new Map<string, RedactionItemStatus>();
+    const tlpByValue = new Map<string, string>();
+    for (const o of raw.observables) {
+      const st = statusById.get(o.id);
+      if (!st) continue;
+      statusByObservableId.set(o.id, st.status);
+      tlpByObservableId.set(o.id, o.tlp);
+      statusByValue.set(o.value, st.status);
+      tlpByValue.set(o.value, o.tlp);
+    }
+    timeline = redactTimelineEvents(raw.timeline, {
+      maxTlp,
+      statusByObservableId,
+      tlpByObservableId,
+      statusByValue,
+      tlpByValue,
+    });
+  }
+
   const attackMappings = includeSet.has("ttp_mappings") ? raw.attackMappings : [];
   const attackStory = includeSet.has("attack_story") ? raw.attackStory : [];
 

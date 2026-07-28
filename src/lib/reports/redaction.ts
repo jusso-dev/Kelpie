@@ -10,6 +10,7 @@
 import {
   classifyLabel,
   classifyPapLabel,
+  type RedactionItemStatus,
   type RedactionPreview,
   type RedactionPreviewItem,
   type ReportPap,
@@ -159,4 +160,84 @@ export function previewLeaksRawValue(
 export function maskValue(tlp: string | undefined, maxTlp: ReportTlp): string {
   const label = tlp ? classifyLabel(tlp) : "CLASSIFIED";
   return `[REDACTED — ${label} exceeds ${classifyLabel(maxTlp)}]`;
+}
+
+/**
+ * Apply the same audience ceiling to timeline payloads that already apply
+ * to observables. `observable_added` events embed the raw value; without
+ * this, MD/PDF/JSON leak over-ceiling IOCs via the timeline section.
+ *
+ * - excluded → drop event
+ * - masked → replace payload.value with mask text
+ * - unknown / deleted observable with a value → fail closed (mask)
+ */
+export function redactTimelineEvents<
+  T extends { eventType: string; payload: unknown },
+>(
+  events: T[],
+  opts: {
+    maxTlp: ReportTlp;
+    /** status by observable id from buildRedactionPreview */
+    statusByObservableId: Map<string, RedactionItemStatus>;
+    /** tlp by observable id for mask labels */
+    tlpByObservableId: Map<string, string>;
+    /** value → status fallback when payload lacks observable_id */
+    statusByValue?: Map<string, RedactionItemStatus>;
+    tlpByValue?: Map<string, string>;
+  },
+): T[] {
+  const out: T[] = [];
+  for (const event of events) {
+    if (event.eventType !== "observable_added") {
+      out.push(event);
+      continue;
+    }
+    if (!event.payload || typeof event.payload !== "object") {
+      out.push(event);
+      continue;
+    }
+    const p = event.payload as Record<string, unknown>;
+    const obsId =
+      typeof p.observable_id === "string" ? p.observable_id : undefined;
+    const value = typeof p.value === "string" ? p.value : undefined;
+
+    let status: RedactionItemStatus | undefined = obsId
+      ? opts.statusByObservableId.get(obsId)
+      : undefined;
+    let tlp: string | undefined = obsId
+      ? opts.tlpByObservableId.get(obsId)
+      : undefined;
+
+    if (!status && value && opts.statusByValue) {
+      status = opts.statusByValue.get(value);
+      tlp = opts.tlpByValue?.get(value) ?? tlp;
+    }
+
+    if (status === "excluded") {
+      continue;
+    }
+    if (status === "masked") {
+      out.push({
+        ...event,
+        payload: {
+          ...p,
+          value: maskValue(tlp, opts.maxTlp),
+        },
+      });
+      continue;
+    }
+    if (!status && value) {
+      // Fail closed: cannot classify (deleted observable etc.) — mask.
+      out.push({
+        ...event,
+        payload: {
+          ...p,
+          value: maskValue(tlp, opts.maxTlp),
+        },
+      });
+      continue;
+    }
+    out.push(event);
+  }
+  return out;
 }
