@@ -26,6 +26,16 @@ export type TimelineEventType =
   | "relationship_created"
   | "relationship_removed"
   | "relationship_suggestion_dismissed"
+  | "alert_linked_to_case"
+  | "alert_unlinked_from_case"
+  | "alert_status_changed"
+  | "alert_verdict_changed"
+  | "alert_assigned"
+  | "alert_entity_linked"
+  | "evidence_item_created"
+  | "evidence_item_verdict_changed"
+  | "evidence_item_remediation_changed"
+  | "evidence_relationship_created"
   | "custom";
 
 export async function writeTimelineEvent(opts: {

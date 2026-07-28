@@ -32,6 +32,16 @@ export const KNOWN_SCOPES = [
     value: "audit:read",
     label: "Read organisation audit events (sensitive; only grant to admin-issued tokens)",
   },
+  { value: "alerts:read", label: "Read alerts, linked entities, and evidence items" },
+  {
+    value: "alerts:write",
+    label: "Create/link alerts, change alert disposition, and link entities",
+  },
+  {
+    value: "alerts:raw_payload:read",
+    label:
+      "Read raw provider payload references behind alerts and evidence (sensitive; only grant to admin-issued tokens)",
+  },
 ] as const;
 
 export type ScopeValue = (typeof KNOWN_SCOPES)[number]["value"];

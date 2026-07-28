@@ -107,6 +107,97 @@ export const evidenceRelevanceEnum = pgEnum("evidence_relevance", [
 ]);
 
 /* ────────────────────────────────────────────────────────────────────────── */
+/* Investigation data model: alerts, entities, evidence items (issue #55)    */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+export const entityTypeEnum = pgEnum("entity_type", [
+  "user_identity",
+  "device_endpoint",
+  "mailbox",
+  "email_message",
+  "ip",
+  "domain",
+  "url",
+  "file",
+  "file_hash",
+  "process",
+  "cloud_resource",
+  "application",
+  "tenant",
+  "network",
+  "asset",
+]);
+
+export const entityIdentifierKindEnum = pgEnum("entity_identifier_kind", [
+  "email",
+  "upn",
+  "sid",
+  "aad_object_id",
+  "device_id",
+  "hostname",
+  "ip",
+  "fqdn",
+  "url",
+  "sha256",
+  "sha1",
+  "md5",
+  "process_guid",
+  "cloud_resource_id",
+  "tenant_id",
+  "application_id",
+  "other",
+]);
+
+export const alertSeverityEnum = pgEnum("alert_severity", [
+  "informational",
+  "low",
+  "medium",
+  "high",
+  "critical",
+]);
+
+export const alertStatusEnum = pgEnum("alert_status", [
+  "new",
+  "in_progress",
+  "closed",
+  "dismissed",
+]);
+
+export const alertDeterminationEnum = pgEnum("alert_determination", [
+  "unknown",
+  "true_positive",
+  "false_positive",
+  "benign_positive",
+]);
+
+export const alertEntityRoleEnum = pgEnum("alert_entity_role", [
+  "actor",
+  "target",
+  "impacted",
+  "related",
+]);
+
+export const evidenceItemVerdictEnum = pgEnum("evidence_item_verdict", [
+  "unknown",
+  "clean",
+  "suspicious",
+  "malicious",
+]);
+
+export const evidenceItemRemediationEnum = pgEnum("evidence_item_remediation", [
+  "none",
+  "pending",
+  "remediated",
+  "not_applicable",
+]);
+
+export const evidenceRelationshipTypeEnum = pgEnum("evidence_relationship_type", [
+  "related_to",
+  "duplicate_of",
+  "derived_from",
+]);
+
+/* ────────────────────────────────────────────────────────────────────────── */
 /* Organisations + BetterAuth tables                                          */
 /* ────────────────────────────────────────────────────────────────────────── */
 
@@ -759,6 +850,405 @@ export const evidenceLegalHolds = pgTable(
     check(
       "evidence_legal_holds_scope_target",
       sql.raw(`"case_id" is not null or "evidence_id" is not null`),
+    ),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Investigation model: alerts, entities, evidence items (issue #55)         */
+/*                                                                            */
+/* Field ownership contract (enforced in src/lib/investigations, not just    */
+/* documented here):                                                         */
+/*   - Provider-owned fields (title, description, detectionSource/Product,   */
+/*     classification, severity until analyst override, detectedAt,          */
+/*     providerCreatedAt/providerUpdatedAt, sourceUrl, normalizedFields,      */
+/*     attackTechniques) are refreshed on every poll/push from the source.   */
+/*   - Analyst-owned fields (status, determination, assigneeId,              */
+/*     analystNotes, dismissedReason, and severity once                      */
+/*     severityOverriddenByAnalyst is set) are only ever written by an       */
+/*     explicit analyst action and are never overwritten by provider sync.   */
+/*   - Derived fields (derivedFields jsonb) are recomputable from other      */
+/*     columns and always carry provenance: { value, method, computedAt }.  */
+/*   - Raw provider payloads are never inlined on the alert/evidence row or  */
+/*     in timeline events; they live in provider_payload_references as a     */
+/*     bounded (<=256KB), redacted, access-controlled reference.            */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/** Provenance registry for a producer of alerts (a connector + tenant pair, or "manual" for analyst-authored alerts). Distinct from `case_sources`, which owns case-level polling schedules; an `alert_source` only identifies who an alert came from. */
+export const alertSources = pgTable(
+  "alert_sources",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    name: text("name").notNull(),
+    tenantId: text("tenant_id").notNull().default(""),
+    config: jsonb("config").notNull().default(sql`'{}'::jsonb`),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("alert_sources_org_kind_tenant_idx").on(
+      t.organisationId,
+      t.kind,
+      t.tenantId,
+    ),
+    index("alert_sources_org_idx").on(t.organisationId),
+  ],
+);
+
+/** Bounded, access-controlled reference to a raw provider payload. Never the payload inline on an alert/evidence row or in a timeline event; a dedicated, scope-gated endpoint is the only read path. */
+export const providerPayloadReferences = pgTable(
+  "provider_payload_references",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    sourceId: text("source_id").references(() => alertSources.id, {
+      onDelete: "set null",
+    }),
+    externalRef: text("external_ref").notNull(),
+    payload: jsonb("payload").notNull().default(sql`'{}'::jsonb`),
+    sizeBytes: integer("size_bytes").notNull().default(0),
+    redacted: boolean("redacted").notNull().default(true),
+    retrievedAt: timestamp("retrieved_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("provider_payload_references_org_idx").on(t.organisationId),
+    index("provider_payload_references_source_idx").on(t.sourceId),
+  ],
+);
+
+/**
+ * An independently addressable detection. `(organisationId, sourceId,
+ * tenantId, externalId)` is unique, so re-polling the same source never
+ * creates a duplicate alert — the same idempotent-ingestion guarantee
+ * `cases` already has for `(organisationId, sourceSystem, sourceReference)`.
+ */
+export const alerts = pgTable(
+  "alerts",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    sourceId: text("source_id")
+      .notNull()
+      .references(() => alertSources.id, { onDelete: "restrict" }),
+    tenantId: text("tenant_id").notNull().default(""),
+    externalId: text("external_id").notNull(),
+    title: text("title").notNull(),
+    description: text("description"),
+    detectionSource: text("detection_source"),
+    detectionProduct: text("detection_product"),
+    classification: text("classification"),
+    severity: alertSeverityEnum("severity").notNull().default("medium"),
+    severityOverriddenByAnalyst: boolean("severity_overridden_by_analyst")
+      .notNull()
+      .default(false),
+    status: alertStatusEnum("status").notNull().default("new"),
+    determination: alertDeterminationEnum("determination")
+      .notNull()
+      .default("unknown"),
+    assigneeId: text("assignee_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    analystNotes: text("analyst_notes"),
+    dismissedReason: text("dismissed_reason"),
+    detectedAt: timestamp("detected_at", { withTimezone: true }),
+    providerCreatedAt: timestamp("provider_created_at", { withTimezone: true }),
+    providerUpdatedAt: timestamp("provider_updated_at", { withTimezone: true }),
+    sourceUrl: text("source_url"),
+    normalizedFields: jsonb("normalized_fields").notNull().default(sql`'{}'::jsonb`),
+    attackTechniques: jsonb("attack_techniques").notNull().default(sql`'[]'::jsonb`),
+    derivedFields: jsonb("derived_fields").notNull().default(sql`'{}'::jsonb`),
+    rawPayloadRefId: text("raw_payload_ref_id").references(
+      () => providerPayloadReferences.id,
+      { onDelete: "set null" },
+    ),
+    version: integer("version").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("alerts_org_source_tenant_external_idx").on(
+      t.organisationId,
+      t.sourceId,
+      t.tenantId,
+      t.externalId,
+    ),
+    index("alerts_org_status_idx").on(t.organisationId, t.status),
+    index("alerts_org_detected_idx").on(t.organisationId, t.detectedAt),
+    index("alerts_source_idx").on(t.sourceId),
+  ],
+);
+
+/**
+ * A deduplicated, organisation-scoped subject: a user/identity, device,
+ * mailbox, email message, IP, domain, URL, file/hash, process, cloud
+ * resource, application, tenant, network, or generic asset. Deduplication is
+ * type-aware: `(organisationId, type, canonicalKey)` is unique, where
+ * `canonicalKey` is a normalised form of the entity's primary identifier
+ * (lower-cased email, upper-cased hash, etc.) computed in
+ * `src/lib/investigations/entities-core.ts`.
+ */
+export const entities = pgTable(
+  "entities",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    type: entityTypeEnum("type").notNull(),
+    displayName: text("display_name").notNull(),
+    canonicalKey: text("canonical_key").notNull(),
+    attributes: jsonb("attributes").notNull().default(sql`'{}'::jsonb`),
+    riskScore: integer("risk_score"),
+    notes: text("notes"),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("entities_org_type_canonical_idx").on(
+      t.organisationId,
+      t.type,
+      t.canonicalKey,
+    ),
+    index("entities_org_idx").on(t.organisationId),
+    check(
+      "entities_risk_score_range",
+      sql.raw(`"risk_score" is null or ("risk_score" >= 0 and "risk_score" <= 100)`),
+    ),
+  ],
+);
+
+/**
+ * Every raw value ever seen for an entity (an email may also appear as an
+ * `upn`, a hostname may resolve through several `ip` sightings, etc).
+ * `(organisationId, kind, value)` is unique so a given raw value always
+ * resolves back to the same entity.
+ */
+export const entityIdentifiers = pgTable(
+  "entity_identifiers",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    entityId: text("entity_id")
+      .notNull()
+      .references(() => entities.id, { onDelete: "cascade" }),
+    kind: entityIdentifierKindEnum("kind").notNull(),
+    value: text("value").notNull(),
+    source: text("source"),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("entity_identifiers_org_kind_value_idx").on(
+      t.organisationId,
+      t.kind,
+      t.value,
+    ),
+    index("entity_identifiers_entity_idx").on(t.entityId),
+  ],
+);
+
+/** Links an alert to every entity it involves, with the entity's role in that alert. */
+export const alertEntities = pgTable(
+  "alert_entities",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    alertId: text("alert_id")
+      .notNull()
+      .references(() => alerts.id, { onDelete: "cascade" }),
+    entityId: text("entity_id")
+      .notNull()
+      .references(() => entities.id, { onDelete: "cascade" }),
+    role: alertEntityRoleEnum("role").notNull().default("related"),
+    addedBy: text("added_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("alert_entities_unique_idx").on(t.alertId, t.entityId, t.role),
+    index("alert_entities_entity_idx").on(t.entityId),
+    index("alert_entities_org_idx").on(t.organisationId),
+  ],
+);
+
+/** Links an alert into a case's investigation. One case can hold many alerts; `isPrimary` marks the alert (if any) that the case was originally opened from. */
+export const caseAlerts = pgTable(
+  "case_alerts",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    alertId: text("alert_id")
+      .notNull()
+      .references(() => alerts.id, { onDelete: "cascade" }),
+    isPrimary: boolean("is_primary").notNull().default(false),
+    addedBy: text("added_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("case_alerts_unique_idx").on(t.caseId, t.alertId),
+    index("case_alerts_alert_idx").on(t.alertId),
+    index("case_alerts_org_idx").on(t.organisationId),
+  ],
+);
+
+/**
+ * An investigation-level evidence record: an indicator, log excerpt, finding,
+ * or provider record, with a verdict and remediation state independent of any
+ * binary file. May optionally point at a binary `attachments` row (issue #44)
+ * via `attachmentId`, but never duplicates that table's storage/integrity
+ * responsibilities.
+ */
+export const evidenceItems = pgTable(
+  "evidence_items",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    alertId: text("alert_id").references(() => alerts.id, {
+      onDelete: "set null",
+    }),
+    entityId: text("entity_id").references(() => entities.id, {
+      onDelete: "set null",
+    }),
+    attachmentId: text("attachment_id").references(() => attachments.id, {
+      onDelete: "set null",
+    }),
+    type: text("type").notNull(),
+    value: text("value"),
+    description: text("description"),
+    verdict: evidenceItemVerdictEnum("verdict").notNull().default("unknown"),
+    remediationState: evidenceItemRemediationEnum("remediation_state")
+      .notNull()
+      .default("none"),
+    confidence: integer("confidence"),
+    source: text("source").notNull().default("analyst"),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    analystNotes: text("analyst_notes"),
+    rawPayloadRefId: text("raw_payload_ref_id").references(
+      () => providerPayloadReferences.id,
+      { onDelete: "set null" },
+    ),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("evidence_items_case_idx").on(t.caseId),
+    index("evidence_items_alert_idx").on(t.alertId),
+    index("evidence_items_entity_idx").on(t.entityId),
+    index("evidence_items_org_idx").on(t.organisationId),
+    check(
+      "evidence_items_confidence_range",
+      sql.raw(`"confidence" is null or ("confidence" >= 0 and "confidence" <= 100)`),
+    ),
+  ],
+);
+
+/** Typed relationships between evidence items, canonicalised the same way as `case_relationships` (symmetric types sorted by id) so an edge can never be stored twice. */
+export const evidenceRelationships = pgTable(
+  "evidence_relationships",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    sourceEvidenceId: text("source_evidence_id")
+      .notNull()
+      .references(() => evidenceItems.id, { onDelete: "cascade" }),
+    targetEvidenceId: text("target_evidence_id")
+      .notNull()
+      .references(() => evidenceItems.id, { onDelete: "cascade" }),
+    relationshipType: evidenceRelationshipTypeEnum("relationship_type").notNull(),
+    reason: text("reason").notNull(),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("evidence_relationships_org_idx").on(t.organisationId),
+    index("evidence_relationships_source_idx").on(t.sourceEvidenceId),
+    index("evidence_relationships_target_idx").on(t.targetEvidenceId),
+    uniqueIndex("evidence_relationships_unique_edge_idx").on(
+      t.organisationId,
+      t.sourceEvidenceId,
+      t.targetEvidenceId,
+      t.relationshipType,
+    ),
+    check(
+      "evidence_relationships_no_self_link",
+      sql.raw(`"source_evidence_id" <> "target_evidence_id"`),
     ),
   ],
 );
@@ -1601,6 +2091,15 @@ export type CustomFieldDefinition = typeof customFieldDefinitions.$inferSelect;
 export type CustomFieldValue = typeof customFieldValues.$inferSelect;
 export type CasePresence = typeof casePresence.$inferSelect;
 export type SsoLoginState = typeof ssoLoginStates.$inferSelect;
+export type AlertSource = typeof alertSources.$inferSelect;
+export type ProviderPayloadReference = typeof providerPayloadReferences.$inferSelect;
+export type Alert = typeof alerts.$inferSelect;
+export type Entity = typeof entities.$inferSelect;
+export type EntityIdentifier = typeof entityIdentifiers.$inferSelect;
+export type AlertEntity = typeof alertEntities.$inferSelect;
+export type CaseAlert = typeof caseAlerts.$inferSelect;
+export type EvidenceItem = typeof evidenceItems.$inferSelect;
+export type EvidenceRelationship = typeof evidenceRelationships.$inferSelect;
 
 export type PlaybookStep = {
   id: string;
