@@ -848,6 +848,109 @@ export const apiTokens = pgTable("api_tokens", {
 });
 
 /* ────────────────────────────────────────────────────────────────────────── */
+/* Organisation audit trail                                                  */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+export const auditActorTypeEnum = pgEnum("audit_actor_type", [
+  "user",
+  "api_token",
+  "system",
+]);
+
+export const auditExportFormatEnum = pgEnum("audit_export_format", [
+  "csv",
+  "ndjson",
+]);
+
+export const auditExportStatusEnum = pgEnum("audit_export_status", [
+  "pending",
+  "processing",
+  "completed",
+  "failed",
+]);
+
+/**
+ * Append-only organisation-wide audit trail. A `BEFORE UPDATE` trigger (see
+ * migration 0020) rejects every update except the `actor_id -> NULL`
+ * transition the `actor_id` FK's own `ON DELETE SET NULL` action performs
+ * when a referenced user is deleted (anonymizing past events rather than
+ * blocking user deletion) — no other column may ever change. A
+ * `BEFORE DELETE` trigger rejects direct deletes unless the
+ * `kelpie.audit_retention_purge` session setting is `'on'` for the current
+ * transaction (only `runAuditRetention()`, src/lib/audit/retention.ts, sets
+ * it), but allows a delete nested inside another trigger — in practice, the
+ * owning organisation's `ON DELETE CASCADE` removing this row along with the
+ * rest of that tenant's data. No application role, including admin routes,
+ * can update or delete a row through a direct query; this holds even though
+ * the app's runtime DB role owns the table.
+ */
+export const auditEvents = pgTable(
+  "audit_events",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    actorType: auditActorTypeEnum("actor_type").notNull().default("user"),
+    actorLabel: text("actor_label"),
+    action: text("action").notNull(),
+    targetType: text("target_type").notNull(),
+    targetId: text("target_id"),
+    targetLabel: text("target_label"),
+    requestId: text("request_id"),
+    sourceIp: text("source_ip"),
+    userAgent: text("user_agent"),
+    before: jsonb("before"),
+    after: jsonb("after"),
+    metadata: jsonb("metadata").notNull().default(sql`'{}'::jsonb`),
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("audit_events_org_occurred_idx").on(t.organisationId, t.occurredAt),
+    index("audit_events_org_action_idx").on(t.organisationId, t.action),
+    index("audit_events_org_actor_idx").on(t.organisationId, t.actorId),
+    index("audit_events_org_target_idx").on(
+      t.organisationId,
+      t.targetType,
+      t.targetId,
+    ),
+  ],
+);
+
+/** Tracks one requested CSV/NDJSON export of `audit_events`; the file itself lives in blob storage. */
+export const auditExportJobs = pgTable(
+  "audit_export_jobs",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    requestedBy: text("requested_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    format: auditExportFormatEnum("format").notNull(),
+    filters: jsonb("filters").notNull().default(sql`'{}'::jsonb`),
+    status: auditExportStatusEnum("status").notNull().default("pending"),
+    storageKey: text("storage_key"),
+    rowCount: integer("row_count"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("audit_export_jobs_org_idx").on(t.organisationId, t.createdAt),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
 /* Mobile devices + push delivery outbox                                      */
 /* ────────────────────────────────────────────────────────────────────────── */
 

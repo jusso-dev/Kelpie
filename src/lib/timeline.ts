@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { newId } from "./utils";
 import { queueAutomationRunsForTimelineEvent } from "./automations/core";
 import { fireWebhook } from "./webhooks";
+import { recordAuditEvent } from "./audit/events";
 
 export type TimelineEventType =
   | "case_created"
@@ -50,20 +51,30 @@ export async function writeTimelineEvent(opts: {
       caseId: opts.caseId,
       occurredAt: created.occurredAt,
     });
-    if (
-      opts.eventType === "case_created" ||
-      opts.eventType === "status_change"
-    ) {
-      const [caseRow] = await db
-        .select({
-          organisationId: cases.organisationId,
-          caseNumber: cases.caseNumber,
-          title: cases.title,
-        })
-        .from(cases)
-        .where(eq(cases.id, opts.caseId))
-        .limit(1);
-      if (caseRow) {
+    const [caseRow] = await db
+      .select({
+        organisationId: cases.organisationId,
+        caseNumber: cases.caseNumber,
+        title: cases.title,
+      })
+      .from(cases)
+      .where(eq(cases.id, opts.caseId))
+      .limit(1);
+    if (caseRow) {
+      await recordAuditEvent({
+        organisationId: caseRow.organisationId,
+        actorId: opts.actorId,
+        actorType: opts.actorId ? "user" : "system",
+        action: `case.${opts.eventType}`,
+        targetType: "case",
+        targetId: opts.caseId,
+        targetLabel: caseRow.caseNumber,
+        metadata: opts.payload ?? null,
+      });
+      if (
+        opts.eventType === "case_created" ||
+        opts.eventType === "status_change"
+      ) {
         const event =
           opts.eventType === "case_created"
             ? "case.created"

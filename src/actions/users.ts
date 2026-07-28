@@ -1,6 +1,7 @@
 "use server";
 
 import crypto from "node:crypto";
+import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { accounts, sessions, twoFactors, users } from "@/db/schema";
@@ -9,6 +10,8 @@ import { hashPassword } from "better-auth/crypto";
 import { requireRole } from "@/lib/session";
 import { newId } from "@/lib/utils";
 import { sendEmail } from "@/lib/email";
+import { recordAuditEvent } from "@/lib/audit/events";
+import { auditContextFromHeaders } from "@/lib/audit/request-context";
 
 const ROLES = ["admin", "analyst", "read_only"] as const;
 type Role = (typeof ROLES)[number];
@@ -117,6 +120,18 @@ export async function inviteUser(formData: FormData) {
       `Email: ${email}\nTemporary password: ${password}\n\n` +
       "Change this password after your first sign-in.",
   });
+  await recordAuditEvent({
+    organisationId: actor.organisationId,
+    actorId: actor.id,
+    actorType: "user",
+    actorLabel: actor.email,
+    action: "team.member_invited",
+    targetType: "user",
+    targetId: userId,
+    targetLabel: email,
+    after: { email, role },
+    ...auditContextFromHeaders(await headers()),
+  });
   revalidatePath("/settings");
 }
 
@@ -127,8 +142,21 @@ export async function setUserRole(formData: FormData) {
   if (userId === actor.id && role !== "admin") {
     throw new Error("You cannot remove your own administrator role");
   }
-  await loadManagedUser(userId, actor.organisationId);
+  const target = await loadManagedUser(userId, actor.organisationId);
   await db.update(users).set({ role }).where(eq(users.id, userId));
+  await recordAuditEvent({
+    organisationId: actor.organisationId,
+    actorId: actor.id,
+    actorType: "user",
+    actorLabel: actor.email,
+    action: "team.role_changed",
+    targetType: "user",
+    targetId: userId,
+    targetLabel: target.email,
+    before: { role: target.role },
+    after: { role },
+    ...auditContextFromHeaders(await headers()),
+  });
   revalidatePath("/settings");
 }
 
@@ -147,6 +175,17 @@ export async function lockUser(formData: FormData) {
     })
     .where(eq(users.id, userId));
   await db.delete(sessions).where(eq(sessions.userId, userId));
+  await recordAuditEvent({
+    organisationId: actor.organisationId,
+    actorId: actor.id,
+    actorType: "user",
+    actorLabel: actor.email,
+    action: "team.member_locked",
+    targetType: "user",
+    targetId: userId,
+    after: { reason },
+    ...auditContextFromHeaders(await headers()),
+  });
   revalidatePath("/settings");
 }
 
@@ -158,6 +197,16 @@ export async function unlockUser(formData: FormData) {
     .update(users)
     .set({ banned: false, banReason: null, banExpires: null, lockedAt: null })
     .where(eq(users.id, userId));
+  await recordAuditEvent({
+    organisationId: actor.organisationId,
+    actorId: actor.id,
+    actorType: "user",
+    actorLabel: actor.email,
+    action: "team.member_unlocked",
+    targetType: "user",
+    targetId: userId,
+    ...auditContextFromHeaders(await headers()),
+  });
   revalidatePath("/settings");
 }
 
@@ -184,6 +233,17 @@ export async function resetUserPassword(formData: FormData) {
       `Temporary password: ${password}\n\n` +
       "Change this password after your next sign-in.",
   });
+  await recordAuditEvent({
+    organisationId: actor.organisationId,
+    actorId: actor.id,
+    actorType: "user",
+    actorLabel: actor.email,
+    action: "team.password_reset",
+    targetType: "user",
+    targetId: target.id,
+    targetLabel: target.email,
+    ...auditContextFromHeaders(await headers()),
+  });
   revalidatePath("/settings");
 }
 
@@ -193,6 +253,17 @@ export async function setMfaRequired(formData: FormData) {
   const required = formData.get("required") === "true";
   await loadManagedUser(userId, actor.organisationId);
   await db.update(users).set({ mfaRequired: required }).where(eq(users.id, userId));
+  await recordAuditEvent({
+    organisationId: actor.organisationId,
+    actorId: actor.id,
+    actorType: "user",
+    actorLabel: actor.email,
+    action: "team.mfa_requirement_changed",
+    targetType: "user",
+    targetId: userId,
+    after: { required },
+    ...auditContextFromHeaders(await headers()),
+  });
   revalidatePath("/settings");
 }
 
@@ -206,5 +277,15 @@ export async function resetUserMfa(formData: FormData) {
     .set({ twoFactorEnabled: false, mfaRequired: true })
     .where(eq(users.id, userId));
   await db.delete(sessions).where(eq(sessions.userId, userId));
+  await recordAuditEvent({
+    organisationId: actor.organisationId,
+    actorId: actor.id,
+    actorType: "user",
+    actorLabel: actor.email,
+    action: "team.mfa_reset",
+    targetType: "user",
+    targetId: userId,
+    ...auditContextFromHeaders(await headers()),
+  });
   revalidatePath("/settings");
 }

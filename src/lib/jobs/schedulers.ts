@@ -23,6 +23,11 @@ const SYSTEM_SCHEDULES: Array<{
   { id: "system:deliver-mobile-push", every: 60_000, name: "deliver-mobile-push" },
   { id: "system:prune-presence", every: 60_000, name: "prune-presence" },
   { id: "system:scan-evidence", every: 15_000, name: "scan-evidence" },
+  {
+    id: "system:purge-audit-events",
+    every: 24 * 60 * 60_000,
+    name: "purge-audit-events",
+  },
 ];
 
 export async function upsertSystemSchedulers(queue: KelpieQueue) {

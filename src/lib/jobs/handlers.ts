@@ -10,6 +10,8 @@ import { pruneStalePresence } from "@/lib/presence";
 import { runSlaChecks } from "@/lib/sla-runner";
 import { processPendingAutomationRuns } from "@/lib/automations/dispatch";
 import { scanPendingEvidence } from "@/lib/evidence/scan-runner";
+import { purgeExpiredAuditExports } from "@/lib/audit/export";
+import { runAuditRetention } from "@/lib/audit/retention";
 
 export async function pollThreatFeed(feedId: string) {
   const result = await pollFeed(feedId);
@@ -34,6 +36,12 @@ export async function enrichPendingCases() {
   return { enriched, organisations: orgs.length };
 }
 
+export async function purgeAuditData() {
+  const retention = await runAuditRetention();
+  const exports = await purgeExpiredAuditExports();
+  return { ...retention, exportsPurged: exports.purged };
+}
+
 export const jobHandlers = {
   "sla-check": runSlaChecks,
   "deliver-webhooks": processPendingDeliveries,
@@ -42,4 +50,5 @@ export const jobHandlers = {
   "deliver-mobile-push": dispatchPendingMobilePushes,
   "prune-presence": pruneStalePresence,
   "scan-evidence": scanPendingEvidence,
+  "purge-audit-events": purgeAuditData,
 };

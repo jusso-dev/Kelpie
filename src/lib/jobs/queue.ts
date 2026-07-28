@@ -12,11 +12,14 @@ export type KelpieJobName =
   | "enrich-cases"
   | "deliver-mobile-push"
   | "prune-presence"
-  | "scan-evidence";
+  | "scan-evidence"
+  | "export-audit-events"
+  | "purge-audit-events";
 
 export type KelpieJobData = {
   feedId?: string;
   sourceId?: string;
+  auditExportJobId?: string;
 };
 
 export function redisConnection(worker = false): ConnectionOptions {
