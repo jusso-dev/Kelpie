@@ -14,6 +14,7 @@ Errors return `{ "error": "..." }` with an appropriate HTTP status (`400` invali
 | --- | --- |
 | `cases:read` / `cases:write` | Read or create/update cases |
 | `cases:override_closure` | Override case-closure policy requirements (sensitive; only grant to admin-issued tokens) |
+| `case_views:read` / `case_views:write` | Read or manage saved case views, counts, widgets, and personal defaults |
 | `tasks:read` / `tasks:write` | Read or create/update tasks |
 | `observables:read` / `observables:write` | Search or add observables |
 | `comments:read` / `comments:write` | Read or post comments |
@@ -801,6 +802,60 @@ Pass `"score": null` to clear the override.
 ### `GET /api/v1/priority-scoring` / `PATCH /api/v1/priority-scoring`
 Organisation scoring settings: `enabled`, bounded `weights`, `staleContextPolicy` (`discount` | `exclude` | `include`), `staleAfterHours`.
 
+## Saved case views
+
+Named, shareable case-list configurations (filters, sort, columns, page size, optional SLA/workload widgets, bulk-action *shapes*). Visibility is `personal`, `team`, or `organisation`. Queries, counts, and widgets are always organisation-scoped; counts use complete aggregates, not the current page. Bulk presets never store case IDs, never auto-execute, and never skip confirmation or permissions.
+
+### `GET /api/v1/case-views`
+List views the token's creator can access. Requires `case_views:read`.
+
+### `POST /api/v1/case-views`
+```json
+{
+  "name": "Critical open queue",
+  "description": "High urgency triage",
+  "visibility": "personal",
+  "config": {
+    "status": "open",
+    "severity": "critical",
+    "sort": "priority",
+    "pageSize": 25,
+    "columns": ["number", "title", "severity", "sla", "assignee"],
+    "widgets": ["sla_summary", "workload_summary"],
+    "bulkPresets": [
+      {
+        "id": "mark-high",
+        "name": "Mark high",
+        "operationType": "set_severity",
+        "params": { "severity": "high" }
+      }
+    ]
+  }
+}
+```
+`visibility: "team"` requires `teamId`. Organisation views must be created by an admin **session** (API tokens are limited to personal/team). Unknown filter/widget/action fields return `400`. Requires `case_views:write`.
+
+### `GET /api/v1/case-views/{id}`
+### `PATCH /api/v1/case-views/{id}`
+### `DELETE /api/v1/case-views/{id}`
+### `POST /api/v1/case-views/{id}/duplicate`
+Optional body: `{ "name", "visibility", "teamId" }`. Defaults to a personal copy.
+
+### `GET /api/v1/case-views/{id}/count`
+Complete inbox-style count: `{ "count": { "total", "active", "critical", "high" } }`.
+
+### `GET /api/v1/case-views/{id}/widgets`
+Bounded widgets configured on the view (`severity_breakdown`, `status_breakdown`, `sla_summary`, `workload_summary`), computed from the same full filter query.
+
+### `POST /api/v1/case-views/{id}/presets/preview`
+```json
+{ "presetId": "mark-high", "caseIds": ["case_…"] }
+```
+Re-resolves targets to the token's organisation and returns impact preview. Does not execute.
+
+### `GET /api/v1/case-views/defaults` / `PUT /api/v1/case-views/defaults`
+Personal default only via API tokens. Body: `{ "scope": "personal", "viewId": "cview_…" | null }`. Role/team defaults require an admin session.
+
 **Empty scopes grant nothing.** A token whose `scopes` array is empty fails every scope check (`403`). Sensitive scopes (`alerts:raw_payload:read`, `evidence:override`, `audit:read`) are never implied. Migration `0026_empty_token_scopes` rewrites any pre-existing empty-scope tokens to an explicit non-sensitive set so ordinary integrations keep working without retaining those sensitive powers — re-issue tokens that intentionally need sensitive scopes from Settings after upgrading.
 
 ## Scopes
@@ -825,6 +880,8 @@ Organisation scoring settings: `enabled`, bounded `weights`, `staleContextPolicy
 | `attack:write` | Attach, update, and remove ATT&CK technique mappings and attack-story entries |
 | `integrations:read` | Read integration health, open sync conflicts, and support-safe diagnostics |
 | `integrations:write` | Pause/resume connections, run connection tests, resolve sync conflicts, toggle outbound writes |
+| `case_views:read` | Read saved case views, complete counts, widgets, and bulk-preset previews |
+| `case_views:write` | Create, update, delete, duplicate, and set personal defaults for saved case views |
 
 **Empty scopes grant nothing.** A token whose `scopes` array is empty fails every scope check (`403`). Sensitive scopes (`alerts:raw_payload:read`, `evidence:override`, `audit:read`) are never implied. Migration `0026_empty_token_scopes` rewrites any pre-existing empty-scope tokens to an explicit non-sensitive set so ordinary integrations keep working without retaining those sensitive powers — re-issue tokens that intentionally need sensitive scopes from Settings after upgrading.
 

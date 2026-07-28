@@ -1,31 +1,12 @@
 import Link from "next/link";
-import {
-  and,
-  asc,
-  count,
-  desc,
-  eq,
-  ilike,
-  inArray,
-  isNotNull,
-  isNull,
-  or,
-  sql,
-} from "drizzle-orm";
+import { and, asc, count, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { formatDistanceToNow } from "date-fns";
 import { ArrowUpRight, Filter, Search, X } from "lucide-react";
 import { db } from "@/db";
-import {
-  attackCatalogVersions,
-  attackTechniqueMappings,
-  attackTechniques,
-  cases,
-  queues,
-  users,
-} from "@/db/schema";
+import { cases, queues, teamMembers, users } from "@/db/schema";
 import { requireUser } from "@/lib/session";
-import { caseSlaAtRiskSql, caseSlaBreachedSql, caseSlaWarningSql } from "@/lib/sla";
-import { listQueuesCore } from "@/lib/queues-core";
+import { caseSlaAtRiskSql } from "@/lib/sla";
+import { listQueuesCore, listTeamsCore } from "@/lib/queues-core";
 import { listWatchedCaseIdsCore } from "@/lib/watchers-core";
 import { ATTACK_TACTICS } from "@/lib/attack/tactics";
 import {
@@ -39,43 +20,44 @@ import {
   sourceSystemLabel,
 } from "@/lib/case-source-identity";
 import { BulkActionsBar } from "@/components/bulk-actions-bar";
+import { CaseViewSwitcher } from "@/components/case-view-switcher";
+import { CaseViewWidgets } from "@/components/case-view-widgets";
+import { CaseViewBulkPresets } from "@/components/case-view-bulk-presets";
+import {
+  CASE_VIEW_CLASSIFICATIONS,
+  CASE_VIEW_COLUMNS,
+  CASE_VIEW_OPERATIONAL_VIEWS,
+  CASE_VIEW_PAGE_SIZES,
+  CASE_VIEW_PRIORITY_BANDS,
+  CASE_VIEW_SEVERITIES,
+  CASE_VIEW_SORTS,
+  CASE_VIEW_STATUSES,
+  CASE_VIEW_TLPS,
+  DEFAULT_CASE_VIEW_COLUMNS,
+  type CaseViewColumn,
+  type CaseViewConfig,
+} from "@/lib/case-views/config";
+import {
+  configToUrlState,
+  parseCaseListUrlState,
+  serializeCaseListUrlState,
+  urlStateMatchesConfig,
+  urlStateToConfig,
+  type CaseListUrlState,
+} from "@/lib/case-views/url-state";
+import { buildCaseFilterClauses } from "@/lib/case-views/filters";
+import {
+  computeCaseViewWidgetsCore,
+  countManyCaseViewsCore,
+  getCaseViewCore,
+  listCaseViewDefaultsCore,
+  listCaseViewsCore,
+  resolveDefaultCaseViewCore,
+  type CaseViewActor,
+  type CaseViewRow,
+} from "@/lib/case-views/core";
 
-const PAGE_SIZE = 50;
-const STATUSES = [
-  "open",
-  "in_progress",
-  "contained",
-  "eradicated",
-  "recovered",
-  "closed",
-] as const;
-const SEVERITIES = ["low", "medium", "high", "critical"] as const;
-const CLASSIFICATIONS = [
-  "malware",
-  "phishing",
-  "unauthorised_access",
-  "data_breach",
-  "dos",
-  "policy_violation",
-  "other",
-] as const;
-const TLPS = ["clear", "green", "amber", "amber_strict", "red"] as const;
-const SORTS = ["priority", "recent", "oldest", "severity"] as const;
-
-// Built-in operational views (#54). Each maps to an indexed predicate below;
-// picking one composes with, rather than replaces, the other filters.
-const VIEWS = [
-  "unassigned",
-  "mine",
-  "watched",
-  "sla_warning",
-  "sla_breached",
-  "awaiting_third_party",
-  "awaiting_approval",
-  "stale_investigation",
-  "recently_reopened",
-] as const;
-const VIEW_LABELS: Record<(typeof VIEWS)[number], string> = {
+const VIEW_LABELS: Record<(typeof CASE_VIEW_OPERATIONAL_VIEWS)[number], string> = {
   unassigned: "Unassigned",
   mine: "My cases",
   watched: "Watched cases",
@@ -87,110 +69,30 @@ const VIEW_LABELS: Record<(typeof VIEWS)[number], string> = {
   recently_reopened: "Recently reopened",
 };
 
+const COLUMN_LABELS: Record<CaseViewColumn, string> = {
+  number: "Number",
+  title: "Title",
+  status: "Status",
+  severity: "Severity",
+  sla: "SLA",
+  tlp: "TLP",
+  classification: "Classification",
+  tags: "Tags",
+  queue: "Queue",
+  assignee: "Assignee",
+  opened: "Opened",
+  priority: "Priority",
+};
+
 type RawSearchParams = Promise<Record<string, string | string[] | undefined>>;
 type TeamMember = { id: string; name: string };
 type SourceOption = { value: string; label: string };
-type QueueParams = {
-  q?: string;
-  status?: (typeof STATUSES)[number];
-  severity?: (typeof SEVERITIES)[number];
-  classification?: (typeof CLASSIFICATIONS)[number];
-  tlp?: (typeof TLPS)[number];
-  assignee?: string;
-  queueId?: string;
-  view?: (typeof VIEWS)[number];
-  tag?: string;
-  dataTag?: string;
-  source?: string;
-  technique?: string;
-  tactic?: string;
-  sla?: "risk";
-  sort: (typeof SORTS)[number];
-  page: number;
-};
-
-// Bare push-producer slugs (e.g. `tawny`) and managed-connector namespaces
-// (e.g. `microsoft_sentinel:src_123`) are both valid; the colon is required
-// so connector rows stay filterable by their exact source.
-const SOURCE_PATTERN = /^[a-z0-9][a-z0-9_:-]*$/;
-
-function first(raw: string | string[] | undefined): string | undefined {
-  return Array.isArray(raw) ? raw[0] : raw;
-}
-
-function pick<const T extends readonly string[]>(
-  values: T,
-  raw: string | undefined,
-): T[number] | undefined {
-  return raw && (values as readonly string[]).includes(raw)
-    ? (raw as T[number])
-    : undefined;
-}
-
-function cleanText(raw: string | undefined, max: number): string | undefined {
-  const value = raw?.trim().slice(0, max);
-  return value || undefined;
-}
-
-function normaliseSource(raw: string | undefined): string | undefined {
-  const value = raw?.trim().toLowerCase().slice(0, 64);
-  return value && SOURCE_PATTERN.test(value) ? value : undefined;
-}
-
-function normaliseParams(
-  raw: Record<string, string | string[] | undefined>,
-  team: TeamMember[],
-  queueOptions: Array<{ id: string }>,
-): QueueParams {
-  const rawAssignee = first(raw.assignee);
-  const assignee =
-    rawAssignee === "mine" || rawAssignee === "unassigned"
-      ? rawAssignee
-      : team.some((member) => member.id === rawAssignee)
-        ? rawAssignee
-        : undefined;
-  const rawQueueId = first(raw.queueId);
-  const queueId =
-    rawQueueId === "none" || queueOptions.some((q) => q.id === rawQueueId)
-      ? rawQueueId
-      : undefined;
-  const rawPage = Number(first(raw.page));
-  return {
-    q: cleanText(first(raw.q), 120),
-    status: pick(STATUSES, first(raw.status)),
-    severity: pick(SEVERITIES, first(raw.severity)),
-    classification: pick(CLASSIFICATIONS, first(raw.classification)),
-    tlp: pick(TLPS, first(raw.tlp)),
-    assignee,
-    queueId,
-    view: pick(VIEWS, first(raw.view)),
-    tag: cleanText(first(raw.tag), 60),
-    dataTag: cleanText(first(raw.dataTag), 60),
-    source: normaliseSource(first(raw.source)),
-    technique: cleanText(first(raw.technique), 32)?.toUpperCase(),
-    tactic: ATTACK_TACTICS.some((t) => t.id === first(raw.tactic)) ? first(raw.tactic) : undefined,
-    sla: first(raw.sla) === "risk" ? "risk" : undefined,
-    sort: pick(SORTS, first(raw.sort)) ?? "priority",
-    page:
-      Number.isInteger(rawPage) && rawPage > 0
-        ? Math.min(rawPage, 10_000)
-        : 1,
-  };
-}
 
 function queryString(
-  current: QueueParams,
-  updates: Partial<Record<keyof QueueParams, string | number | undefined>>,
+  current: CaseListUrlState,
+  updates: Partial<Record<keyof CaseListUrlState, string | number | undefined>> = {},
 ): string {
-  const merged = { ...current, ...updates };
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(merged)) {
-    if (value !== undefined && value !== "" && !(key === "sort" && value === "priority")) {
-      params.set(key, String(value));
-    }
-  }
-  const value = params.toString();
-  return value ? `?${value}` : "";
+  return serializeCaseListUrlState(current, updates);
 }
 
 export default async function CasesPage({
@@ -199,33 +101,132 @@ export default async function CasesPage({
   searchParams: RawSearchParams;
 }) {
   const user = await requireUser();
+  const actor: CaseViewActor = {
+    id: user.id,
+    organisationId: user.organisationId,
+    role: user.role,
+  };
   const canBulk = user.role === "admin" || user.role === "analyst";
-  const [rawParams, team, sourceSystemRows, queueOptions, watchedCaseIds] =
-    await Promise.all([
-      searchParams,
-      db
-        .select({ id: users.id, name: users.name })
-        .from(users)
-        .where(eq(users.organisationId, user.organisationId))
-        .orderBy(asc(users.name)),
-      db
-        .selectDistinct({ sourceSystem: cases.sourceSystem })
-        .from(cases)
-        .where(
-          and(
-            eq(cases.organisationId, user.organisationId),
-            isNotNull(cases.sourceSystem),
-          ),
-        )
-        .orderBy(asc(cases.sourceSystem))
-        .limit(50),
-      listQueuesCore(user.organisationId),
-      listWatchedCaseIdsCore(user.organisationId, user.id),
-    ]);
-  const params = normaliseParams(rawParams, team, queueOptions);
-  // Known push producers (e.g. Tawny) are always offered even if this org has
-  // no cases yet; managed connectors are only offered once observed, since
-  // their identifiers are per-org connection ids.
+  const canWriteViews = user.role === "admin" || user.role === "analyst";
+
+  const [
+    rawParams,
+    team,
+    sourceSystemRows,
+    queueOptions,
+    watchedCaseIds,
+    savedViews,
+    defaults,
+    orgTeams,
+    memberships,
+  ] = await Promise.all([
+    searchParams,
+    db
+      .select({ id: users.id, name: users.name })
+      .from(users)
+      .where(eq(users.organisationId, user.organisationId))
+      .orderBy(asc(users.name)),
+    db
+      .selectDistinct({ sourceSystem: cases.sourceSystem })
+      .from(cases)
+      .where(
+        and(
+          eq(cases.organisationId, user.organisationId),
+          isNotNull(cases.sourceSystem),
+        ),
+      )
+      .orderBy(asc(cases.sourceSystem))
+      .limit(50),
+    listQueuesCore(user.organisationId),
+    listWatchedCaseIdsCore(user.organisationId, user.id),
+    listCaseViewsCore(actor),
+    listCaseViewDefaultsCore(actor),
+    listTeamsCore(user.organisationId),
+    db
+      .select({ teamId: teamMembers.teamId })
+      .from(teamMembers)
+      .where(
+        and(
+          eq(teamMembers.organisationId, user.organisationId),
+          eq(teamMembers.userId, user.id),
+        ),
+      ),
+  ]);
+
+  const memberTeamIds = new Set(memberships.map((m) => m.teamId));
+  const personalDefaultId = defaults.find(
+    (d) => d.scope === "personal" && d.userId === user.id,
+  )?.viewId;
+
+  // Parse URL first. Missing/inaccessible savedView falls back safely.
+  let params = parseCaseListUrlState(rawParams);
+  // Drop invalid assignee/queue references (team-scoped allow-list).
+  if (
+    params.assignee &&
+    params.assignee !== "mine" &&
+    params.assignee !== "unassigned" &&
+    !team.some((m) => m.id === params.assignee)
+  ) {
+    params = { ...params, assignee: undefined };
+  }
+  if (
+    params.queueId &&
+    params.queueId !== "none" &&
+    !queueOptions.some((q) => q.id === params.queueId)
+  ) {
+    params = { ...params, queueId: undefined };
+  }
+  if (
+    params.tactic &&
+    !ATTACK_TACTICS.some((t) => t.id === params.tactic)
+  ) {
+    params = { ...params, tactic: undefined };
+  }
+
+  let activeSavedView: CaseViewRow | null = null;
+
+  const rawKeys = Object.keys(rawParams).filter((key) => {
+    const value = rawParams[key];
+    if (value === undefined || value === "") return false;
+    if (Array.isArray(value) && value.length === 0) return false;
+    return true;
+  });
+  const onlySavedViewKeys = rawKeys.every(
+    (key) => key === "savedView" || key === "page",
+  );
+  const hasFilterParams = rawKeys.some(
+    (key) => key !== "savedView" && key !== "page",
+  );
+
+  if (params.savedView) {
+    activeSavedView = await getCaseViewCore(actor, params.savedView);
+    if (!activeSavedView) {
+      // Inaccessible / missing → standard list without savedView param.
+      params = { ...params, savedView: undefined };
+    } else if (onlySavedViewKeys) {
+      // First load with only savedView=id: expand config into filter state.
+      params = configToUrlState(activeSavedView.config, {
+        savedViewId: activeSavedView.id,
+        page: params.page,
+      });
+    }
+    // Else: savedView + other params = dirty/shared unsaved set; keep URL filters.
+  } else if (!hasFilterParams) {
+    const defaultView = await resolveDefaultCaseViewCore(actor);
+    if (defaultView) {
+      activeSavedView = defaultView;
+      params = configToUrlState(defaultView.config, {
+        savedViewId: defaultView.id,
+        page: 1,
+      });
+    }
+  }
+
+  const currentConfig: CaseViewConfig = urlStateToConfig(params);
+  const isDirty = activeSavedView
+    ? !urlStateMatchesConfig(params, activeSavedView.config)
+    : false;
+
   const sourceSystemOptions: SourceOption[] = Array.from(
     new Set([
       ...KNOWN_PUSH_SOURCE_SYSTEMS,
@@ -236,108 +237,16 @@ export default async function CasesPage({
   )
     .map((value) => ({ value, label: sourceSystemLabel(value) ?? value }))
     .sort((a, b) => a.label.localeCompare(b.label));
-  const filters = [eq(cases.organisationId, user.organisationId)];
 
-  if (params.q) {
-    filters.push(
-      or(
-        ilike(cases.caseNumber, `%${params.q}%`),
-        ilike(cases.title, `%${params.q}%`),
-      )!,
-    );
-  }
-  if (params.status) filters.push(eq(cases.status, params.status));
-  if (params.severity) filters.push(eq(cases.severity, params.severity));
-  if (params.classification) {
-    filters.push(eq(cases.classification, params.classification));
-  }
-  if (params.tlp) filters.push(eq(cases.tlp, params.tlp));
-  if (params.assignee === "mine") {
-    filters.push(eq(cases.assigneeId, user.id));
-  } else if (params.assignee === "unassigned") {
-    filters.push(isNull(cases.assigneeId));
-  } else if (params.assignee) {
-    filters.push(eq(cases.assigneeId, params.assignee));
-  }
-  if (params.tag) filters.push(sql`${cases.tags} ? ${params.tag}`);
-  if (params.dataTag) {
-    filters.push(sql`${cases.dataClassificationTags} ? ${params.dataTag}`);
-  }
-  if (params.source) filters.push(eq(cases.sourceSystem, params.source));
-  if (params.queueId === "none") {
-    filters.push(isNull(cases.queueId));
-  } else if (params.queueId) {
-    filters.push(eq(cases.queueId, params.queueId));
-  }
-  if (params.technique) {
-    filters.push(
-      sql`EXISTS (SELECT 1 FROM ${attackTechniqueMappings} m WHERE m.case_id = ${cases.id} AND m.technique_id = ${params.technique})`,
-    );
-  }
-  if (params.tactic) {
-    filters.push(
-      sql`EXISTS (
-        SELECT 1 FROM ${attackTechniqueMappings} m
-        WHERE m.case_id = ${cases.id}
-          AND EXISTS (
-            SELECT 1 FROM ${attackTechniques} t
-            WHERE t.technique_id = m.technique_id
-              AND t.catalog_version_id = (
-                SELECT id FROM ${attackCatalogVersions} WHERE status = 'active' LIMIT 1
-              )
-              AND EXISTS (SELECT 1 FROM jsonb_array_elements(t.tactics) elem WHERE elem->>'id' = ${params.tactic})
-          )
-      )`,
-    );
-  }
-
-  const slaRisk = caseSlaAtRiskSql();
-  if (params.sla === "risk") filters.push(slaRisk);
-
-  // Built-in operational views (#54): each is an indexed predicate, not a
-  // client-side filter, so counts/pagination stay correct for the whole view.
-  switch (params.view) {
-    case "unassigned":
-      filters.push(isNull(cases.assigneeId));
-      break;
-    case "mine":
-      filters.push(
-        or(
-          eq(cases.assigneeId, user.id),
-          sql`exists (select 1 from case_assignees ca where ca.case_id = ${cases.id} and ca.user_id = ${user.id})`,
-        )!,
-      );
-      break;
-    case "watched":
-      filters.push(
-        watchedCaseIds.length > 0 ? inArray(cases.id, watchedCaseIds) : sql`false`,
-      );
-      break;
-    case "sla_warning":
-      filters.push(caseSlaWarningSql());
-      break;
-    case "sla_breached":
-      filters.push(caseSlaBreachedSql());
-      break;
-    case "awaiting_third_party":
-      filters.push(eq(cases.waitingReason, "third_party"));
-      break;
-    case "awaiting_approval":
-      filters.push(eq(cases.waitingReason, "approval"));
-      break;
-    case "stale_investigation":
-      filters.push(
-        sql`${cases.status} = 'in_progress' and now() - ${cases.lastActivityAt} > interval '3 days'`,
-      );
-      break;
-    case "recently_reopened":
-      filters.push(
-        sql`${cases.lastReopenedAt} is not null and now() - ${cases.lastReopenedAt} < interval '7 days'`,
-      );
-      break;
-  }
-
+  const filterCtx = {
+    organisationId: user.organisationId,
+    userId: user.id,
+    watchedCaseIds,
+  };
+  const filters = buildCaseFilterClauses(currentConfig, filterCtx);
   const where = and(...filters);
+
+  const pageSize = currentConfig.pageSize;
   const [metrics] = await db
     .select({
       total: count(),
@@ -349,17 +258,18 @@ export default async function CasesPage({
     .where(where);
 
   const total = Number(metrics?.total ?? 0);
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const page = Math.min(params.page, totalPages);
-  params.page = page;
+  params = { ...params, page };
+  const slaRisk = caseSlaAtRiskSql();
   const severityRank = sql<number>`case ${cases.severity}
     when 'critical' then 0 when 'high' then 1 when 'medium' then 2 else 3 end`;
   const orderBy =
-    params.sort === "oldest"
+    currentConfig.sort === "oldest"
       ? [asc(cases.openedAt), asc(cases.id)]
-      : params.sort === "recent"
+      : currentConfig.sort === "recent"
         ? [desc(cases.openedAt), desc(cases.id)]
-        : params.sort === "severity"
+        : currentConfig.sort === "severity"
           ? [asc(severityRank), desc(cases.openedAt), desc(cases.id)]
           : [
               asc(sql`case when ${cases.status} = 'closed' then 1 else 0 end`),
@@ -391,12 +301,14 @@ export default async function CasesPage({
     .leftJoin(queues, eq(queues.id, cases.queueId))
     .where(where)
     .orderBy(...orderBy)
-    .limit(PAGE_SIZE)
-    .offset((page - 1) * PAGE_SIZE);
+    .limit(pageSize)
+    .offset((page - 1) * pageSize);
 
-  // Counts truthy filters for the "Clear N" affordance; the human-readable
-  // form of each value (e.g. "Source: Tawny") is what the corresponding
-  // <SelectFilter> shows as its selected option, via sourceSystemLabel.
+  const columns: CaseViewColumn[] =
+    currentConfig.columns.length > 0
+      ? currentConfig.columns
+      : [...DEFAULT_CASE_VIEW_COLUMNS];
+
   const activeFilters = [
     params.q,
     params.status,
@@ -412,9 +324,60 @@ export default async function CasesPage({
     params.technique,
     params.tactic,
     params.sla,
-  ].filter(Boolean).length;
-  const firstResult = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  const lastResult = Math.min(page * PAGE_SIZE, total);
+    params.priorityBand,
+    params.minPriorityScore,
+  ].filter((v) => v !== undefined && v !== "").length;
+
+  const firstResult = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const lastResult = Math.min(page * pageSize, total);
+
+  // Complete counts for switcher badges (bounded: first 20 views).
+  const countByView = await countManyCaseViewsCore(
+    actor,
+    savedViews.slice(0, 20).map((v) => v.id),
+    watchedCaseIds,
+  );
+
+  const widgetResults =
+    activeSavedView && activeSavedView.config.widgets.length > 0
+      ? await computeCaseViewWidgetsCore(
+          filterCtx,
+          // Widgets follow the *active list* filters (URL state), not only saved config,
+          // so dirty edits still show consistent summaries.
+          currentConfig,
+          activeSavedView.config.widgets,
+        )
+      : [];
+
+  const switcherViews = savedViews.map((view) => {
+    const canWrite =
+      user.role !== "read_only" &&
+      (view.visibility === "organisation"
+        ? user.role === "admin"
+        : view.visibility === "personal"
+          ? view.ownerUserId === user.id
+          : user.role === "admin" ||
+            (view.teamId != null && memberTeamIds.has(view.teamId)));
+    return {
+      id: view.id,
+      name: view.name,
+      visibility: view.visibility,
+      teamId: view.teamId,
+      count: countByView[view.id]?.total,
+      isDefault: view.id === personalDefaultId,
+      canWrite,
+      href: `/cases${serializeCaseListUrlState(
+        configToUrlState(view.config, { savedViewId: view.id }),
+      )}`,
+    };
+  });
+
+  const bulkPresets =
+    activeSavedView && !isDirty ? activeSavedView.config.bulkPresets : [];
+
+  const visibleTeams = orgTeams
+    .filter((t) => t.isActive && (user.role === "admin" || memberTeamIds.has(t.id)))
+    .map((t) => ({ id: t.id, name: t.name }));
 
   return (
     <div className="space-y-5">
@@ -446,11 +409,28 @@ export default async function CasesPage({
         </div>
       </header>
 
+      <CaseViewSwitcher
+        views={switcherViews}
+        activeViewId={activeSavedView?.id}
+        isDirty={isDirty}
+        currentConfig={currentConfig}
+        teams={visibleTeams}
+        canWrite={canWriteViews}
+        isAdmin={user.role === "admin"}
+      />
+
+      {widgetResults.length > 0 ? (
+        <CaseViewWidgets widgets={widgetResults} />
+      ) : null}
+
       <nav aria-label="Built-in views" className="flex flex-wrap gap-2">
-        {VIEWS.map((view) => (
+        {CASE_VIEW_OPERATIONAL_VIEWS.map((view) => (
           <Link
             key={view}
-            href={`/cases${queryString(params, { view: params.view === view ? undefined : view, page: undefined })}`}
+            href={`/cases${queryString(params, {
+              view: params.view === view ? undefined : view,
+              page: undefined,
+            })}`}
             className={
               "kelpie-badge " +
               (params.view === view
@@ -470,6 +450,7 @@ export default async function CasesPage({
         queueOptions={queueOptions}
         sourceOptions={sourceSystemOptions}
         activeFilters={activeFilters}
+        columns={columns}
       />
 
       {canBulk ? (
@@ -480,36 +461,45 @@ export default async function CasesPage({
         />
       ) : null}
 
+      {canBulk && activeSavedView && bulkPresets.length > 0 ? (
+        <CaseViewBulkPresets
+          viewId={activeSavedView.id}
+          formId="bulk-case-form"
+          presets={bulkPresets}
+        />
+      ) : null}
+
       <div className="flex flex-col gap-2 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between">
         <p aria-live="polite">
           Showing {firstResult}-{lastResult} of {total} matching case
           {total === 1 ? "" : "s"}
         </p>
-        <p>Page {page} of {totalPages}</p>
+        <p>
+          Page {page} of {totalPages}
+        </p>
       </div>
 
       <div className="kelpie-panel kelpie-scroll-x" tabIndex={0} aria-label="Cases table">
         <table className="kelpie-table">
           <thead>
             <tr>
-              {canBulk ? <th><span className="sr-only">Select</span></th> : null}
-              <th>Number</th>
-              <th>Title</th>
-              <th>Status</th>
-              <th>Severity</th>
-              <th>SLA</th>
-              <th>TLP</th>
-              <th>Classification</th>
-              <th>Tags</th>
-              <th>Queue</th>
-              <th>Assignee</th>
-              <th>Opened</th>
+              {canBulk ? (
+                <th>
+                  <span className="sr-only">Select</span>
+                </th>
+              ) : null}
+              {columns.map((col) => (
+                <th key={col}>{COLUMN_LABELS[col]}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={canBulk ? 12 : 11} className="py-10 text-center text-slate-400">
+                <td
+                  colSpan={(canBulk ? 1 : 0) + columns.length}
+                  className="py-10 text-center text-slate-400"
+                >
                   <p>No cases match these filters.</p>
                   {activeFilters > 0 ? (
                     <Link href="/cases" className="kelpie-link mt-2 inline-block">
@@ -536,47 +526,11 @@ export default async function CasesPage({
                       />
                     </td>
                   ) : null}
-                  <td className="font-mono text-xs text-slate-400">{c.caseNumber}</td>
-                  <td className="max-w-sm">
-                    <Link href={`/cases/${c.id}`} className="kelpie-link font-medium">
-                      {c.title}
-                    </Link>
-                  </td>
-                  <td><StatusBadge value={c.status} /></td>
-                  <td><SeverityBadge value={c.severity} /></td>
-                  <td>
-                    {c.slaRisk ? (
-                      <span className="kelpie-badge text-amber-300">at risk</span>
-                    ) : (
-                      <span className="text-xs text-slate-500">clear</span>
-                    )}
-                  </td>
-                  <td><TlpBadge value={c.tlp} /></td>
-                  <td className="text-xs capitalize text-slate-300">
-                    {c.classification.replace(/_/g, " ")}
-                  </td>
-                  <td>
-                    <div className="flex max-w-64 flex-wrap gap-1">
-                      {(Array.isArray(c.dataClassificationTags)
-                        ? (c.dataClassificationTags as string[])
-                        : []
-                      ).map((tag) => (
-                        <TagBadge key={`data-${tag}`} value={tag} tone="classification" />
-                      ))}
-                      {(Array.isArray(c.tags) ? (c.tags as string[]) : []).map((tag) => (
-                        <TagBadge key={tag} value={tag} />
-                      ))}
-                    </div>
-                  </td>
-                  <td className="text-xs text-slate-300">
-                    {c.queueName ?? <span className="text-slate-500">No queue</span>}
-                  </td>
-                  <td className="text-xs text-slate-300">
-                    {c.assigneeName ?? <span className="text-slate-500">Unassigned</span>}
-                  </td>
-                  <td className="whitespace-nowrap text-xs text-slate-400">
-                    {formatDistanceToNow(c.openedAt, { addSuffix: true })}
-                  </td>
+                  {columns.map((col) => (
+                    <td key={col}>
+                      <CaseCell column={col} row={c} />
+                    </td>
+                  ))}
                 </tr>
               ))
             )}
@@ -593,7 +547,9 @@ export default async function CasesPage({
             >
               Previous
             </Link>
-          ) : <span />}
+          ) : (
+            <span />
+          )}
           {page < totalPages ? (
             <Link
               href={`/cases${queryString(params, { page: page + 1 })}`}
@@ -601,11 +557,105 @@ export default async function CasesPage({
             >
               Next
             </Link>
-          ) : <span />}
+          ) : (
+            <span />
+          )}
         </nav>
       ) : null}
     </div>
   );
+}
+
+function CaseCell({
+  column,
+  row,
+}: {
+  column: CaseViewColumn;
+  row: {
+    caseNumber: string;
+    id: string;
+    title: string;
+    status: string;
+    severity: string;
+    slaRisk: boolean | null;
+    tlp: string;
+    classification: string;
+    tags: unknown;
+    dataClassificationTags: unknown;
+    queueName: string | null;
+    assigneeName: string | null;
+    openedAt: Date;
+  };
+}) {
+  switch (column) {
+    case "number":
+      return <span className="font-mono text-xs text-slate-400">{row.caseNumber}</span>;
+    case "title":
+      return (
+        <span className="max-w-sm block">
+          <Link href={`/cases/${row.id}`} className="kelpie-link font-medium">
+            {row.title}
+          </Link>
+        </span>
+      );
+    case "status":
+      return <StatusBadge value={row.status as never} />;
+    case "severity":
+      return <SeverityBadge value={row.severity as never} />;
+    case "sla":
+      return row.slaRisk ? (
+        <span className="kelpie-badge text-amber-300">at risk</span>
+      ) : (
+        <span className="text-xs text-slate-500">clear</span>
+      );
+    case "tlp":
+      return <TlpBadge value={row.tlp as never} />;
+    case "classification":
+      return (
+        <span className="text-xs capitalize text-slate-300">
+          {row.classification.replace(/_/g, " ")}
+        </span>
+      );
+    case "tags":
+      return (
+        <div className="flex max-w-64 flex-wrap gap-1">
+          {(Array.isArray(row.dataClassificationTags)
+            ? (row.dataClassificationTags as string[])
+            : []
+          ).map((tag) => (
+            <TagBadge key={`data-${tag}`} value={tag} tone="classification" />
+          ))}
+          {(Array.isArray(row.tags) ? (row.tags as string[]) : []).map((tag) => (
+            <TagBadge key={tag} value={tag} />
+          ))}
+        </div>
+      );
+    case "queue":
+      return (
+        <span className="text-xs text-slate-300">
+          {row.queueName ?? <span className="text-slate-500">No queue</span>}
+        </span>
+      );
+    case "assignee":
+      return (
+        <span className="text-xs text-slate-300">
+          {row.assigneeName ?? <span className="text-slate-500">Unassigned</span>}
+        </span>
+      );
+    case "opened":
+      return (
+        <span className="whitespace-nowrap text-xs text-slate-400">
+          {formatDistanceToNow(row.openedAt, { addSuffix: true })}
+        </span>
+      );
+    case "priority":
+      // Priority score lives on a separate table; list shows severity proxy unless scored.
+      return (
+        <span className="text-xs capitalize text-slate-400">{row.severity}</span>
+      );
+    default:
+      return null;
+  }
 }
 
 function QueueFilters({
@@ -614,16 +664,24 @@ function QueueFilters({
   queueOptions,
   sourceOptions,
   activeFilters,
+  columns,
 }: {
-  params: QueueParams;
+  params: CaseListUrlState;
   team: TeamMember[];
   queueOptions: Array<{ id: string; name: string; teamName: string }>;
   sourceOptions: SourceOption[];
   activeFilters: number;
+  columns: CaseViewColumn[];
 }) {
   return (
     <form className="kelpie-panel space-y-4 p-4" aria-label="Case filters">
       {params.view ? <input type="hidden" name="view" value={params.view} /> : null}
+      {params.savedView ? (
+        <input type="hidden" name="savedView" value={params.savedView} />
+      ) : null}
+      {columns.length > 0 ? (
+        <input type="hidden" name="columns" value={columns.join(",")} />
+      ) : null}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <label className="min-w-0 flex-1 text-xs font-medium text-slate-300" htmlFor="case-search">
           Search
@@ -658,13 +716,17 @@ function QueueFilters({
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <SelectFilter label="Status" name="status" value={params.status}>
           <option value="">Any status</option>
-          {STATUSES.map((value) => (
-            <option key={value} value={value}>{value.replace(/_/g, " ")}</option>
+          {CASE_VIEW_STATUSES.map((value) => (
+            <option key={value} value={value}>
+              {value.replace(/_/g, " ")}
+            </option>
           ))}
         </SelectFilter>
         <SelectFilter label="Severity" name="severity" value={params.severity}>
           <option value="">Any severity</option>
-          {SEVERITIES.map((value) => <option key={value}>{value}</option>)}
+          {CASE_VIEW_SEVERITIES.map((value) => (
+            <option key={value}>{value}</option>
+          ))}
         </SelectFilter>
         <SelectFilter
           label="Classification"
@@ -672,14 +734,18 @@ function QueueFilters({
           value={params.classification}
         >
           <option value="">Any classification</option>
-          {CLASSIFICATIONS.map((value) => (
-            <option key={value} value={value}>{value.replace(/_/g, " ")}</option>
+          {CASE_VIEW_CLASSIFICATIONS.map((value) => (
+            <option key={value} value={value}>
+              {value.replace(/_/g, " ")}
+            </option>
           ))}
         </SelectFilter>
         <SelectFilter label="TLP" name="tlp" value={params.tlp}>
           <option value="">Any TLP</option>
-          {TLPS.map((value) => (
-            <option key={value} value={value}>{value.replace("_", "+")}</option>
+          {CASE_VIEW_TLPS.map((value) => (
+            <option key={value} value={value}>
+              {value.replace("_", "+")}
+            </option>
           ))}
         </SelectFilter>
         <SelectFilter label="Assignee" name="assignee" value={params.assignee}>
@@ -687,47 +753,84 @@ function QueueFilters({
           <option value="mine">Mine</option>
           <option value="unassigned">Unassigned</option>
           {team.map((member) => (
-            <option key={member.id} value={member.id}>{member.name}</option>
+            <option key={member.id} value={member.id}>
+              {member.name}
+            </option>
           ))}
         </SelectFilter>
         <SelectFilter label="Queue" name="queueId" value={params.queueId}>
           <option value="">Any queue</option>
           <option value="none">No queue</option>
           {queueOptions.map((queue) => (
-            <option key={queue.id} value={queue.id}>{queue.teamName} / {queue.name}</option>
+            <option key={queue.id} value={queue.id}>
+              {queue.teamName} / {queue.name}
+            </option>
           ))}
         </SelectFilter>
         <SelectFilter label="Source" name="source" value={params.source}>
           <option value="">All sources</option>
           {sourceOptions.map((opt) => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
           ))}
         </SelectFilter>
         <SelectFilter label="SLA" name="sla" value={params.sla}>
           <option value="">Any SLA state</option>
           <option value="risk">At risk or breached</option>
         </SelectFilter>
+        <SelectFilter label="Priority band" name="priorityBand" value={params.priorityBand}>
+          <option value="">Any priority band</option>
+          {CASE_VIEW_PRIORITY_BANDS.map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </SelectFilter>
         <SelectFilter label="Sort" name="sort" value={params.sort}>
-          <option value="priority">Operational priority</option>
-          <option value="recent">Newest opened</option>
-          <option value="oldest">Oldest opened</option>
-          <option value="severity">Severity</option>
+          {CASE_VIEW_SORTS.map((value) => (
+            <option key={value} value={value}>
+              {value === "priority"
+                ? "Operational priority"
+                : value === "recent"
+                  ? "Newest opened"
+                  : value === "oldest"
+                    ? "Oldest opened"
+                    : "Severity"}
+            </option>
+          ))}
+        </SelectFilter>
+        <SelectFilter
+          label="Page size"
+          name="pageSize"
+          value={String(params.pageSize)}
+        >
+          {CASE_VIEW_PAGE_SIZES.map((size) => (
+            <option key={size} value={size}>
+              {size} per page
+            </option>
+          ))}
         </SelectFilter>
         <SelectFilter label="ATT&CK tactic" name="tactic" value={params.tactic}>
           <option value="">Any tactic</option>
           {ATTACK_TACTICS.map((tactic) => (
-            <option key={tactic.id} value={tactic.id}>{tactic.name}</option>
+            <option key={tactic.id} value={tactic.id}>
+              {tactic.name}
+            </option>
           ))}
         </SelectFilter>
-        <TextFilter label="ATT&CK technique" name="technique" value={params.technique} />
+        <TextFilter
+          label="ATT&CK technique"
+          name="technique"
+          value={params.technique}
+        />
         <div className="grid grid-cols-2 gap-3">
           <TextFilter label="Case tag" name="tag" value={params.tag} />
-          <TextFilter
-            label="Data tag"
-            name="dataTag"
-            value={params.dataTag}
-          />
+          <TextFilter label="Data tag" name="dataTag" value={params.dataTag} />
         </div>
+        <p className="text-[10px] text-slate-500 sm:col-span-2 lg:col-span-4">
+          Columns: {CASE_VIEW_COLUMNS.join(", ")}. Current: {columns.join(", ")}.
+        </p>
       </div>
     </form>
   );

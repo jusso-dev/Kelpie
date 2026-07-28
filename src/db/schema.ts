@@ -234,6 +234,20 @@ export const priorityScoreBandEnum = pgEnum("priority_score_band", [
   "critical",
 ]);
 
+/** Who a saved case view is shared with (issue #46). */
+export const caseViewVisibilityEnum = pgEnum("case_view_visibility", [
+  "personal",
+  "team",
+  "organisation",
+]);
+
+/** Default-view binding scope: personal user, role, or team (issue #46). */
+export const caseViewDefaultScopeEnum = pgEnum("case_view_default_scope", [
+  "personal",
+  "role",
+  "team",
+]);
+
 export const staleContextPolicyEnum = pgEnum("stale_context_policy", [
   "discount",
   "exclude",
@@ -1037,6 +1051,118 @@ export const bulkOperations = pgTable(
       t.organisationId,
       t.createdAt,
     ),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Saved case views (issue #46)                                               */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * A named, shareable case-list configuration: filters, sort, columns, page
+ * size, optional widgets, and bulk-action *shapes* (never auto-execute).
+ *
+ * Visibility:
+ * - personal: only `ownerUserId` (and admins listing for support) can see
+ * - team: members of `teamId` plus admins
+ * - organisation: every member of the organisation
+ *
+ * Access to the *cases* returned by a view always remains organisation-
+ * scoped; a view never grants cross-tenant or elevated case access.
+ */
+export const caseViews = pgTable(
+  "case_views",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    visibility: caseViewVisibilityEnum("visibility").notNull(),
+    /** Required when visibility = personal. */
+    ownerUserId: text("owner_user_id").references(() => users.id, {
+      onDelete: "cascade",
+    }),
+    /** Required when visibility = team. */
+    teamId: text("team_id").references(() => teams.id, {
+      onDelete: "cascade",
+    }),
+    /**
+     * Strict config blob (validated in application code with zod).
+     * Shape: { q, status, severity, ..., sort, pageSize, columns, widgets, bulkPresets }
+     */
+    config: jsonb("config").notNull().default(sql`'{}'::jsonb`),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    updatedBy: text("updated_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("case_views_org_idx").on(t.organisationId),
+    index("case_views_org_owner_idx").on(t.organisationId, t.ownerUserId),
+    index("case_views_org_team_idx").on(t.organisationId, t.teamId),
+    index("case_views_org_visibility_idx").on(t.organisationId, t.visibility),
+  ],
+);
+
+/**
+ * Default saved view bindings. At most one default per (scope, subject):
+ * - personal: (organisationId, userId)
+ * - role: (organisationId, role)
+ * - team: (organisationId, teamId)
+ *
+ * Resolution order when opening /cases with no explicit filters:
+ * personal default → first matching team default (membership) → role default.
+ */
+export const caseViewDefaults = pgTable(
+  "case_view_defaults",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    scope: caseViewDefaultScopeEnum("scope").notNull(),
+    userId: text("user_id").references(() => users.id, {
+      onDelete: "cascade",
+    }),
+    role: roleEnum("role"),
+    teamId: text("team_id").references(() => teams.id, {
+      onDelete: "cascade",
+    }),
+    viewId: text("view_id")
+      .notNull()
+      .references(() => caseViews.id, { onDelete: "cascade" }),
+    setBy: text("set_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("case_view_defaults_org_idx").on(t.organisationId),
+    index("case_view_defaults_view_idx").on(t.viewId),
+    uniqueIndex("case_view_defaults_personal_uidx")
+      .on(t.organisationId, t.userId)
+      .where(sql`${t.scope} = 'personal' and ${t.userId} is not null`),
+    uniqueIndex("case_view_defaults_role_uidx")
+      .on(t.organisationId, t.role)
+      .where(sql`${t.scope} = 'role' and ${t.role} is not null`),
+    uniqueIndex("case_view_defaults_team_uidx")
+      .on(t.organisationId, t.teamId)
+      .where(sql`${t.scope} = 'team' and ${t.teamId} is not null`),
   ],
 );
 
@@ -4496,6 +4622,8 @@ export type CaseClosurePolicyVersion =
   typeof caseClosurePolicyVersions.$inferSelect;
 export type CaseClosureSnapshot = typeof caseClosureSnapshots.$inferSelect;
 export type BulkOperation = typeof bulkOperations.$inferSelect;
+export type CaseView = typeof caseViews.$inferSelect;
+export type CaseViewDefault = typeof caseViewDefaults.$inferSelect;
 export type AttackCatalogVersion = typeof attackCatalogVersions.$inferSelect;
 export type AttackTechniqueRow = typeof attackTechniques.$inferSelect;
 export type AttackTechniqueMapping = typeof attackTechniqueMappings.$inferSelect;
