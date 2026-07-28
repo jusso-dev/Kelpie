@@ -107,6 +107,19 @@ export const KNOWN_SCOPES = [
     value: "case_views:write",
     label: "Create, update, delete, and set defaults for saved case views",
   },
+  {
+    value: "reports:read",
+    label: "Read report templates, previews, export history, and download released reports",
+  },
+  {
+    value: "reports:write",
+    label: "Generate case reports, request release approval, and manage report schedules",
+  },
+  {
+    value: "reports:admin",
+    label:
+      "Create and version report templates and approve report release (sensitive; admin-issued tokens)",
+  },
 ] as const;
 
 export type ScopeValue = (typeof KNOWN_SCOPES)[number]["value"];
@@ -121,6 +134,7 @@ export const SENSITIVE_SCOPES = [
   "evidence:override",
   "audit:read",
   "cases:override_closure",
+  "reports:admin",
 ] as const satisfies readonly ScopeValue[];
 
 export type SensitiveScopeValue = (typeof SENSITIVE_SCOPES)[number];

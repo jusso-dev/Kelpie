@@ -21,6 +21,10 @@ import {
   refreshAttackCatalogFromBundled,
   refreshAttackCatalogFromUrl,
 } from "@/lib/attack/refresh-job";
+import {
+  processDueReportSchedules,
+  processReportExportJob,
+} from "@/lib/reports/export-core";
 
 const queue = createKelpieQueue();
 
@@ -51,6 +55,13 @@ async function processJob(job: Job<KelpieJobData, unknown, string>) {
         throw new Error("Audit export job is missing auditExportJobId");
       }
       return processAuditExportJob(job.data.auditExportJobId);
+    case "generate-case-report":
+      if (!job.data.reportExportId) {
+        throw new Error("Report export job is missing reportExportId");
+      }
+      return processReportExportJob(job.data.reportExportId);
+    case "run-report-schedules":
+      return processDueReportSchedules();
     case "refresh-attack-catalog":
       return job.data.attackCatalogSourceUrl
         ? refreshAttackCatalogFromUrl(

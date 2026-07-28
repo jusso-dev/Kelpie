@@ -29,6 +29,11 @@ const SYSTEM_SCHEDULES: Array<{
     every: 24 * 60 * 60_000,
     name: "purge-audit-events",
   },
+  {
+    id: "system:run-report-schedules",
+    every: 60_000,
+    name: "run-report-schedules",
+  },
 ];
 
 export async function upsertSystemSchedulers(queue: KelpieQueue) {
