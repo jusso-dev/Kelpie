@@ -11,7 +11,8 @@ export type KelpieJobName =
   | "deliver-automations"
   | "enrich-cases"
   | "deliver-mobile-push"
-  | "prune-presence";
+  | "prune-presence"
+  | "scan-evidence";
 
 export type KelpieJobData = {
   feedId?: string;

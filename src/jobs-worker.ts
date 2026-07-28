@@ -40,6 +40,7 @@ async function processJob(job: Job<KelpieJobData, unknown, string>) {
     case "deliver-automations":
     case "deliver-mobile-push":
     case "prune-presence":
+    case "scan-evidence":
       return jobHandlers[job.name]();
     default:
       throw new Error(`Unsupported Kelpie job: ${job.name}`);

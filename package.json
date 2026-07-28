@@ -44,6 +44,9 @@
     "test:automation-domain": "tsx scripts/test-automation-domain.ts",
     "test:automation-runtime": "tsx scripts/test-automation-runtime.ts",
     "test:response-action-approval": "tsx scripts/test-response-action-approval.ts",
+    "test:evidence-core": "tsx scripts/test-evidence-core.ts",
+    "test:evidence-scanner": "tsx scripts/test-evidence-scanner.ts",
+    "test:evidence-api": "tsx scripts/test-evidence-api.ts",
     "test:visual": "tsx scripts/visual-smoke.ts"
   },
   "dependencies": {

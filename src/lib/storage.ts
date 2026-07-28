@@ -35,6 +35,15 @@ export async function readFile(key: string): Promise<Buffer> {
   return fs.readFile(resolveStoragePath(key));
 }
 
+/** Best-effort delete; a missing object is not an error (already gone). */
+export async function deleteFile(key: string): Promise<void> {
+  try {
+    await fs.unlink(resolveStoragePath(key));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
 function resolveStoragePath(key: string): string {
   const absPath = path.resolve(localDir, key);
   const relative = path.relative(localDir, absPath);

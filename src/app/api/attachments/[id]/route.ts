@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
-import { db } from "@/db";
-import { attachments, cases } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/session";
-import { readFile } from "@/lib/storage";
+import { downloadEvidenceCore, EvidenceError } from "@/lib/evidence/core";
+import { stripControlChars } from "@/lib/evidence/filename";
 
 export async function GET(
   _req: Request,
@@ -11,26 +9,24 @@ export async function GET(
 ) {
   const { id } = await context.params;
   const user = await requireUser();
-  const [row] = await db
-    .select({
-      filename: attachments.filename,
-      contentType: attachments.contentType,
-      storageKey: attachments.storageKey,
-      organisationId: cases.organisationId,
-    })
-    .from(attachments)
-    .innerJoin(cases, eq(cases.id, attachments.caseId))
-    .where(and(eq(attachments.id, id), eq(cases.organisationId, user.organisationId)))
-    .limit(1);
-  if (!row) {
-    return NextResponse.json({ error: "Attachment not found" }, { status: 404 });
+  try {
+    const { evidence, buffer } = await downloadEvidenceCore(
+      id,
+      user.organisationId,
+      user.id,
+    );
+    return new NextResponse(new Uint8Array(buffer), {
+      status: 200,
+      headers: {
+        "content-type": evidence.contentType,
+        "content-disposition": `attachment; filename="${stripControlChars(evidence.filename).replace(/"/g, "")}"`,
+        "x-evidence-sha256": evidence.sha256,
+      },
+    });
+  } catch (error) {
+    if (error instanceof EvidenceError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    throw error;
   }
-  const data = await readFile(row.storageKey);
-  return new NextResponse(new Uint8Array(data), {
-    status: 200,
-    headers: {
-      "content-type": row.contentType,
-      "content-disposition": `attachment; filename="${row.filename.replace(/"/g, "")}"`,
-    },
-  });
 }
