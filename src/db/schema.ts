@@ -414,22 +414,62 @@ export const cases = pgTable(
 /* Playbooks                                                                  */
 /* ────────────────────────────────────────────────────────────────────────── */
 
-export const playbooks = pgTable("playbooks", {
-  id: text("id").primaryKey(),
-  organisationId: text("organisation_id")
-    .notNull()
-    .references(() => organisations.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  description: text("description"),
-  classification: classificationEnum("classification")
-    .notNull()
-    .default("other"),
-  isActive: boolean("is_active").notNull().default(true),
-  steps: jsonb("steps").notNull().default(sql`'[]'::jsonb`),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const playbooks = pgTable(
+  "playbooks",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    classification: classificationEnum("classification")
+      .notNull()
+      .default("other"),
+    /** Typical/expected severity for this scenario. Used for catalogue search
+     * and filtering; the actual case severity is still set by the analyst. */
+    defaultSeverity: severityEnum("default_severity"),
+    isActive: boolean("is_active").notNull().default(true),
+    steps: jsonb("steps").notNull().default(sql`'[]'::jsonb`),
+    /** Structured operational detail (purpose, triggers, evidence to
+     * preserve, decision points, closure criteria, ATT&CK references, etc).
+     * See `PlaybookContent`. Custom playbooks may leave this `{}`. */
+    content: jsonb("content").notNull().default(sql`'{}'::jsonb`),
+    /** Free-form catalogue tags for search/filter (e.g. "identity", "email"). */
+    tags: jsonb("tags").notNull().default(sql`'[]'::jsonb`),
+    /** Observable types (see `observableTypeEnum`) an analyst should expect to
+     * capture when running this playbook. Used for catalogue filtering only —
+     * not enforced against the case's actual observables. */
+    requiredObservableTypes: jsonb("required_observable_types")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** Stable identifier for a baseline catalogue scenario (e.g.
+     * "business_email_compromise"). `null` for organisation-authored custom
+     * playbooks. Seeding looks up existing rows by
+     * `(organisationId, catalogueKey)` so re-seeding never overwrites a row
+     * that already exists, whether or not it has since been edited. */
+    catalogueKey: text("catalogue_key"),
+    /** Version of the baseline catalogue definition this row was created
+     * from. Only stamped at insert time; never updated by re-seeding, so it
+     * reflects provenance rather than a live sync target. `null` for custom
+     * playbooks. */
+    catalogueVersion: integer("catalogue_version"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("playbooks_org_classification_idx").on(t.organisationId, t.classification),
+    index("playbooks_org_severity_idx").on(t.organisationId, t.defaultSeverity),
+    // Postgres treats every NULL as distinct in a unique index, so custom
+    // playbooks (catalogueKey null) never collide here; only a duplicate
+    // non-null key within the same organisation would.
+    uniqueIndex("playbooks_org_catalogue_key_idx").on(
+      t.organisationId,
+      t.catalogueKey,
+    ),
+  ],
+);
 
 export const playbookRuns = pgTable("playbook_runs", {
   id: text("id").primaryKey(),
@@ -1285,33 +1325,45 @@ export const slaPolicies = pgTable(
 /* Case templates                                                             */
 /* ────────────────────────────────────────────────────────────────────────── */
 
-export const caseTemplates = pgTable("case_templates", {
-  id: text("id").primaryKey(),
-  organisationId: text("organisation_id")
-    .notNull()
-    .references(() => organisations.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  classification: classificationEnum("classification")
-    .notNull()
-    .default("other"),
-  defaultSeverity: severityEnum("default_severity").notNull().default("medium"),
-  defaultTlp: tlpEnum("default_tlp").notNull().default("amber"),
-  summaryTemplate: text("summary_template"),
-  defaultPlaybookId: text("default_playbook_id").references(() => playbooks.id, {
-    onDelete: "set null",
-  }),
-  defaultTags: jsonb("default_tags").notNull().default(sql`'[]'::jsonb`),
-  defaultDataClassificationTags: jsonb("default_data_classification_tags")
-    .notNull()
-    .default(sql`'[]'::jsonb`),
-  defaultTasks: jsonb("default_tasks").notNull().default(sql`'[]'::jsonb`),
-  defaultCustomFields: jsonb("default_custom_fields")
-    .notNull()
-    .default(sql`'{}'::jsonb`),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const caseTemplates = pgTable(
+  "case_templates",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    classification: classificationEnum("classification")
+      .notNull()
+      .default("other"),
+    defaultSeverity: severityEnum("default_severity").notNull().default("medium"),
+    defaultTlp: tlpEnum("default_tlp").notNull().default("amber"),
+    summaryTemplate: text("summary_template"),
+    defaultPlaybookId: text("default_playbook_id").references(() => playbooks.id, {
+      onDelete: "set null",
+    }),
+    defaultTags: jsonb("default_tags").notNull().default(sql`'[]'::jsonb`),
+    defaultDataClassificationTags: jsonb("default_data_classification_tags")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    defaultTasks: jsonb("default_tasks").notNull().default(sql`'[]'::jsonb`),
+    defaultCustomFields: jsonb("default_custom_fields")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    /** Same provenance/idempotency contract as `playbooks.catalogueKey`. */
+    catalogueKey: text("catalogue_key"),
+    catalogueVersion: integer("catalogue_version"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("case_templates_org_catalogue_key_idx").on(
+      t.organisationId,
+      t.catalogueKey,
+    ),
+  ],
+);
 
 /* ────────────────────────────────────────────────────────────────────────── */
 /* API tokens                                                                 */
@@ -2261,6 +2313,15 @@ export type CaseAlert = typeof caseAlerts.$inferSelect;
 export type EvidenceItem = typeof evidenceItems.$inferSelect;
 export type EvidenceRelationship = typeof evidenceRelationships.$inferSelect;
 
+export type PlaybookStepPhase =
+  | "triage"
+  | "scoping"
+  | "containment"
+  | "eradication"
+  | "recovery"
+  | "communications"
+  | "closure";
+
 export type PlaybookStep = {
   id: string;
   title: string;
@@ -2268,4 +2329,43 @@ export type PlaybookStep = {
   defaultAssigneeRole?: "admin" | "analyst" | "read_only";
   offsetMinutes: number;
   isRequired: boolean;
+  /** Response-lifecycle phase this step belongs to. Optional for
+   * hand-authored custom playbooks; the baseline catalogue sets it on every
+   * step so the UI can group steps by phase. */
+  phase?: PlaybookStepPhase;
+  /** True when this step is (or triggers) an action that must not run without
+   * a human approval — e.g. isolating a host or disabling an account. This is
+   * a display/planning hint only: Kelpie never executes response actions
+   * automatically from a playbook step, and the response-action approval gate
+   * (see `responseActionRuns`) is enforced independently. */
+  requiresApproval?: boolean;
+};
+
+/**
+ * Structured operational detail for a playbook, beyond its ordered task
+ * `steps`. Every field is optional so custom, organisation-authored
+ * playbooks can start from `{}` and grow over time; the baseline catalogue
+ * (`src/lib/playbook-catalogue.ts`) populates all of them.
+ */
+export type PlaybookContent = {
+  purpose?: string;
+  triggers?: string[];
+  exclusions?: string[];
+  severityGuidance?: string;
+  evidenceToPreserve?: string[];
+  initialQuestions?: string[];
+  decisionPoints?: string[];
+  /** Actions that require explicit human/approval-gate sign-off before they
+   * run (containment/eradication actions, account disablement, etc). */
+  approvalActions?: string[];
+  communicationsOwners?: string[];
+  closureCriteria?: string[];
+  followUpImprovements?: string[];
+  /** Plain-text MITRE ATT&CK technique IDs (e.g. "T1566.001"). Kept as plain
+   * strings rather than a structured reference so this catalogue does not
+   * depend on the ATT&CK mapping work landing separately. */
+  mitreTechniques?: string[];
+  /** Case fields/custom fields an analyst should capture while working this
+   * scenario (plain descriptive labels, not schema-bound). */
+  caseFieldsToCapture?: string[];
 };

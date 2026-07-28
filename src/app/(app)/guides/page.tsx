@@ -1,4 +1,6 @@
 import Link from "next/link";
+import CopyTextButton from "@/components/copy-text-button";
+import { LLM_AGENT_PROMPT } from "@/lib/llm-prompt";
 
 const guideLinks = [
   ["cases-and-templates", "Cases and templates"],
@@ -7,6 +9,7 @@ const guideLinks = [
   ["integrations-and-enrichment", "Integrations and enrichment"],
   ["automation-jobs", "Automation jobs"],
   ["api-and-mcp", "API and MCP"],
+  ["playbooks-and-agents", "Playbooks and agents (LLM.txt)"],
 ] as const;
 
 export default function GuidesPage() {
@@ -188,6 +191,55 @@ Authorization: Bearer klp_xxxxxxxx`}
                 Pagination responses include the total, current offset, limit,
                 and next offset so consumers can walk large datasets safely.
               </p>
+            </div>
+          </GuideSection>
+
+          <GuideSection
+            id="playbooks-and-agents"
+            title="Playbooks and agents (LLM.txt)"
+            intro="A baseline catalogue of common SOC scenarios ships with Kelpie. Agents can discover it read-only over MCP or REST, and a copyable prompt tells them how to use it safely."
+          >
+            <div className="space-y-4 text-sm leading-6 text-slate-300">
+              <p>
+                Browse and filter the catalogue under{" "}
+                <LinkText href="/playbooks">Playbooks</LinkText>. Baseline
+                playbooks are labelled <em>Baseline v{"{n}"}</em>; anything
+                your team authors is labelled <em>Custom</em>. Adding new
+                scenarios to a future Kelpie release never overwrites an
+                existing playbook or a local edit — an administrator can pull
+                in newly-added baseline scenarios at any time from the
+                Playbooks page without touching what is already there.
+              </p>
+              <p>
+                Agents with a token scoped to{" "}
+                <code className="text-xs text-slate-200">playbooks:read</code>{" "}
+                can call the MCP tools{" "}
+                <code className="text-xs text-slate-200">playbooks_list</code>{" "}
+                and{" "}
+                <code className="text-xs text-slate-200">playbooks_get</code>,
+                or the REST endpoints{" "}
+                <code className="text-xs text-slate-200">
+                  GET /api/v1/playbooks
+                </code>{" "}
+                and{" "}
+                <code className="text-xs text-slate-200">
+                  GET /api/v1/playbooks/{"{id}"}
+                </code>
+                . All three are read-only.
+              </p>
+              <p>
+                The prompt below is also published at{" "}
+                <code className="text-xs text-slate-200">LLM.txt</code> in the
+                Kelpie repository. Paste it into an agent&rsquo;s system/developer
+                prompt and replace the placeholders with real values before
+                use.
+              </p>
+              <div className="flex justify-end">
+                <CopyTextButton text={LLM_AGENT_PROMPT} label="LLM.txt prompt" />
+              </div>
+              <pre className="kelpie-scroll-x max-h-96 overflow-y-auto rounded-lg bg-[color:var(--color-navy-900)] p-4 text-xs text-slate-300 whitespace-pre-wrap">
+                {LLM_AGENT_PROMPT}
+              </pre>
             </div>
           </GuideSection>
         </div>

@@ -79,7 +79,7 @@ async function main() {
     .where(
       and(
         eq(playbooks.organisationId, orgId),
-        eq(playbooks.name, "Phishing first response"),
+        eq(playbooks.catalogueKey, "reported_phishing"),
       ),
     )
     .limit(1);

@@ -13,6 +13,7 @@ import {
   queryCyberBriefing,
   queryThreatIntelligence,
 } from "@/lib/machine-data";
+import { getPlaybookCore, listPlaybooksCore } from "@/lib/playbooks-core";
 import type { ScopeValue } from "@/lib/scopes";
 import { tokenHasScope } from "@/lib/scopes";
 import { getThreatLandscapeData } from "@/lib/threat-landscape";
@@ -64,6 +65,20 @@ const evidenceListInput = z.object({
 
 const evidenceCustodyListInput = z.object({
   evidenceId: z.string().trim().min(1).max(128),
+});
+
+const playbooksListInput = z.object({
+  scenario: z.string().trim().min(1).max(128).optional(),
+  classification: z.string().trim().min(1).max(64).optional(),
+  severity: z.string().trim().min(1).max(32).optional(),
+  tag: z.string().trim().min(1).max(64).optional(),
+  observable_type: z.string().trim().min(1).max(32).optional(),
+  q: z.string().trim().min(1).max(200).optional(),
+  include_inactive: z.boolean().optional(),
+});
+
+const playbookGetInput = z.object({
+  playbookId: z.string().trim().min(1).max(128),
 });
 
 const tools = [
@@ -216,6 +231,57 @@ const tools = [
       additionalProperties: false,
     },
   },
+  {
+    name: "playbooks_list",
+    title: "List playbooks",
+    description:
+      "List this organisation's playbook catalogue (baseline and custom), with classification, severity guidance, tags, required observable types, and provenance. Read-only — never starts a playbook or changes case data.",
+    scope: "playbooks:read" as ScopeValue,
+    inputSchema: {
+      type: "object",
+      properties: {
+        scenario: {
+          type: "string",
+          description:
+            "Baseline catalogue scenario key filter (see playbooks_get output's catalogueKey), exact match.",
+        },
+        classification: {
+          type: "string",
+          description: "Case classification filter, exact match.",
+        },
+        severity: {
+          type: "string",
+          description: "Default severity filter, exact match.",
+        },
+        tag: { type: "string", description: "Exact playbook tag filter." },
+        observable_type: {
+          type: "string",
+          description: "Required observable type filter, exact match.",
+        },
+        q: { type: "string", description: "Search name and description." },
+        include_inactive: {
+          type: "boolean",
+          description: "Include deactivated playbooks. Defaults to active-only.",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "playbooks_get",
+    title: "Get playbook",
+    description:
+      "Get full detail for one playbook in this organisation, including its ordered steps and structured content (purpose, triggers, evidence to preserve, decision points, approval actions, closure criteria, MITRE ATT&CK references, and more).",
+    scope: "playbooks:read" as ScopeValue,
+    inputSchema: {
+      type: "object",
+      properties: {
+        playbookId: { type: "string", description: "Playbook identifier." },
+      },
+      required: ["playbookId"],
+      additionalProperties: false,
+    },
+  },
 ] as const;
 
 type JsonRpcId = string | number | null;
@@ -359,6 +425,31 @@ async function callTool(
     return toolResult({
       events: await listCustodyEventsForEvidence(input.evidenceId, organisationId),
     });
+  }
+  if (name === "playbooks_list") {
+    const input = playbooksListInput.parse(args);
+    return toolResult({
+      playbooks: await listPlaybooksCore(organisationId, {
+        scenario: input.scenario,
+        classification: input.classification,
+        severity: input.severity,
+        tag: input.tag,
+        observableType: input.observable_type,
+        q: input.q,
+        includeInactive: input.include_inactive,
+      }),
+    });
+  }
+  if (name === "playbooks_get") {
+    const input = playbookGetInput.parse(args);
+    const playbook = await getPlaybookCore(organisationId, input.playbookId);
+    if (!playbook) {
+      return {
+        content: [{ type: "text", text: "Playbook not found." }],
+        isError: true,
+      };
+    }
+    return toolResult(playbook);
   }
   throw new Error("Unknown tool");
 }

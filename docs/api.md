@@ -21,6 +21,7 @@ Errors return `{ "error": "..." }` with an appropriate HTTP status (`400` invali
 | `briefing:read` | Read Cyber brief, watched vendors, and vendor matches |
 | `case_relationships:read` | Read case relationships and duplicate/related suggestions |
 | `case_relationships:write` | Link, unlink, and dismiss case relationships |
+| `playbooks:read` | Read the playbook catalogue (baseline and custom) |
 | `audit:read` | Search the organisation audit trail and read individual audit event detail (sensitive; only grant to admin-issued tokens) |
 | `alerts:read` | Read alerts, linked entities, and evidence items |
 | `alerts:write` | Create/link alerts, change alert disposition, link entities, and create/update evidence items |
@@ -119,6 +120,35 @@ Adding an observable kicks off enrichment.
 
 ### `GET /api/v1/observables?value=&exact=`
 Cross-case search. With `exact=true` does an equality match; otherwise substring.
+
+## Playbooks
+
+### `GET /api/v1/playbooks`
+
+Requires `playbooks:read`. Read-only; lists this organisation's playbook
+catalogue (baseline and custom). Optional query: `scenario` (baseline
+catalogue key, exact match), `classification`, `severity`, `tag` (exact),
+`observableType` (exact, one of the [observable
+types](#observables)), `q` (search name/description), `includeInactive`
+(`true` to include deactivated playbooks; default is active-only).
+
+Returns `{ "playbooks": [ { "id", "name", "description", "classification",
+"defaultSeverity", "isActive", "tags", "requiredObservableTypes",
+"catalogueKey", "catalogueVersion", "isBaseline", "stepCount", "createdAt" } ] }`.
+`isBaseline` is `true` when the playbook has a `catalogueKey` (it originated
+from the baseline catalogue), `false` for organisation-authored custom
+playbooks — this is provenance only; a baseline playbook that has since been
+edited by the organisation is still reported as baseline.
+
+### `GET /api/v1/playbooks/{id}`
+
+Requires `playbooks:read`. Returns the same fields as the list endpoint for
+one playbook, plus its full `steps` (ordered task list with cadence offsets)
+and `content` (purpose, triggers, exclusions, severity guidance, evidence to
+preserve, initial questions, decision points, approval actions, closure
+criteria, follow-up improvements, MITRE ATT&CK technique references, and
+case fields to capture). See `docs/playbooks.md` for the full catalogue
+structure and maintenance rules.
 
 ## Case relationships
 
@@ -400,9 +430,15 @@ one or more machine-data scopes. Available tools:
 - `get_threat_landscape` — `threat_landscape:read`
 - `get_cyber_briefing` — `briefing:read`
 - `list_watched_vendors` — `briefing:read`
+- `playbooks_list` — `playbooks:read`
+- `playbooks_get` — `playbooks:read`
 
 MCP tools are read-only. Tool discovery only returns tools permitted by the
-token's scopes.
+token's scopes. `playbooks_list`/`playbooks_get` are the recommended way for
+an agent to discover Kelpie's playbook catalogue; see `/LLM.txt` in the
+repository root for a full copyable prompt describing how an agent should
+use them, and `docs/playbooks.md` for the catalogue's structure and a worked
+example.
 
 ## Comments
 

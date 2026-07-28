@@ -162,6 +162,13 @@
       "when": 1785228197877,
       "tag": "0022_abandoned_lilith",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1785228829319,
+      "tag": "0023_nice_echo",
+      "breakpoints": true
     }
   ]
 }
