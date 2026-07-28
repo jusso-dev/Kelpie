@@ -67,6 +67,25 @@ function main() {
   const none = toolsPermittedByScopes(["cases:read"]);
   assert.equal(none.length, 0, "unrelated scopes must grant no MCP tools");
 
+  // Empty / unmatched scopes must never list the full catalogue as "permitted".
+  const emptyConn = buildConnectionDetails({
+    endpoint: "https://kelpie.example/api/mcp",
+    scopes: [],
+    placeholderMode: true,
+  });
+  assert.match(emptyConn, /no tools permitted/i);
+  assert.doesNotMatch(
+    emptyConn,
+    /search_threat_intelligence/,
+    "empty scopes must not dump the full tool catalogue into copy blocks",
+  );
+  const emptyAgents = buildAgentsMdBlock({
+    endpoint: "https://kelpie.example/api/mcp",
+    scopes: ["cases:read"],
+    placeholderMode: true,
+  });
+  assert.match(emptyAgents, /no tools permitted/i);
+
   const caps = mcpScopeCapabilities();
   assert.ok(caps.some((c) => c.scope === "playbooks:read"));
   assert.ok(caps.some((c) => c.scope === "attack:write" && c.readOnly === false));

@@ -95,7 +95,9 @@ export function buildConnectionDetails(input: OnboardingCopyInput): string {
     `Scopes            : ${formatSelectedScopes(input.scopes) || "(none)"}`,
     "",
     "Tool discovery returns only tools permitted by the token scopes:",
-    formatToolScopeLines(tools.length > 0 ? tools : MCP_TOOLS),
+    tools.length > 0
+      ? formatToolScopeLines(tools)
+      : "- (no tools permitted with the selected scopes)",
   ].join("\n");
 }
 

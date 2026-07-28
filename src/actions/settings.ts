@@ -47,6 +47,9 @@ export async function createApiToken(formData: FormData): Promise<{
   const name = String(formData.get("name") ?? "").trim();
   if (!name) throw new Error("Name required");
   const scopes = parseScopes(formData.get("scopes"));
+  if (scopes.length === 0) {
+    throw new Error("Select at least one scope — empty scopes grant no API access");
+  }
   const expiresAt = parseExpiry(formData.get("expiresAt"));
   const { plaintext, hash } = generateApiToken();
   const id = newId("tok");

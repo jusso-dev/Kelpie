@@ -136,6 +136,11 @@ export default function McpOnboarding({
   const sensitive = Boolean(issued && !placeholderMode);
 
   function toggleScope(scope: string) {
+    // Changing scopes after issue would make copy/verify claim tools the
+    // frozen token does not have — clear the one-time secret so configs
+    // cannot drift from the minted scopes without an explicit re-create.
+    setIssued(null);
+    setVerifyState({ status: "idle" });
     setScopes((prev) =>
       prev.includes(scope) ? prev.filter((s) => s !== scope) : [...prev, scope],
     );
