@@ -6,10 +6,19 @@
  * copy blocks, and docs/tests all derive from this list so tool-to-scope
  * mappings cannot drift.
  */
-import { MAPPING_ENTITY_TYPES } from "@/lib/attack/mapping-core";
 import type { ScopeValue } from "@/lib/scopes";
 import { tokenHasScope } from "@/lib/scopes";
 import { TI_INDICATOR_TYPES } from "@/lib/ti/indicator-types";
+
+// Pure constant — do not import mapping-core (it pulls db/server into the
+// Settings MCP client bundle and breaks production Next builds).
+const MAPPING_ENTITY_TYPES = [
+  "case",
+  "alert",
+  "observable",
+  "evidence",
+  "task",
+] as const;
 
 export const MCP_PROTOCOL_VERSION = "2025-11-25";
 

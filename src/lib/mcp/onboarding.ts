@@ -14,7 +14,16 @@ import {
   type McpToolDefinition,
 } from "@/lib/mcp/catalogue";
 import { KNOWN_SCOPES, type ScopeValue } from "@/lib/scopes";
-import { appBaseUrl } from "@/lib/sso/config";
+
+/** Public origin only — avoid importing sso/config (db/auth) into client bundle. */
+function appBaseUrl(): string {
+  const raw =
+    process.env.APP_URL?.trim() ||
+    process.env.BETTER_AUTH_URL?.trim() ||
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    "";
+  return raw.replace(/\/$/, "");
+}
 
 export const MCP_TOKEN_PLACEHOLDER = "<KELPIE_API_TOKEN>";
 
