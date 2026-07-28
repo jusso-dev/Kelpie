@@ -28,6 +28,10 @@ export const KNOWN_SCOPES = [
     label:
       "Override quarantine and manage legal holds (sensitive; only grant to admin-issued tokens)",
   },
+  {
+    value: "audit:read",
+    label: "Read organisation audit events (sensitive; only grant to admin-issued tokens)",
+  },
 ] as const;
 
 export type ScopeValue = (typeof KNOWN_SCOPES)[number]["value"];

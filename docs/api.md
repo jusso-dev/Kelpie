@@ -21,6 +21,7 @@ Errors return `{ "error": "..." }` with an appropriate HTTP status (`400` invali
 | `briefing:read` | Read Cyber brief, watched vendors, and vendor matches |
 | `case_relationships:read` | Read case relationships and duplicate/related suggestions |
 | `case_relationships:write` | Link, unlink, and dismiss case relationships |
+| `audit:read` | Search the organisation audit trail and read individual audit event detail (sensitive; only grant to admin-issued tokens) |
 
 ## Cases
 
@@ -223,6 +224,55 @@ Returns `200` with the same `{ "suggestions": [...] }` shape as the per-case sug
 { "candidateCaseId": "case_7f0a12", "reason": "Reviewed — unrelated despite the overlap" }
 ```
 Records that an analyst reviewed and rejected this pairing so it stops appearing in either case's suggestions. `reason` is required. Returns `200 { "ok": true }`. Returns `400` for a missing/empty reason or a candidate equal to the case itself, `403` without `case_relationships:write`, `404` if either case does not exist in the caller's organisation.
+
+## Audit trail
+
+An organisation-wide, append-only log of who did what, when — every mutation across auth, team, settings, integrations, tokens, cases, tasks, observables, evidence, tags, fields, and jobs is recorded. `audit_events` rows can never be updated, and can never be deleted except by the organisation's own retention purge job — this is enforced by a database trigger, not just application code, so it holds even for admin routes. Sensitive fields (passwords, secrets, API keys, tokens, HMACs, and message/comment body content) are redacted to `"[redacted]"` before a row is ever written, and `before`/`after` snapshots only ever contain the specific keys that changed, never a whole request or response body. Both endpoints below require the `audit:read` scope.
+
+### `GET /api/v1/audit-events`
+
+Optional query: `action`, `actorId`, `targetType`, `targetId`, `from`, `to` (ISO 8601 timestamps, inclusive range over `occurredAt`), `q` (free-text match over action, target type/id/label, and actor label), `limit` (default 50, maximum 200), and `cursor` (opaque keyset pagination cursor from a previous response's `nextCursor`). Results are ordered most-recent-first (`occurredAt` descending, `id` descending as a tie-breaker), so pages stay stable under concurrent inserts.
+
+```json
+{
+  "events": [
+    {
+      "id": "audit_8k2n4qz",
+      "action": "case.updated",
+      "targetType": "case",
+      "targetId": "case_3ecfe70",
+      "targetLabel": "KP-2026-0041",
+      "actorId": "user_9f2c1e",
+      "actorType": "user",
+      "actorLabel": "sam.analyst",
+      "requestId": "req_a1b2c3",
+      "sourceIp": "203.0.113.9",
+      "userAgent": "Mozilla/5.0 ...",
+      "before": { "status": "open" },
+      "after": { "status": "contained" },
+      "metadata": {},
+      "occurredAt": "2026-07-28T02:14:00Z"
+    }
+  ],
+  "nextCursor": "MjAyNi0wNy0yOFQwMjoxNDowMFp8YXVkaXRfOGsybjRxeg"
+}
+```
+
+`nextCursor` is `null` once the last page has been reached. Pass it back as `?cursor=` to fetch the next page with the same other filters.
+
+### `GET /api/v1/audit-events/{id}`
+
+Returns the full audit event, including the (already-redacted) `before`, `after`, and `metadata` payloads:
+
+```json
+{ "event": { "id": "audit_8k2n4qz", "action": "case.updated", "...": "..." } }
+```
+
+Returns `404` if the event does not exist in the caller's organisation — this includes an id that belongs to a different organisation, which never leaks whether the id exists elsewhere.
+
+### Exports and retention
+
+CSV/NDJSON exports of the audit trail are requested from the admin console at **Settings → Audit** (`/settings/audit`), not a v1 API endpoint. Every export always applies the exact same filters and permissions as the equivalent search — an export can never surface an event that the matching search call wouldn't have returned. Exports expire and are removed automatically after 7 days. Retention is configurable per organisation (**Settings → Audit**) down to a safe minimum of 90 days; a daily job purges events older than the configured window.
 
 ## Threat intelligence
 

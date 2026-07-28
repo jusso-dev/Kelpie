@@ -47,6 +47,8 @@
     "test:evidence-core": "tsx scripts/test-evidence-core.ts",
     "test:evidence-scanner": "tsx scripts/test-evidence-scanner.ts",
     "test:evidence-api": "tsx scripts/test-evidence-api.ts",
+    "test:audit-redaction": "tsx scripts/test-audit-redaction.ts",
+    "test:audit-events-api": "tsx scripts/test-audit-events-api.ts",
     "test:visual": "tsx scripts/visual-smoke.ts"
   },
   "dependencies": {

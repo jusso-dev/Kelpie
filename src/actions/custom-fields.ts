@@ -1,5 +1,6 @@
 "use server";
 
+import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { customFieldDefinitions } from "@/db/schema";
@@ -11,6 +12,8 @@ import {
   setCustomFieldValue,
   type CustomFieldType,
 } from "@/lib/custom-fields";
+import { recordAuditEvent } from "@/lib/audit/events";
+import { auditContextFromHeaders } from "@/lib/audit/request-context";
 
 function parseOptions(raw: FormDataEntryValue | null): string[] {
   if (typeof raw !== "string" || !raw.trim()) return [];
@@ -49,8 +52,9 @@ export async function createFieldDefinition(formData: FormData) {
       ),
     );
 
+  const fieldId = newId("cfd");
   await db.insert(customFieldDefinitions).values({
-    id: newId("cfd"),
+    id: fieldId,
     organisationId: user.organisationId,
     entity: "case",
     key,
@@ -61,11 +65,34 @@ export async function createFieldDefinition(formData: FormData) {
     orderIndex: (max ?? -1) + 1,
     isActive: true,
   });
+  await recordAuditEvent({
+    organisationId: user.organisationId,
+    actorId: user.id,
+    actorType: "user",
+    actorLabel: user.email,
+    action: "custom_field.created",
+    targetType: "custom_field",
+    targetId: fieldId,
+    targetLabel: label,
+    before: null,
+    after: { key, label, type, options, required, entity: "case" },
+    ...auditContextFromHeaders(await headers()),
+  });
   revalidatePath("/settings/fields");
 }
 
 export async function setFieldActive(id: string, active: boolean) {
   const user = await requireRole(["admin"]);
+  const [existing] = await db
+    .select()
+    .from(customFieldDefinitions)
+    .where(
+      and(
+        eq(customFieldDefinitions.id, id),
+        eq(customFieldDefinitions.organisationId, user.organisationId),
+      ),
+    )
+    .limit(1);
   await db
     .update(customFieldDefinitions)
     .set({ isActive: active })
@@ -75,6 +102,21 @@ export async function setFieldActive(id: string, active: boolean) {
         eq(customFieldDefinitions.organisationId, user.organisationId),
       ),
     );
+  if (existing) {
+    await recordAuditEvent({
+      organisationId: user.organisationId,
+      actorId: user.id,
+      actorType: "user",
+      actorLabel: user.email,
+      action: "custom_field.updated",
+      targetType: "custom_field",
+      targetId: id,
+      targetLabel: existing.label,
+      before: { isActive: existing.isActive },
+      after: { isActive: active },
+      ...auditContextFromHeaders(await headers()),
+    });
+  }
   revalidatePath("/settings/fields");
 }
 
@@ -104,11 +146,35 @@ export async function reorderField(id: string, direction: "up" | "down") {
     .update(customFieldDefinitions)
     .set({ orderIndex: a.orderIndex })
     .where(eq(customFieldDefinitions.id, b.id));
+  await recordAuditEvent({
+    organisationId: user.organisationId,
+    actorId: user.id,
+    actorType: "user",
+    actorLabel: user.email,
+    action: "custom_field.updated",
+    targetType: "custom_field",
+    targetId: a.id,
+    targetLabel: a.label,
+    metadata: { operation: "reorder", direction, swappedWith: b.id },
+    before: { orderIndex: a.orderIndex },
+    after: { orderIndex: b.orderIndex },
+    ...auditContextFromHeaders(await headers()),
+  });
   revalidatePath("/settings/fields");
 }
 
 export async function deleteFieldDefinition(id: string) {
   const user = await requireRole(["admin"]);
+  const [existing] = await db
+    .select()
+    .from(customFieldDefinitions)
+    .where(
+      and(
+        eq(customFieldDefinitions.id, id),
+        eq(customFieldDefinitions.organisationId, user.organisationId),
+      ),
+    )
+    .limit(1);
   await db
     .delete(customFieldDefinitions)
     .where(
@@ -117,6 +183,28 @@ export async function deleteFieldDefinition(id: string) {
         eq(customFieldDefinitions.organisationId, user.organisationId),
       ),
     );
+  if (existing) {
+    await recordAuditEvent({
+      organisationId: user.organisationId,
+      actorId: user.id,
+      actorType: "user",
+      actorLabel: user.email,
+      action: "custom_field.deleted",
+      targetType: "custom_field",
+      targetId: id,
+      targetLabel: existing.label,
+      before: {
+        key: existing.key,
+        label: existing.label,
+        type: existing.type,
+        options: existing.options,
+        required: existing.required,
+        entity: existing.entity,
+      },
+      after: null,
+      ...auditContextFromHeaders(await headers()),
+    });
+  }
   revalidatePath("/settings/fields");
 }
 

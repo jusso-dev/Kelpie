@@ -15,6 +15,7 @@ import {
   pollExternalCaseSource,
   pollThreatFeed,
 } from "@/lib/jobs/handlers";
+import { processAuditExportJob } from "@/lib/audit/export";
 
 const queue = createKelpieQueue();
 
@@ -35,12 +36,18 @@ async function processJob(job: Job<KelpieJobData, unknown, string>) {
       return pollExternalCaseSource(job.data.sourceId);
     case "enrich-cases":
       return enrichPendingCases();
+    case "export-audit-events":
+      if (!job.data.auditExportJobId) {
+        throw new Error("Audit export job is missing auditExportJobId");
+      }
+      return processAuditExportJob(job.data.auditExportJobId);
     case "sla-check":
     case "deliver-webhooks":
     case "deliver-automations":
     case "deliver-mobile-push":
     case "prune-presence":
     case "scan-evidence":
+    case "purge-audit-events":
       return jobHandlers[job.name]();
     default:
       throw new Error(`Unsupported Kelpie job: ${job.name}`);

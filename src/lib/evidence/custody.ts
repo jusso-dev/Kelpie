@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { evidenceCustodyEvents } from "@/db/schema";
 import { newId } from "@/lib/utils";
+import { recordAuditEvent } from "@/lib/audit/events";
 
 /**
  * Every action this module's callers can take against an evidence row.
@@ -46,5 +47,14 @@ export async function recordCustodyEvent(opts: {
     eventType: opts.eventType,
     reason: opts.reason ?? null,
     payload: opts.payload ?? {},
+  });
+  await recordAuditEvent({
+    organisationId: opts.organisationId,
+    actorId: opts.actorId,
+    actorType: opts.actorId ? "user" : "system",
+    action: `evidence.${opts.eventType}`,
+    targetType: "evidence",
+    targetId: opts.evidenceId,
+    metadata: { reason: opts.reason ?? null, ...opts.payload },
   });
 }

@@ -85,6 +85,12 @@ export default async function SettingsPage() {
           >
             Single sign-on
           </Link>
+          <Link
+            href="/settings/audit"
+            className="kelpie-btn kelpie-btn-secondary justify-center"
+          >
+            Audit log
+          </Link>
         </div>
       </section>
 

@@ -6,6 +6,7 @@ import { passkey } from "@better-auth/passkey";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
+import { recordAuditEvent } from "@/lib/audit/events";
 
 /**
  * Blocks email/password sign in for organisations that have force-SSO enabled.
@@ -122,6 +123,46 @@ export const auth = betterAuth({
               "This organisation requires single sign-on. Use your SSO login.",
           });
         }
+      }
+    }),
+    after: createAuthMiddleware(async (ctx) => {
+      try {
+        // `ctx.context.newSession` is only ever populated by better-auth's own
+        // `setNewSession()` (session cookie helper, two-factor verification,
+        // device authorization, etc.) when this response just established a
+        // session — regardless of which endpoint did it (password sign-in,
+        // sign-up with autoSignIn, 2FA verification, SSO callback, passkey).
+        // That makes it a more reliable "the user just signed in" signal than
+        // matching against a specific path.
+        const newSession = (
+          ctx.context as
+            | { newSession?: { user?: { id?: string; email?: string } } }
+            | undefined
+        )?.newSession;
+        const userId = newSession?.user?.id;
+        if (userId) {
+          const [u] = await db
+            .select({ organisationId: schema.users.organisationId, email: schema.users.email })
+            .from(schema.users)
+            .where(eq(schema.users.id, userId))
+            .limit(1);
+          if (u?.organisationId) {
+            await recordAuditEvent({
+              organisationId: u.organisationId,
+              actorId: userId,
+              actorType: "user",
+              actorLabel: u.email,
+              action: "auth.signed_in",
+              targetType: "user",
+              targetId: userId,
+              sourceIp:
+                ctx.request?.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+              userAgent: ctx.request?.headers.get("user-agent") ?? null,
+            });
+          }
+        }
+      } catch {
+        // Never let audit logging break authentication.
       }
     }),
   },
