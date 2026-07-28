@@ -15,8 +15,10 @@
 import { and, desc, eq, lt, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  alerts,
   attachments,
   cases,
+  entities,
   evidenceItems,
   evidenceRelationships,
   type EvidenceItem,
@@ -99,6 +101,30 @@ export async function createEvidenceItemCore(
       )
       .limit(1);
     if (!att) throw new EvidenceItemError("Attachment not found", 404);
+  }
+
+  // `alertId` and `entityId` arrive straight from the REST body, so they get
+  // the same org-scoped existence check as `attachmentId` above. Without it a
+  // caller could hang an evidence item in their own organisation off another
+  // organisation's alert or entity just by guessing an opaque id.
+  if (input.alertId) {
+    const [alert] = await db
+      .select({ id: alerts.id })
+      .from(alerts)
+      .where(and(eq(alerts.id, input.alertId), eq(alerts.organisationId, input.organisationId)))
+      .limit(1);
+    if (!alert) throw new EvidenceItemError("Alert not found", 404);
+  }
+
+  if (input.entityId) {
+    const [entity] = await db
+      .select({ id: entities.id })
+      .from(entities)
+      .where(
+        and(eq(entities.id, input.entityId), eq(entities.organisationId, input.organisationId)),
+      )
+      .limit(1);
+    if (!entity) throw new EvidenceItemError("Entity not found", 404);
   }
 
   const id = newId("evitem");

@@ -140,6 +140,24 @@ export async function createOrUpdateAlertFromProviderCore(
 ): Promise<{ alert: Alert; created: boolean }> {
   if (!input.title.trim()) throw new AlertError("Alert title is required");
   if (!input.externalId.trim()) throw new AlertError("Alert externalId is required");
+
+  // The foreign key only proves the source exists somewhere, not that it
+  // belongs to this organisation. Today every caller resolves `sourceId`
+  // through an org-scoped helper, but this function is the intended entry
+  // point for future provider-polling endpoints, so it verifies ownership
+  // itself rather than trusting its callers to keep doing so.
+  const [source] = await db
+    .select({ id: alertSources.id })
+    .from(alertSources)
+    .where(
+      and(
+        eq(alertSources.id, input.sourceId),
+        eq(alertSources.organisationId, input.organisationId),
+      ),
+    )
+    .limit(1);
+  if (!source) throw new AlertError("Alert source not found", 404);
+
   const tenantId = input.tenantId ?? "";
 
   const providerFields = {

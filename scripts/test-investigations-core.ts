@@ -409,6 +409,72 @@ async function main() {
   );
   console.log("ok: alerts and their case links are organisation-isolated");
 
+  // Regression: `alertId`/`entityId` reach `createEvidenceItemCore` straight
+  // from the REST body. Before they were org-checked, an org-A caller could
+  // create an evidence item in their own case that referenced org B's alert
+  // or entity purely by guessing an opaque id.
+  const orgBSource = await getOrCreateAlertSourceCore({
+    organisationId: orgBId,
+    kind: "microsoft_sentinel",
+    name: "Org B workspace",
+    tenantId: "tenant-b",
+  });
+  const { alert: orgBAlert } = await createOrUpdateAlertFromProviderCore({
+    organisationId: orgBId,
+    sourceId: orgBSource.id,
+    externalId: `orgb-ext-${runId}`,
+    title: "Org B alert",
+  });
+  const { entity: orgBEntity } = await resolveEntityCore({
+    organisationId: orgBId,
+    type: "ip",
+    displayName: "198.51.100.7",
+    identifiers: [{ kind: "ip", value: "198.51.100.7" }],
+  });
+
+  await assert.rejects(
+    () =>
+      createEvidenceItemCore({
+        organisationId: orgId,
+        actorId: userId,
+        caseId,
+        alertId: orgBAlert.id,
+        type: "ip",
+        value: "198.51.100.7",
+      }),
+    (err: unknown) => err instanceof EvidenceItemError && err.status === 404,
+    "evidence cannot reference another organisation's alert",
+  );
+  await assert.rejects(
+    () =>
+      createEvidenceItemCore({
+        organisationId: orgId,
+        actorId: userId,
+        caseId,
+        entityId: orgBEntity.id,
+        type: "ip",
+        value: "198.51.100.7",
+      }),
+    (err: unknown) => err instanceof EvidenceItemError && err.status === 404,
+    "evidence cannot reference another organisation's entity",
+  );
+  console.log("ok: evidence items cannot reference another organisation's alert or entity");
+
+  // Regression: the alerts FK only proves the source exists somewhere, so
+  // provider ingestion verifies the source belongs to the ingesting org.
+  await assert.rejects(
+    () =>
+      createOrUpdateAlertFromProviderCore({
+        organisationId: orgId,
+        sourceId: orgBSource.id,
+        externalId: `cross-org-ext-${runId}`,
+        title: "Alert ingested against another organisation's source",
+      }),
+    (err: unknown) => err instanceof AlertError && err.status === 404,
+    "provider ingestion rejects a source from another organisation",
+  );
+  console.log("ok: provider alert ingestion rejects a cross-organisation source");
+
   // ── backfill idempotency (same flow as scripts/backfill-case-source-alerts.ts) ──
   const legacyCaseId = newId("case");
   await db.insert(cases).values({
