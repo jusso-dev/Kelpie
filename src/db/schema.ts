@@ -10,6 +10,7 @@ import {
   uniqueIndex,
   pgEnum,
   check,
+  foreignKey,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -90,6 +91,19 @@ export const caseRelationshipOriginEnum = pgEnum("case_relationship_origin", [
   "analyst",
   "provider",
   "rule",
+]);
+
+export const evidenceStatusEnum = pgEnum("evidence_status", [
+  "pending_scan",
+  "available",
+  "quarantined",
+  "scan_failed",
+]);
+
+export const evidenceRelevanceEnum = pgEnum("evidence_relevance", [
+  "unknown",
+  "relevant",
+  "not_relevant",
 ]);
 
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -568,9 +582,17 @@ export const comments = pgTable(
 );
 
 /* ────────────────────────────────────────────────────────────────────────── */
-/* Attachments                                                                */
+/* Attachments (evidence)                                                     */
 /* ────────────────────────────────────────────────────────────────────────── */
 
+/**
+ * Case evidence, formerly a bare attachment record. `organisationId` is
+ * denormalised (same rationale as `caseRelationships`) so every evidence
+ * query can filter on one indexed column instead of relying on an
+ * `innerJoin` through `cases` to be present on every call site. The row is
+ * never mutated to point at different bytes: renames only change `filename`,
+ * and a re-acquired/processed copy is a new row via `parentEvidenceId`.
+ */
 export const attachments = pgTable(
   "attachments",
   {
@@ -578,8 +600,13 @@ export const attachments = pgTable(
     caseId: text("case_id")
       .notNull()
       .references(() => cases.id, { onDelete: "cascade" }),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
     filename: text("filename").notNull(),
+    originalFilename: text("original_filename").notNull(),
     contentType: text("content_type").notNull(),
+    declaredContentType: text("declared_content_type"),
     sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
     storageKey: text("storage_key").notNull(),
     sha256: text("sha256").notNull(),
@@ -589,8 +616,151 @@ export const attachments = pgTable(
     uploadedAt: timestamp("uploaded_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    status: evidenceStatusEnum("status").notNull().default("pending_scan"),
+    source: text("source").notNull().default("analyst_upload"),
+    scannerName: text("scanner_name"),
+    scanVerdict: text("scan_verdict"),
+    scanDetail: text("scan_detail"),
+    scannedAt: timestamp("scanned_at", { withTimezone: true }),
+    overriddenBy: text("overridden_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    overriddenAt: timestamp("overridden_at", { withTimezone: true }),
+    overrideReason: text("override_reason"),
+    isArchive: boolean("is_archive").notNull().default(false),
+    archiveKind: text("archive_kind"),
+    archiveEntryCount: integer("archive_entry_count"),
+    archivePasswordProtected: boolean("archive_password_protected"),
+    parentEvidenceId: text("parent_evidence_id"),
+    collectionId: text("collection_id").references(() => evidenceCollections.id, {
+      onDelete: "set null",
+    }),
+    relevance: evidenceRelevanceEnum("relevance").notNull().default("unknown"),
+    acquisitionSource: text("acquisition_source"),
+    acquiredAt: timestamp("acquired_at", { withTimezone: true }),
+    examinerNotes: text("examiner_notes"),
+    labels: jsonb("labels").notNull().default(sql`'[]'::jsonb`),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedBy: text("deleted_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    deletionReason: text("deletion_reason"),
   },
-  (t) => [index("attachments_case_idx").on(t.caseId)],
+  (t) => [
+    index("attachments_case_idx").on(t.caseId),
+    index("attachments_org_idx").on(t.organisationId),
+    index("attachments_org_status_idx").on(t.organisationId, t.status),
+    index("attachments_parent_idx").on(t.parentEvidenceId),
+    index("attachments_collection_idx").on(t.collectionId),
+    foreignKey({
+      columns: [t.parentEvidenceId],
+      foreignColumns: [t.id],
+      name: "attachments_parent_evidence_id_attachments_id_fk",
+    }).onDelete("restrict"),
+  ],
+);
+
+/**
+ * Append-only chain-of-custody ledger for evidence. Application code only
+ * ever inserts here; rows are never updated or deleted, including when the
+ * evidence row itself is soft-deleted.
+ */
+export const evidenceCustodyEvents = pgTable(
+  "evidence_custody_events",
+  {
+    id: text("id").primaryKey(),
+    evidenceId: text("evidence_id")
+      .notNull()
+      .references(() => attachments.id, { onDelete: "cascade" }),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    eventType: text("event_type").notNull(),
+    reason: text("reason"),
+    payload: jsonb("payload").notNull().default(sql`'{}'::jsonb`),
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("evidence_custody_events_evidence_idx").on(
+      t.evidenceId,
+      t.occurredAt,
+    ),
+    index("evidence_custody_events_org_idx").on(t.organisationId),
+  ],
+);
+
+/** Analyst-defined groupings of evidence within a case (e.g. "host triage"). */
+export const evidenceCollections = pgTable(
+  "evidence_collections",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("evidence_collections_case_idx").on(t.caseId),
+    uniqueIndex("evidence_collections_case_name_idx").on(t.caseId, t.name),
+  ],
+);
+
+/**
+ * A hold can target either an entire case (every current and future item of
+ * evidence on it) or one evidence item; exactly one of the two must be set.
+ * Deletion and retention cleanup must refuse to act while any row for the
+ * relevant case/evidence has `releasedAt` still null.
+ */
+export const evidenceLegalHolds = pgTable(
+  "evidence_legal_holds",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id").references(() => cases.id, {
+      onDelete: "cascade",
+    }),
+    evidenceId: text("evidence_id").references(() => attachments.id, {
+      onDelete: "cascade",
+    }),
+    reason: text("reason").notNull(),
+    appliedBy: text("applied_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    appliedAt: timestamp("applied_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    releasedBy: text("released_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    releasedAt: timestamp("released_at", { withTimezone: true }),
+    releaseReason: text("release_reason"),
+  },
+  (t) => [
+    index("evidence_legal_holds_org_idx").on(t.organisationId),
+    index("evidence_legal_holds_case_idx").on(t.caseId),
+    index("evidence_legal_holds_evidence_idx").on(t.evidenceId),
+    check(
+      "evidence_legal_holds_scope_target",
+      sql.raw(`"case_id" is not null or "evidence_id" is not null`),
+    ),
+  ],
 );
 
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -1303,6 +1473,9 @@ export type CaseRelationshipDismissal =
 export type TimelineEvent = typeof timelineEvents.$inferSelect;
 export type Comment = typeof comments.$inferSelect;
 export type Attachment = typeof attachments.$inferSelect;
+export type EvidenceCustodyEvent = typeof evidenceCustodyEvents.$inferSelect;
+export type EvidenceCollection = typeof evidenceCollections.$inferSelect;
+export type EvidenceLegalHold = typeof evidenceLegalHolds.$inferSelect;
 export type Playbook = typeof playbooks.$inferSelect;
 export type PlaybookRun = typeof playbookRuns.$inferSelect;
 export type SlaPolicy = typeof slaPolicies.$inferSelect;

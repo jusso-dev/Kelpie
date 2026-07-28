@@ -22,6 +22,7 @@ const SYSTEM_SCHEDULES: Array<{
   { id: "system:enrich-cases", every: 60_000, name: "enrich-cases" },
   { id: "system:deliver-mobile-push", every: 60_000, name: "deliver-mobile-push" },
   { id: "system:prune-presence", every: 60_000, name: "prune-presence" },
+  { id: "system:scan-evidence", every: 15_000, name: "scan-evidence" },
 ];
 
 export async function upsertSystemSchedulers(queue: KelpieQueue) {

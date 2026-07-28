@@ -5,6 +5,10 @@ import {
   listSuggestionsCore,
 } from "@/lib/case-relationships-core";
 import {
+  listCustodyEventsForEvidence,
+  listEvidenceForCase,
+} from "@/lib/evidence/core";
+import {
   listWatchedVendors,
   queryCyberBriefing,
   queryThreatIntelligence,
@@ -52,6 +56,14 @@ const caseRelationshipsListInput = z.object({
 const caseRelationshipSuggestionsListInput = z.object({
   caseId: z.string().trim().min(1).max(128),
   limit: z.number().int().min(1).max(50).optional(),
+});
+
+const evidenceListInput = z.object({
+  caseId: z.string().trim().min(1).max(128),
+});
+
+const evidenceCustodyListInput = z.object({
+  evidenceId: z.string().trim().min(1).max(128),
 });
 
 const tools = [
@@ -171,6 +183,36 @@ const tools = [
         },
       },
       required: ["caseId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "evidence_list",
+    title: "List evidence",
+    description:
+      "List evidence items for a case, including status, hashes, labels, relevance, and acquisition metadata. Never returns internal storage locations.",
+    scope: "evidence:read" as ScopeValue,
+    inputSchema: {
+      type: "object",
+      properties: {
+        caseId: { type: "string", description: "Case identifier." },
+      },
+      required: ["caseId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "evidence_custody_list",
+    title: "List evidence custody events",
+    description:
+      "List the append-only chain-of-custody events recorded for an evidence item (uploads, downloads, overrides, renames, holds, and more).",
+    scope: "evidence:read" as ScopeValue,
+    inputSchema: {
+      type: "object",
+      properties: {
+        evidenceId: { type: "string", description: "Evidence identifier." },
+      },
+      required: ["evidenceId"],
       additionalProperties: false,
     },
   },
@@ -304,6 +346,19 @@ async function callTool(
     return toolResult(
       await listSuggestionsCore(organisationId, input.caseId, input.limit),
     );
+  }
+  if (name === "evidence_list") {
+    const input = evidenceListInput.parse(args);
+    const rows = await listEvidenceForCase(input.caseId, organisationId);
+    return toolResult({
+      evidence: rows.map(({ storageKey: _storageKey, ...safe }) => safe),
+    });
+  }
+  if (name === "evidence_custody_list") {
+    const input = evidenceCustodyListInput.parse(args);
+    return toolResult({
+      events: await listCustodyEventsForEvidence(input.evidenceId, organisationId),
+    });
   }
   throw new Error("Unknown tool");
 }

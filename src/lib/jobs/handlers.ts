@@ -9,6 +9,7 @@ import { dispatchPendingMobilePushes } from "@/lib/mobile-push";
 import { pruneStalePresence } from "@/lib/presence";
 import { runSlaChecks } from "@/lib/sla-runner";
 import { processPendingAutomationRuns } from "@/lib/automations/dispatch";
+import { scanPendingEvidence } from "@/lib/evidence/scan-runner";
 
 export async function pollThreatFeed(feedId: string) {
   const result = await pollFeed(feedId);
@@ -40,4 +41,5 @@ export const jobHandlers = {
   "enrich-cases": enrichPendingCases,
   "deliver-mobile-push": dispatchPendingMobilePushes,
   "prune-presence": pruneStalePresence,
+  "scan-evidence": scanPendingEvidence,
 };

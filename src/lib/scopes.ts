@@ -18,6 +18,16 @@ export const KNOWN_SCOPES = [
     value: "case_relationships:write",
     label: "Link, unlink, and dismiss case relationships",
   },
+  { value: "evidence:read", label: "Read evidence metadata and custody history" },
+  {
+    value: "evidence:write",
+    label: "Upload evidence and update evidence metadata",
+  },
+  {
+    value: "evidence:override",
+    label:
+      "Override quarantine and manage legal holds (sensitive; only grant to admin-issued tokens)",
+  },
 ] as const;
 
 export type ScopeValue = (typeof KNOWN_SCOPES)[number]["value"];

@@ -2,7 +2,7 @@
 
 import * as Dialog from "@radix-ui/react-dialog";
 import { AlertTriangle, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
@@ -19,6 +19,8 @@ export function ConfirmDialog({
   confirmLabel,
   pending = false,
   tone = "danger",
+  reasonLabel,
+  reasonPlaceholder,
   onConfirm,
 }: {
   open: boolean;
@@ -28,8 +30,21 @@ export function ConfirmDialog({
   confirmLabel: string;
   pending?: boolean;
   tone?: "danger" | "warning";
-  onConfirm: () => void;
+  /** When set, renders a required reason textarea and passes its trimmed value to `onConfirm`. */
+  reasonLabel?: string;
+  reasonPlaceholder?: string;
+  onConfirm: (reason?: string) => void;
 }) {
+  const reasonId = useId();
+  const [reason, setReason] = useState("");
+
+  useEffect(() => {
+    if (!open) setReason("");
+  }, [open]);
+
+  const reasonRequired = Boolean(reasonLabel);
+  const reasonValid = !reasonRequired || reason.trim().length > 0;
+
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
@@ -51,6 +66,23 @@ export function ConfirmDialog({
             <Dialog.Description className="kelpie-dialog-description">
               {description}
             </Dialog.Description>
+            {reasonLabel ? (
+              <div className="kelpie-field mt-3">
+                <label htmlFor={reasonId} className="kelpie-label">
+                  {reasonLabel}
+                </label>
+                <textarea
+                  id={reasonId}
+                  className="kelpie-input"
+                  rows={2}
+                  required
+                  disabled={pending}
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                  placeholder={reasonPlaceholder}
+                />
+              </div>
+            ) : null}
           </div>
           <Dialog.Close
             className="kelpie-dialog-close"
@@ -73,8 +105,8 @@ export function ConfirmDialog({
                   ? "kelpie-btn kelpie-btn-danger"
                   : "kelpie-btn kelpie-btn-primary"
               }
-              disabled={pending}
-              onClick={onConfirm}
+              disabled={pending || !reasonValid}
+              onClick={() => onConfirm(reasonRequired ? reason.trim() : undefined)}
             >
               {pending ? "Working…" : confirmLabel}
             </button>
