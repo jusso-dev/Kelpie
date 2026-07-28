@@ -1,6 +1,12 @@
 import { db } from "@/db";
 import { cases, comments, users } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
+import {
+  evaluateCasePermissions,
+  hasPermission,
+  loadCaseAccessContext,
+  resolveUserActor,
+} from "./access";
 import { newId } from "./utils";
 import { writeTimelineEvent } from "./timeline";
 import { sendEmail } from "./email";
@@ -16,6 +22,7 @@ export async function postCommentCore(
   actor: { id: string; name: string } | null,
   caseId: string,
   body: string,
+  opts?: { sensitive?: boolean },
 ): Promise<{ id: string; mentionedUserIds: string[] }> {
   if (!body.trim()) throw new Error("body required");
   const [c] = await db
@@ -43,6 +50,7 @@ export async function postCommentCore(
     mentionedUserIds = mentioned.map((u) => u.id);
   }
 
+  const sensitive = Boolean(opts?.sensitive);
   const id = newId("cmt");
   await db.insert(comments).values({
     id,
@@ -51,30 +59,65 @@ export async function postCommentCore(
     source: actor ? "user" : "api",
     body,
     mentions: mentionedUserIds,
+    sensitive,
   });
+  // Timeline preview must never carry sensitive comment body (issue #61).
+  const timelinePreview = sensitive
+    ? "[redacted]"
+    : body.length > 120
+      ? body.slice(0, 117) + "..."
+      : body;
   await writeTimelineEvent({
     caseId,
     actorId: actor?.id ?? null,
     eventType: "comment",
     payload: {
       comment_id: id,
-      preview: body.length > 120 ? body.slice(0, 117) + "..." : body,
+      preview: timelinePreview,
+      sensitive,
     },
   });
   if (mentioned.length > 0) {
+    // Mentions never grant access. Only notify users who already have
+    // know_exists on this case; never include sensitive body text.
+    const accessCtx = await loadCaseAccessContext(organisationId, caseId);
+    const notifiable: Array<{ id: string; email: string; name: string }> = [];
+    if (accessCtx) {
+      for (const u of mentioned) {
+        if (actor && u.id === actor.id) continue;
+        const mentionedActor = await resolveUserActor(organisationId, u.id);
+        if (!mentionedActor) continue;
+        const perms = evaluateCasePermissions(accessCtx, mentionedActor);
+        if (!hasPermission(perms, "know_exists")) continue;
+        notifiable.push(u);
+      }
+    }
     const url = `${process.env.APP_URL ?? "http://localhost:3000"}/cases/${caseId}/comments`;
     const who = actor?.name ?? "An API token";
-    for (const u of mentioned) {
-      if (actor && u.id === actor.id) continue;
+    for (const u of notifiable) {
+      const safeBody = sensitive
+        ? "(content withheld — you may need access to view this comment)"
+        : body;
+      // Case title only when the recipient has view_metadata; otherwise
+      // generic copy so restricted titles do not leak via email.
+      const mentionedActor = await resolveUserActor(organisationId, u.id);
+      const perms =
+        accessCtx && mentionedActor
+          ? evaluateCasePermissions(accessCtx, mentionedActor)
+          : null;
+      const titlePart =
+        perms && hasPermission(perms, "view_metadata")
+          ? ` — ${c.title}`
+          : "";
       await sendEmail({
         to: u.email,
         subject: `[Kelpie] ${who} mentioned you on ${c.caseNumber}`,
-        text: `${who} mentioned you on case ${c.caseNumber} — ${c.title}\n\n${body}\n\n${url}`,
+        text: `${who} mentioned you on case ${c.caseNumber}${titlePart}\n\n${safeBody}\n\n${url}`,
       });
     }
     await queueMobilePushForUsers(
       organisationId,
-      mentionedUserIds.filter((userId) => userId !== actor?.id),
+      notifiable.map((u) => u.id),
       {
         event: "comment_mention",
         sourceId: id,

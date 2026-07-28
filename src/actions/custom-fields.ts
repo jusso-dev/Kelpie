@@ -41,6 +41,8 @@ export async function createFieldDefinition(formData: FormData) {
     throw new Error("Select fields need at least one option");
   }
   const required = formData.get("required") === "on" || formData.get("required") === "true";
+  const sensitive =
+    formData.get("sensitive") === "on" || formData.get("sensitive") === "true";
 
   const [{ max }] = await db
     .select({ max: sql<number>`coalesce(max(${customFieldDefinitions.orderIndex}), -1)::int` })
@@ -62,6 +64,7 @@ export async function createFieldDefinition(formData: FormData) {
     type,
     options,
     required,
+    sensitive,
     orderIndex: (max ?? -1) + 1,
     isActive: true,
   });
@@ -75,7 +78,7 @@ export async function createFieldDefinition(formData: FormData) {
     targetId: fieldId,
     targetLabel: label,
     before: null,
-    after: { key, label, type, options, required, entity: "case" },
+    after: { key, label, type, options, required, sensitive, entity: "case" },
     ...auditContextFromHeaders(await headers()),
   });
   revalidatePath("/settings/fields");

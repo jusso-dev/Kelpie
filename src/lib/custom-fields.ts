@@ -23,6 +23,8 @@ export type CustomFieldDefinitionView = {
   required: boolean;
   orderIndex: number;
   isActive: boolean;
+  /** When true, values require view_sensitive (issue #61). */
+  sensitive: boolean;
 };
 
 export type CustomFieldWithValue = CustomFieldDefinitionView & {
@@ -53,6 +55,7 @@ export async function listFieldDefinitions(
     required: r.required,
     orderIndex: r.orderIndex,
     isActive: r.isActive,
+    sensitive: Boolean(r.sensitive),
   }));
 }
 
@@ -177,6 +180,7 @@ export async function setCustomFieldValue(
     required: def.required,
     orderIndex: def.orderIndex,
     isActive: def.isActive,
+    sensitive: Boolean(def.sensitive),
   };
   const value = coerceValue(view, raw);
 

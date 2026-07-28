@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
 import {
+  authorizeCase,
+  redactContentBlock,
+  resolveTokenActor,
+} from "@/lib/access";
+import {
   CASE_CONTENT_BLOCK_TYPES,
   ContentBlockError,
   createContentBlockCore,
@@ -32,13 +37,29 @@ export async function GET(req: Request, { params }: Params) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
   const { id } = await params;
+  const actor = await resolveTokenActor(auth.token);
+  const gate = await authorizeCase(
+    auth.token.organisationId,
+    id,
+    actor,
+    "view_metadata",
+  );
+  if (!gate.ok) {
+    return NextResponse.json({ error: gate.error }, { status: gate.status });
+  }
   const includeArchived =
     new URL(req.url).searchParams.get("includeArchived") === "true";
   try {
     const blocks = await listContentBlocksCore(auth.token.organisationId, id, {
       includeArchived,
     });
-    return NextResponse.json({ blocks });
+    const redacted = blocks.map((b) =>
+      redactContentBlock(b, gate.permissions, {
+        actor,
+        grants: gate.ctx.grants,
+      }),
+    );
+    return NextResponse.json({ blocks: redacted });
   } catch (error) {
     if (error instanceof ContentBlockError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -53,6 +74,16 @@ export async function POST(req: Request, { params }: Params) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
   const { id } = await params;
+  const actor = await resolveTokenActor(auth.token);
+  const gate = await authorizeCase(
+    auth.token.organisationId,
+    id,
+    actor,
+    "edit",
+  );
+  if (!gate.ok) {
+    return NextResponse.json({ error: gate.error }, { status: gate.status });
+  }
   const body = await req.json().catch(() => null);
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) {

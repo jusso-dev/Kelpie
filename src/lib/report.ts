@@ -16,6 +16,11 @@ import {
   listReportContentBlocksCore,
   type ContentBlockView,
 } from "@/lib/content-blocks-core";
+import {
+  authorizeCase,
+  type AccessActor,
+  REDACTED_PLACEHOLDER,
+} from "@/lib/access";
 
 export type CaseReportData = {
   case: Case;
@@ -51,10 +56,30 @@ export type CaseReportData = {
   contentBlocks: ContentBlockView[];
 };
 
+/**
+ * Load a case report. When `actor` is provided, export permission is evaluated
+ * independently of view (issue #61). Missing export permission returns null
+ * (same as missing case) so callers cannot distinguish the two.
+ */
 export async function loadCaseReport(
   organisationId: string,
   caseId: string,
+  opts?: { actor?: AccessActor; includeSensitive?: boolean },
 ): Promise<CaseReportData | null> {
+  let includeSensitive = opts?.includeSensitive ?? false;
+  if (opts?.actor) {
+    const exportGate = await authorizeCase(
+      organisationId,
+      caseId,
+      opts.actor,
+      "export",
+    );
+    if (!exportGate.ok) return null;
+    // Sensitive report content still needs view_sensitive separately.
+    includeSensitive =
+      includeSensitive || exportGate.permissions.has("view_sensitive");
+  }
+
   const [c] = await db
     .select()
     .from(cases)
@@ -118,6 +143,7 @@ export async function loadCaseReport(
     .select({
       id: comments.id,
       body: comments.body,
+      sensitive: comments.sensitive,
       createdAt: comments.createdAt,
       authorName:
         sql<string>`case when ${comments.source} = 'system' then 'Kelpie Intelligence' when ${comments.source} = 'api' then 'API integration' else ${users.name} end`,
@@ -130,8 +156,16 @@ export async function loadCaseReport(
   const [attackMappings, attackStory, contentBlocks] = await Promise.all([
     listMappingsForCase(organisationId, caseId),
     listStoryCore(organisationId, caseId),
-    listReportContentBlocksCore(organisationId, caseId),
+    listReportContentBlocksCore(organisationId, caseId, { includeSensitive }),
   ]);
+
+  const safeComments = commentRows.map((row) => ({
+    id: row.id,
+    body:
+      row.sensitive && !includeSensitive ? REDACTED_PLACEHOLDER : row.body,
+    createdAt: row.createdAt,
+    authorName: row.authorName,
+  }));
 
   return {
     case: c,
@@ -147,7 +181,7 @@ export async function loadCaseReport(
     })),
     tasks: tasksRaw,
     timeline,
-    comments: commentRows,
+    comments: safeComments,
     attackMappings,
     attackStory,
     contentBlocks,
