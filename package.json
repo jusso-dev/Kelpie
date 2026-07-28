@@ -34,6 +34,8 @@
     "test:case-relationship-scoring": "tsx scripts/test-case-relationship-scoring.ts",
     "test:case-relationships-api": "tsx scripts/test-case-relationships-api.ts",
     "test:case-sources": "tsx scripts/test-case-sources.ts",
+    "test:mailbox-core": "tsx scripts/test-mailbox-core.ts",
+    "test:mailbox-intake": "tsx scripts/test-mailbox-intake.ts",
     "test:tawny-source": "tsx scripts/test-tawny-source.ts",
     "test:tawny-ingest": "tsx scripts/test-tawny-ingest.ts",
     "test:tawny-api": "tsx scripts/test-tawny-api.ts",

@@ -1,7 +1,7 @@
 import type { Queue } from "bullmq";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { caseSources, tiFeeds } from "@/db/schema";
+import { caseSources, mailboxConnections, tiFeeds } from "@/db/schema";
 import {
   type KelpieJobData,
   type KelpieJobName,
@@ -50,9 +50,10 @@ export async function upsertSystemSchedulers(queue: KelpieQueue) {
 export async function syncSourceSchedulers(queue: KelpieQueue): Promise<{
   feeds: number;
   caseSources: number;
+  mailboxes: number;
   removed: number;
 }> {
-  const [feeds, sources] = await Promise.all([
+  const [feeds, sources, mailboxes] = await Promise.all([
     db
       .select({
         id: tiFeeds.id,
@@ -67,6 +68,13 @@ export async function syncSourceSchedulers(queue: KelpieQueue): Promise<{
       })
       .from(caseSources)
       .where(eq(caseSources.isActive, true)),
+    db
+      .select({
+        id: mailboxConnections.id,
+        intervalMinutes: mailboxConnections.pollIntervalMinutes,
+      })
+      .from(mailboxConnections)
+      .where(eq(mailboxConnections.isActive, true)),
   ]);
 
   const desired = new Set<string>();
@@ -97,6 +105,19 @@ export async function syncSourceSchedulers(queue: KelpieQueue): Promise<{
         },
       );
     }),
+    ...mailboxes.map((mailbox) => {
+      const schedulerId = `mailbox:${mailbox.id}`;
+      desired.add(schedulerId);
+      return queue.upsertJobScheduler(
+        schedulerId,
+        { every: Math.max(1, mailbox.intervalMinutes) * 60_000 },
+        {
+          name: "poll-mailbox",
+          data: { mailboxConnectionId: mailbox.id },
+          opts: scheduledJobOptions,
+        },
+      );
+    }),
   ]);
 
   const existing = await queue.getJobSchedulers(0, -1, true);
@@ -104,7 +125,9 @@ export async function syncSourceSchedulers(queue: KelpieQueue): Promise<{
     .map((scheduler) => scheduler.key)
     .filter(
       (key) =>
-        (key.startsWith("ti:") || key.startsWith("case-source:")) &&
+        (key.startsWith("ti:") ||
+          key.startsWith("case-source:") ||
+          key.startsWith("mailbox:")) &&
         !desired.has(key),
     );
   await Promise.all(obsolete.map((key) => queue.removeJobScheduler(key)));
@@ -112,6 +135,7 @@ export async function syncSourceSchedulers(queue: KelpieQueue): Promise<{
   return {
     feeds: feeds.length,
     caseSources: sources.length,
+    mailboxes: mailboxes.length,
     removed: obsolete.length,
   };
 }

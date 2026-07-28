@@ -106,7 +106,8 @@ function sha256(buffer: Buffer): string {
 export type UploadEvidenceInput = {
   organisationId: string;
   caseId: string;
-  actorId: string;
+  /** Nullable for system/mailbox intake paths with no human actor. */
+  actorId: string | null;
   buffer: Buffer;
   filename: string;
   declaredContentType: string | null;

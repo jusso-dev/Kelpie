@@ -2567,6 +2567,133 @@ export const caseSources = pgTable(
 );
 
 /* ────────────────────────────────────────────────────────────────────────── */
+/* Inbound mailbox intake (issue #42)                                         */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Organisation-scoped mailbox connection. Secrets live only in
+ * `credentialsEncrypted` (AES-256-GCM); never select that column into API/UI
+ * responses. Non-secret connection metadata (host, tenant, mailbox address)
+ * lives in `connectionMeta`.
+ */
+export const mailboxConnections = pgTable(
+  "mailbox_connections",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** `imap` | `microsoft_graph` */
+    provider: text("provider").notNull(),
+    folder: text("folder").notNull().default("INBOX"),
+    pollIntervalMinutes: integer("poll_interval_minutes").notNull().default(5),
+    /** `auto_create` | `review` */
+    intakeMode: text("intake_mode").notNull().default("review"),
+    defaultSeverity: severityEnum("default_severity").notNull().default("medium"),
+    defaultClassification: classificationEnum("default_classification")
+      .notNull()
+      .default("other"),
+    defaultAssigneeId: text("default_assignee_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    defaultTemplateId: text("default_template_id").references(
+      () => caseTemplates.id,
+      { onDelete: "set null" },
+    ),
+    defaultTags: jsonb("default_tags").notNull().default(sql`'[]'::jsonb`),
+    /**
+     * AES-256-GCM sealed credentials (`v1:<iv>:<tag>:<ciphertext>` base64).
+     * Never returned after save.
+     */
+    credentialsEncrypted: text("credentials_encrypted").notNull(),
+    /** Non-secret provider settings (host/port/username, tenant/client/mailbox). */
+    connectionMeta: jsonb("connection_meta").notNull().default(sql`'{}'::jsonb`),
+    isActive: boolean("is_active").notNull().default(true),
+    cursor: text("cursor"),
+    lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
+    lastSuccessAt: timestamp("last_success_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+    /** Distributed poll lock: workers skip while this is in the future. */
+    pollLockUntil: timestamp("poll_lock_until", { withTimezone: true }),
+    importedMessageCount: integer("imported_message_count").notNull().default(0),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("mailbox_connections_org_idx").on(t.organisationId),
+    index("mailbox_connections_active_idx").on(t.isActive),
+  ],
+);
+
+/**
+ * Normalised inbound message records. Deduplicated by
+ * `(connection_id, provider_message_id)`. Bodies are stored as plain text plus
+ * sanitised HTML only — never unsanitised HTML. Attachments route through the
+ * evidence pipeline when a case is created.
+ */
+export const mailboxMessages = pgTable(
+  "mailbox_messages",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    connectionId: text("connection_id")
+      .notNull()
+      .references(() => mailboxConnections.id, { onDelete: "cascade" }),
+    providerMessageId: text("provider_message_id").notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    fromAddress: text("from_address"),
+    fromName: text("from_name"),
+    toAddresses: jsonb("to_addresses").notNull().default(sql`'[]'::jsonb`),
+    ccAddresses: jsonb("cc_addresses").notNull().default(sql`'[]'::jsonb`),
+    subject: text("subject"),
+    bodyText: text("body_text"),
+    bodyHtmlSanitized: text("body_html_sanitized"),
+    /** Attachment descriptors only (filename, size, contentType) — no bytes. */
+    attachmentMeta: jsonb("attachment_meta").notNull().default(sql`'[]'::jsonb`),
+    /**
+     * `pending_review` | `imported` | `dismissed` | `failed` | `duplicate`
+     */
+    status: text("status").notNull().default("pending_review"),
+    failureReason: text("failure_reason"),
+    dismissReason: text("dismiss_reason"),
+    caseId: text("case_id").references(() => cases.id, { onDelete: "set null" }),
+    originalEvidenceId: text("original_evidence_id").references(
+      () => attachments.id,
+      { onDelete: "set null" },
+    ),
+    retryCount: integer("retry_count").notNull().default(0),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("mailbox_messages_connection_provider_idx").on(
+      t.connectionId,
+      t.providerMessageId,
+    ),
+    index("mailbox_messages_org_status_idx").on(t.organisationId, t.status),
+    index("mailbox_messages_connection_idx").on(t.connectionId),
+    index("mailbox_messages_case_idx").on(t.caseId),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
 /* Inbound push source delivery health                                        */
 /* ────────────────────────────────────────────────────────────────────────── */
 
@@ -3023,6 +3150,8 @@ export type AuditExportJobRow = typeof auditExportJobs.$inferSelect;
 export type TiFeed = typeof tiFeeds.$inferSelect;
 export type TiIndicator = typeof tiIndicators.$inferSelect;
 export type CaseSource = typeof caseSources.$inferSelect;
+export type MailboxConnection = typeof mailboxConnections.$inferSelect;
+export type MailboxMessage = typeof mailboxMessages.$inferSelect;
 export type InboundSourceStatus = typeof inboundSourceStatus.$inferSelect;
 export type VendorWatch = typeof vendorWatchlist.$inferSelect;
 export type CustomFieldDefinition = typeof customFieldDefinitions.$inferSelect;
