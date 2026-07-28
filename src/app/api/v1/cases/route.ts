@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
-import { cases } from "@/db/schema";
+import { attackCatalogVersions, attackTechniqueMappings, attackTechniques, cases } from "@/db/schema";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
 import { CASE_ENUMS, createCaseCore } from "@/lib/cases-core";
@@ -91,6 +91,8 @@ export async function GET(req: Request) {
   const assignee = url.searchParams.get("assignee");
   const openedSince = url.searchParams.get("openedSince");
   const source = url.searchParams.get("source");
+  const technique = url.searchParams.get("technique");
+  const tactic = url.searchParams.get("tactic");
   const limit = Math.min(Number(url.searchParams.get("limit") ?? 50), 200);
   if (status === "active") {
     filters.push(sql`${cases.status} <> 'closed'`);
@@ -109,6 +111,28 @@ export async function GET(req: Request) {
     }
   }
   if (source) filters.push(eq(cases.sourceSystem, source));
+  if (technique) {
+    const techniqueId = technique.trim().toUpperCase();
+    filters.push(
+      sql`EXISTS (SELECT 1 FROM ${attackTechniqueMappings} m WHERE m.case_id = ${cases.id} AND m.technique_id = ${techniqueId})`,
+    );
+  }
+  if (tactic) {
+    filters.push(
+      sql`EXISTS (
+        SELECT 1 FROM ${attackTechniqueMappings} m
+        WHERE m.case_id = ${cases.id}
+          AND EXISTS (
+            SELECT 1 FROM ${attackTechniques} t
+            WHERE t.technique_id = m.technique_id
+              AND t.catalog_version_id = (
+                SELECT id FROM ${attackCatalogVersions} WHERE status = 'active' LIMIT 1
+              )
+              AND EXISTS (SELECT 1 FROM jsonb_array_elements(t.tactics) elem WHERE elem->>'id' = ${tactic})
+          )
+      )`,
+    );
+  }
   const rows = await db
     .select()
     .from(cases)

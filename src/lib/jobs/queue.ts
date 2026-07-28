@@ -15,12 +15,15 @@ export type KelpieJobName =
   | "prune-presence"
   | "scan-evidence"
   | "export-audit-events"
-  | "purge-audit-events";
+  | "purge-audit-events"
+  | "refresh-attack-catalog";
 
 export type KelpieJobData = {
   feedId?: string;
   sourceId?: string;
   auditExportJobId?: string;
+  attackCatalogSourceUrl?: string;
+  attackCatalogActorId?: string;
 };
 
 export function redisConnection(worker = false): ConnectionOptions {

@@ -8,15 +8,19 @@ import {
   caseTasks,
   playbooks,
   playbookRuns,
+  type PlaybookStep,
 } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { requireRole } from "@/lib/session";
 import { newId } from "@/lib/utils";
 import { writeTimelineEvent } from "@/lib/timeline";
-import type { PlaybookStep } from "@/db/schema";
 import { seedBaselineOrganisationData } from "@/lib/baseline-data";
 import { OBSERVABLE_TYPES } from "@/lib/observables-core";
 import { parseTagsInput } from "@/lib/tags";
+import {
+  PLAYBOOK_GUIDANCE_CATEGORIES,
+  type PlaybookGuidanceCategory,
+} from "@/lib/attack/playbook-guidance";
 
 const CLASSIFICATIONS = [
   "malware",
@@ -55,7 +59,32 @@ type ParsedStep = {
   description: string;
   offsetMinutes: number;
   isRequired: boolean;
+  attackTechniqueIds: string[];
+  guidanceCategories: PlaybookGuidanceCategory[];
 };
+
+function parseAttackTechniqueIds(value: unknown): string[] {
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((v) => v.trim().toUpperCase())
+      .filter((v) => /^T\d{4}(\.\d{3})?$/.test(v));
+  }
+  if (Array.isArray(value)) {
+    return value
+      .filter((v): v is string => typeof v === "string")
+      .map((v) => v.trim().toUpperCase())
+      .filter((v) => /^T\d{4}(\.\d{3})?$/.test(v));
+  }
+  return [];
+}
+
+function parseGuidanceCategories(value: unknown): PlaybookGuidanceCategory[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((v): v is PlaybookGuidanceCategory =>
+    (PLAYBOOK_GUIDANCE_CATEGORIES as readonly string[]).includes(v as string),
+  );
+}
 
 function parseSteps(raw: FormDataEntryValue | null): ParsedStep[] {
   if (typeof raw !== "string" || !raw.trim()) return [];
@@ -76,6 +105,8 @@ function parseSteps(raw: FormDataEntryValue | null): ParsedStep[] {
             ? Math.max(0, Math.round(obj.offsetMinutes))
             : 0,
         isRequired: obj.isRequired !== false,
+        attackTechniqueIds: parseAttackTechniqueIds(obj.attackTechniqueIds),
+        guidanceCategories: parseGuidanceCategories(obj.guidanceCategories),
       });
     }
     return result;
@@ -101,6 +132,8 @@ export async function createPlaybook(formData: FormData) {
     description: s.description,
     offsetMinutes: s.offsetMinutes,
     isRequired: s.isRequired,
+    attackTechniqueIds: s.attackTechniqueIds,
+    guidanceCategories: s.guidanceCategories,
   }));
   const defaultSeverity = pickOptionalEnum(SEVERITIES, formData.get("defaultSeverity"));
   const tags = parseTagsInput(String(formData.get("tags") ?? ""));
@@ -139,6 +172,8 @@ export async function updatePlaybook(playbookId: string, formData: FormData) {
     description: s.description,
     offsetMinutes: s.offsetMinutes,
     isRequired: s.isRequired,
+    attackTechniqueIds: s.attackTechniqueIds,
+    guidanceCategories: s.guidanceCategories,
   }));
   const defaultSeverity = pickOptionalEnum(SEVERITIES, formData.get("defaultSeverity"));
   const tags = parseTagsInput(String(formData.get("tags") ?? ""));

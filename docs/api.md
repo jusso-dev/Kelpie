@@ -26,11 +26,13 @@ Errors return `{ "error": "..." }` with an appropriate HTTP status (`400` invali
 | `alerts:read` | Read alerts, linked entities, and evidence items |
 | `alerts:write` | Create/link alerts, change alert disposition, link entities, and create/update evidence items |
 | `alerts:raw_payload:read` | Read raw provider payload references behind alerts and evidence (sensitive; only grant to admin-issued tokens) |
+| `attack:read` | Read the ATT&CK technique catalog, technique mappings, attack stories, and coverage |
+| `attack:write` | Attach, update, and remove ATT&CK technique mappings and attack-story entries |
 
 ## Cases
 
 ### `GET /api/v1/cases`
-Optional query: `status`, `severity`, `classification`, `tlp`, `assignee`, `openedSince`, `limit`, `source`. `status=active` returns every status except `closed`. `source` filters on the exact `source_system` value (e.g. `?source=tawny`) — it is an equality match, not a prefix or substring search.
+Optional query: `status`, `severity`, `classification`, `tlp`, `assignee`, `openedSince`, `limit`, `source`, `technique`, `tactic`. `status=active` returns every status except `closed`. `source` filters on the exact `source_system` value (e.g. `?source=tawny`) — it is an equality match, not a prefix or substring search. `technique` filters to cases with at least one ATT&CK technique mapping matching that exact technique id (e.g. `?technique=T1566.001`); `tactic` filters to cases with at least one mapped technique belonging to that exact tactic id (e.g. `?tactic=initial-access`), evaluated against the currently active catalog version.
 
 ### `POST /api/v1/cases`
 ```json
@@ -329,6 +331,68 @@ Any subset of `verdict` (`unknown`, `clean`, `suspicious`, `malicious`), `remedi
 ### Migrating existing source-backed cases
 
 Cases created before this model existed (via `sourceSystem`/`sourceReference`, e.g. from Microsoft Sentinel/Defender XDR import) are backfilled by `npm run backfill:alerts`: for every such case with no alert yet, it creates (or reuses) an `alert_sources` row for that source, an `alerts` row that preserves the exact `sourceSystem` as `detectionSource` and `sourceReference` as the alert's immutable `externalId`, and links it into the case as the primary alert. The script is idempotent — re-running it after new source-backed cases appear only backfills the ones still missing an alert; it never creates a duplicate.
+## ATT&CK technique mapping
+
+Kelpie ships a versioned, organisation-independent ATT&CK Enterprise technique catalog (a bundled offline baseline snapshot by default; an administrator can refresh it from a configured URL under **Settings**, which runs through BullMQ and is rolled back automatically on failure). Analysts attach techniques to a case, alert, observable, evidence item, or task, recording confidence, source, notes, detection notes, response notes, and analyst-entered actor attribution as separate fields. Kelpie never infers actor attribution automatically. An alert mapping is linked to a case for timeline/audit purposes via its `case_alerts` link (preferring the alert's primary case, otherwise its most recently linked case); a mapping on an alert not yet linked to any case still succeeds — it is recorded on the organisation audit trail without a case timeline entry.
+
+### `GET /api/v1/attack/techniques?q=&tactic=&includeDeprecated=&limit=`
+Search the active catalog version. `q` matches technique id or name substring. `tactic` is an exact ATT&CK tactic id (e.g. `lateral-movement`). Deprecated techniques are excluded unless `includeDeprecated=true` — deprecated techniques remain in the catalog and readable on historical mappings, they just don't surface in the default search.
+
+### `GET /api/v1/attack/mappings?caseId=` or `?entityType=&entityId=`
+Returns every mapping touching a case (the case's own mapping plus its linked alerts/observables/evidence/tasks) or the mappings on one specific entity.
+
+### `POST /api/v1/attack/mappings`
+```json
+{
+  "entityType": "observable",
+  "entityId": "obs_...",
+  "techniqueId": "T1566.001",
+  "confidence": 80,
+  "source": "analyst",
+  "notes": "Matches the phishing lure",
+  "detectionNotes": "Flagged by mail gateway attachment sandbox",
+  "responseNotes": "Blocked sender domain, reset affected mailbox credentials",
+  "actorAttribution": "Suspected commodity phishing kit, not attributed to a named actor"
+}
+```
+Duplicate mappings (same organisation, entity, and technique) are rejected with `409`. Every create/update/remove is recorded on the case timeline and the organisation audit trail.
+
+### `PATCH /api/v1/attack/mappings/{id}` / `DELETE /api/v1/attack/mappings/{id}`
+Update or remove a mapping. `PATCH` accepts any subset of `confidence`, `source`, `notes`, `detectionNotes`, `responseNotes`, `actorAttribution`.
+
+### `GET /api/v1/attack/coverage`
+Organisation-wide coverage: mapped techniques grouped by tactic, mappings still missing detection/response notes ("unresolved work"), and playbook/case-template coverage broken down by investigation/detection/containment/recovery guidance category.
+
+### Attack story ordering
+
+### `GET /api/v1/cases/{id}/attack-story`
+### `POST /api/v1/cases/{id}/attack-story`
+```json
+{ "title": "Initial phishing click", "provenance": "analyst", "techniqueId": "T1566.001" }
+```
+Entries are ordered by an explicit `sequenceIndex` set by whoever adds/reorders them; `occurredAt` is optional contextual timing only and is never used to infer order.
+
+### `PATCH /api/v1/cases/{id}/attack-story/{entryId}`
+Send `{ "targetIndex": 2 }` to reorder, or any subset of `title`, `description`, `sourceRef`, `occurredAt` to edit.
+
+### `DELETE /api/v1/cases/{id}/attack-story/{entryId}`
+
+### Optional D3FEND countermeasure mappings
+
+### `GET /api/v1/attack/d3fend-mappings?playbookId=&responseActionId=`
+### `POST /api/v1/attack/d3fend-mappings`
+```json
+{
+  "d3fendTechniqueId": "D3-NTA",
+  "d3fendTechniqueName": "Network Traffic Analysis",
+  "attackTechniqueIds": ["T1071"],
+  "playbookId": "pb_...",
+  "notes": "Detect C2 beaconing during containment"
+}
+```
+Every mapping records `catalogVersion` (defaults to the bundled D3FEND baseline version) and must link to a playbook and/or a response action — entirely optional and administrator/analyst curated; Kelpie never infers a countermeasure link itself.
+
+### `DELETE /api/v1/attack/d3fend-mappings?id=`
 
 ## Audit trail
 
@@ -414,7 +478,7 @@ Returns public cyber reporting with watched-vendor matches. Optional query:
 
 ## Model Context Protocol
 
-Kelpie exposes the same read-only machine data over stateless Streamable HTTP:
+Kelpie exposes the same machine data over stateless Streamable HTTP:
 
 ```text
 POST https://your-kelpie.example/api/mcp
@@ -430,11 +494,20 @@ one or more machine-data scopes. Available tools:
 - `get_threat_landscape` — `threat_landscape:read`
 - `get_cyber_briefing` — `briefing:read`
 - `list_watched_vendors` — `briefing:read`
+- `case_relationships_list` — `case_relationships:read`
+- `case_relationship_suggestions_list` — `case_relationships:read`
+- `evidence_list` — `evidence:read`
+- `evidence_custody_list` — `evidence:read`
 - `playbooks_list` — `playbooks:read`
 - `playbooks_get` — `playbooks:read`
+- `attack_techniques_search` — `attack:read`
+- `attack_mappings_list` — `attack:read`
+- `attack_coverage_get` — `attack:read`
+- `attack_technique_attach` — `attack:write`
 
-MCP tools are read-only. Tool discovery only returns tools permitted by the
-token's scopes. `playbooks_list`/`playbooks_get` are the recommended way for
+Every tool except `attack_technique_attach` is read-only (see each tool's
+`readOnlyHint` in `tools/list`). Tool discovery only returns tools permitted by
+the token's scopes. `playbooks_list`/`playbooks_get` are the recommended way for
 an agent to discover Kelpie's playbook catalogue; see `/LLM.txt` in the
 repository root for a full copyable prompt describing how an agent should
 use them, and `docs/playbooks.md` for the catalogue's structure and a worked

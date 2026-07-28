@@ -264,6 +264,8 @@ export default async function PlaybookDetailPage({ params }: Props) {
             description: s.description ?? "",
             offsetMinutes: s.offsetMinutes,
             isRequired: s.isRequired,
+            attackTechniqueIds: s.attackTechniqueIds ?? [],
+            guidanceCategories: s.guidanceCategories ?? [],
           }))}
         />
         <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">

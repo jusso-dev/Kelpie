@@ -10,6 +10,8 @@ import {
 } from "@/db/schema";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { findTechnique } from "@/data/mitre";
+import { listMappingsForCase, type MappingView } from "@/lib/attack/mapping-core";
+import { listStoryCore, type StoryEntryView } from "@/lib/attack/story-core";
 
 export type CaseReportData = {
   case: Case;
@@ -39,6 +41,8 @@ export type CaseReportData = {
     actorName: string | null;
   }>;
   comments: Array<{ id: string; body: string; createdAt: Date; authorName: string | null }>;
+  attackMappings: MappingView[];
+  attackStory: StoryEntryView[];
 };
 
 export async function loadCaseReport(
@@ -117,6 +121,11 @@ export async function loadCaseReport(
     .where(eq(comments.caseId, caseId))
     .orderBy(asc(comments.createdAt));
 
+  const [attackMappings, attackStory] = await Promise.all([
+    listMappingsForCase(organisationId, caseId),
+    listStoryCore(organisationId, caseId),
+  ]);
+
   return {
     case: c,
     assignee,
@@ -132,6 +141,8 @@ export async function loadCaseReport(
     tasks: tasksRaw,
     timeline,
     comments: commentRows,
+    attackMappings,
+    attackStory,
   };
 }
 
@@ -214,6 +225,30 @@ export function renderCaseMarkdown(data: CaseReportData): string {
     for (const id of techniques) {
       const t = findTechnique(id);
       lines.push(`- ${id}${t ? ` — ${t.name} (${t.tactic})` : ""}`);
+    }
+    lines.push("");
+  }
+  if (data.attackMappings.length > 0) {
+    lines.push("## ATT&CK technique mappings", "");
+    for (const m of data.attackMappings) {
+      const tactics = m.technique.tactics.map((t) => t.name).join(", ");
+      lines.push(
+        `- \`${m.techniqueId}\`${m.technique.name ? ` — ${m.technique.name}` : ""}${tactics ? ` (${tactics})` : ""}${m.technique.deprecated ? " [deprecated]" : ""} — ${m.entityType}, confidence ${m.confidence ?? "n/a"}, source ${m.source}`,
+      );
+      if (m.notes) lines.push(`  - Notes: ${m.notes}`);
+      if (m.detectionNotes) lines.push(`  - Detection: ${m.detectionNotes}`);
+      if (m.responseNotes) lines.push(`  - Response: ${m.responseNotes}`);
+      if (m.actorAttribution) lines.push(`  - Actor attribution: ${m.actorAttribution}`);
+    }
+    lines.push("");
+  }
+  if (data.attackStory.length > 0) {
+    lines.push("## Attack story", "");
+    for (const [index, e] of data.attackStory.entries()) {
+      lines.push(
+        `${index + 1}. **${e.title}** (${e.provenance})${e.techniqueId ? ` — ${e.techniqueId}${e.techniqueName ? ` ${e.techniqueName}` : ""}` : ""}`,
+      );
+      if (e.description) lines.push(`   ${e.description}`);
     }
     lines.push("");
   }

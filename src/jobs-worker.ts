@@ -16,6 +16,10 @@ import {
   pollThreatFeed,
 } from "@/lib/jobs/handlers";
 import { processAuditExportJob } from "@/lib/audit/export";
+import {
+  refreshAttackCatalogFromBundled,
+  refreshAttackCatalogFromUrl,
+} from "@/lib/attack/refresh-job";
 
 const queue = createKelpieQueue();
 
@@ -41,6 +45,13 @@ async function processJob(job: Job<KelpieJobData, unknown, string>) {
         throw new Error("Audit export job is missing auditExportJobId");
       }
       return processAuditExportJob(job.data.auditExportJobId);
+    case "refresh-attack-catalog":
+      return job.data.attackCatalogSourceUrl
+        ? refreshAttackCatalogFromUrl(
+            job.data.attackCatalogSourceUrl,
+            job.data.attackCatalogActorId ?? null,
+          )
+        : refreshAttackCatalogFromBundled(job.data.attackCatalogActorId ?? null);
     case "sla-check":
     case "escalation-check":
     case "deliver-webhooks":

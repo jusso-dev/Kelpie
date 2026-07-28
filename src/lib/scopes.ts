@@ -51,6 +51,14 @@ export const KNOWN_SCOPES = [
     value: "queues:write",
     label: "Create teams/queues and assign cases to a queue or analyst",
   },
+  {
+    value: "attack:read",
+    label: "Read ATT&CK technique catalog, mappings, attack stories, and coverage",
+  },
+  {
+    value: "attack:write",
+    label: "Attach, update, and remove ATT&CK technique mappings and attack-story entries",
+  },
 ] as const;
 
 export type ScopeValue = (typeof KNOWN_SCOPES)[number]["value"];

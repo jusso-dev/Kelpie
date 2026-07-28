@@ -27,6 +27,10 @@ import {
   listSuggestionsCore,
 } from "@/lib/case-relationships-core";
 import { getCustomFieldsForEntity } from "@/lib/custom-fields";
+import { listMappingsForCase } from "@/lib/attack/mapping-core";
+import { listStoryCore } from "@/lib/attack/story-core";
+import AttackMappingsPanel from "@/components/attack-mappings-panel";
+import AttackStoryPanel from "@/components/attack-story-panel";
 import {
   listAvailableActions,
   listCaseResponseActionRuns,
@@ -90,6 +94,8 @@ export default async function CaseOverviewPage({ params }: Props) {
     additionalAssignees,
     watchers,
     handoffs,
+    attackMappings,
+    attackStory,
   ] = await Promise.all([
     getCustomFieldsForEntity(user.organisationId, c.id),
     listAvailableActions(user.organisationId, c.id),
@@ -100,6 +106,8 @@ export default async function CaseOverviewPage({ params }: Props) {
     listAdditionalAssigneesCore(user.organisationId, c.id),
     listWatchersCore(user.organisationId, c.id),
     listHandoffsCore(user.organisationId, c.id),
+    listMappingsForCase(user.organisationId, c.id),
+    listStoryCore(user.organisationId, c.id),
   ]);
   const canEdit = user.role === "admin" || user.role === "analyst";
   const sourceLabel = sourceSystemLabel(c.sourceSystem);
@@ -173,6 +181,43 @@ export default async function CaseOverviewPage({ params }: Props) {
             techniques={MITRE_TECHNIQUES}
           />
         </div>
+
+        <AttackMappingsPanel
+          caseId={c.id}
+          entityType="case"
+          entityId={c.id}
+          canEdit={canEdit}
+          mappings={attackMappings.map((m) => ({
+            id: m.id,
+            entityType: m.entityType,
+            entityId: m.entityId,
+            techniqueId: m.techniqueId,
+            confidence: m.confidence,
+            source: m.source,
+            notes: m.notes,
+            detectionNotes: m.detectionNotes,
+            responseNotes: m.responseNotes,
+            actorAttribution: m.actorAttribution,
+            createdAt: m.createdAt.toISOString(),
+            technique: m.technique,
+          }))}
+        />
+
+        <AttackStoryPanel
+          caseId={c.id}
+          canEdit={canEdit}
+          entries={attackStory.map((e) => ({
+            id: e.id,
+            sequenceIndex: e.sequenceIndex,
+            title: e.title,
+            description: e.description,
+            provenance: e.provenance,
+            sourceRef: e.sourceRef,
+            occurredAt: e.occurredAt ? e.occurredAt.toISOString() : null,
+            techniqueId: e.techniqueId,
+            techniqueName: e.techniqueName,
+          }))}
+        />
 
         <CustomFieldsPanel
           caseId={c.id}

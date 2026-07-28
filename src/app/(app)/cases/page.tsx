@@ -15,11 +15,19 @@ import {
 import { formatDistanceToNow } from "date-fns";
 import { ArrowUpRight, Filter, Search, X } from "lucide-react";
 import { db } from "@/db";
-import { cases, queues, users } from "@/db/schema";
+import {
+  attackCatalogVersions,
+  attackTechniqueMappings,
+  attackTechniques,
+  cases,
+  queues,
+  users,
+} from "@/db/schema";
 import { requireUser } from "@/lib/session";
 import { caseSlaAtRiskSql, caseSlaBreachedSql, caseSlaWarningSql } from "@/lib/sla";
 import { listQueuesCore } from "@/lib/queues-core";
 import { listWatchedCaseIdsCore } from "@/lib/watchers-core";
+import { ATTACK_TACTICS } from "@/lib/attack/tactics";
 import {
   SeverityBadge,
   StatusBadge,
@@ -94,6 +102,8 @@ type QueueParams = {
   tag?: string;
   dataTag?: string;
   source?: string;
+  technique?: string;
+  tactic?: string;
   sla?: "risk";
   sort: (typeof SORTS)[number];
   page: number;
@@ -157,6 +167,8 @@ function normaliseParams(
     tag: cleanText(first(raw.tag), 60),
     dataTag: cleanText(first(raw.dataTag), 60),
     source: normaliseSource(first(raw.source)),
+    technique: cleanText(first(raw.technique), 32)?.toUpperCase(),
+    tactic: ATTACK_TACTICS.some((t) => t.id === first(raw.tactic)) ? first(raw.tactic) : undefined,
     sla: first(raw.sla) === "risk" ? "risk" : undefined,
     sort: pick(SORTS, first(raw.sort)) ?? "priority",
     page:
@@ -256,6 +268,27 @@ export default async function CasesPage({
     filters.push(isNull(cases.queueId));
   } else if (params.queueId) {
     filters.push(eq(cases.queueId, params.queueId));
+  }
+  if (params.technique) {
+    filters.push(
+      sql`EXISTS (SELECT 1 FROM ${attackTechniqueMappings} m WHERE m.case_id = ${cases.id} AND m.technique_id = ${params.technique})`,
+    );
+  }
+  if (params.tactic) {
+    filters.push(
+      sql`EXISTS (
+        SELECT 1 FROM ${attackTechniqueMappings} m
+        WHERE m.case_id = ${cases.id}
+          AND EXISTS (
+            SELECT 1 FROM ${attackTechniques} t
+            WHERE t.technique_id = m.technique_id
+              AND t.catalog_version_id = (
+                SELECT id FROM ${attackCatalogVersions} WHERE status = 'active' LIMIT 1
+              )
+              AND EXISTS (SELECT 1 FROM jsonb_array_elements(t.tactics) elem WHERE elem->>'id' = ${params.tactic})
+          )
+      )`,
+    );
   }
 
   const slaRisk = caseSlaAtRiskSql();
@@ -376,6 +409,8 @@ export default async function CasesPage({
     params.tag,
     params.dataTag,
     params.source,
+    params.technique,
+    params.tactic,
     params.sla,
   ].filter(Boolean).length;
   const firstResult = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
@@ -678,6 +713,13 @@ function QueueFilters({
           <option value="oldest">Oldest opened</option>
           <option value="severity">Severity</option>
         </SelectFilter>
+        <SelectFilter label="ATT&CK tactic" name="tactic" value={params.tactic}>
+          <option value="">Any tactic</option>
+          {ATTACK_TACTICS.map((tactic) => (
+            <option key={tactic.id} value={tactic.id}>{tactic.name}</option>
+          ))}
+        </SelectFilter>
+        <TextFilter label="ATT&CK technique" name="technique" value={params.technique} />
         <div className="grid grid-cols-2 gap-3">
           <TextFilter label="Case tag" name="tag" value={params.tag} />
           <TextFilter
