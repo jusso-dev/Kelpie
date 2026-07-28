@@ -6251,6 +6251,263 @@ export type IntegrationSyncWrite = typeof integrationSyncWrites.$inferSelect;
 
 export type User = typeof users.$inferSelect;
 export type TwoFactor = typeof twoFactors.$inferSelect;
+export const improvementRegisterTypeEnum = pgEnum("improvement_register_type", [
+  "detection_gap",
+  "logging_gap",
+  "integration_defect",
+  "playbook_defect",
+  "security_control_gap",
+  "process_failure",
+  "training_need",
+  "documentation_gap",
+]);
+
+export const improvementRegisterStatusEnum = pgEnum(
+  "improvement_register_status",
+  [
+    "open",
+    "in_review",
+    "accepted",
+    "in_progress",
+    "validated",
+    "closed",
+    "reopened",
+    "rejected",
+    "deferred",
+  ],
+);
+
+export const improvementRegisterSeverityEnum = pgEnum(
+  "improvement_register_severity",
+  ["low", "medium", "high", "critical"],
+);
+
+export const improvementLinkKindEnum = pgEnum("improvement_link_kind", [
+  "case",
+  "review",
+  "review_proposal",
+  "playbook",
+]);
+
+export const improvementSourceKindEnum = pgEnum("improvement_source_kind", [
+  "case",
+  "review",
+  "review_proposal",
+  "manual",
+]);
+
+export const improvementValidationMethodEnum = pgEnum(
+  "improvement_validation_method",
+  [
+    "retest",
+    "monitoring",
+    "peer_review",
+    "document_review",
+    "exercise",
+    "other",
+  ],
+);
+
+export const improvementTicketSyncStateEnum = pgEnum(
+  "improvement_ticket_sync_state",
+  ["none", "linked", "pending", "synced", "conflict", "failed"],
+);
+
+export const improvementRegisterEventTypeEnum = pgEnum(
+  "improvement_register_event_type",
+  [
+    "created",
+    "updated",
+    "status_changed",
+    "linked",
+    "unlinked",
+    "assigned",
+    "validated",
+    "closed",
+    "reopened",
+    "ticket_synced",
+    "ticket_conflict",
+  ],
+);
+
+export const improvementRegisterItems = pgTable(
+  "improvement_register_items",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    type: improvementRegisterTypeEnum("type").notNull(),
+    title: text("title").notNull(),
+    description: text("description"),
+    /** Non-sensitive structured evidence (checklist, refs, metrics). */
+    evidence: jsonb("evidence").notNull().default(sql`'{}'::jsonb`),
+    /**
+     * Optional sensitive notes from restricted source cases. Redacted for
+     * actors lacking view_sensitive on the source case.
+     */
+    sensitiveEvidence: jsonb("sensitive_evidence"),
+    severity: improvementRegisterSeverityEnum("severity")
+      .notNull()
+      .default("medium"),
+    residualRisk: text("residual_risk"),
+    status: improvementRegisterStatusEnum("status").notNull().default("open"),
+    ownerId: text("owner_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    /** Distinct linked cases (excluding pure proposal/playbook-only links). */
+    recurrenceCount: integer("recurrence_count").notNull().default(0),
+    linkedPlaybookId: text("linked_playbook_id").references(
+      () => playbooks.id,
+      { onDelete: "set null" },
+    ),
+    externalTicketRef: text("external_ticket_ref"),
+    externalTicketUrl: text("external_ticket_url"),
+    externalTicketSyncState: improvementTicketSyncStateEnum(
+      "external_ticket_sync_state",
+    )
+      .notNull()
+      .default("none"),
+    externalTicketSyncedAt: timestamp("external_ticket_synced_at", {
+      withTimezone: true,
+    }),
+    externalTicketSyncError: text("external_ticket_sync_error"),
+    validationMethod: improvementValidationMethodEnum("validation_method"),
+    validationEvidence: text("validation_evidence"),
+    validatedBy: text("validated_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    validatedAt: timestamp("validated_at", { withTimezone: true }),
+    closedBy: text("closed_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    sourceKind: improvementSourceKindEnum("source_kind")
+      .notNull()
+      .default("manual"),
+    /** Immutable origin case (set on create; never overwritten). */
+    sourceCaseId: text("source_case_id").references(() => cases.id, {
+      onDelete: "set null",
+    }),
+    /** Immutable origin post-incident review. */
+    sourceReviewId: text("source_review_id").references(
+      () => casePostIncidentReviews.id,
+      { onDelete: "set null" },
+    ),
+    /** Immutable origin #64 review improvement proposal. */
+    sourceProposalId: text("source_proposal_id").references(
+      () => reviewImprovementProposals.id,
+      { onDelete: "set null" },
+    ),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("improvement_register_items_org_status_idx").on(
+      t.organisationId,
+      t.status,
+    ),
+    index("improvement_register_items_org_type_idx").on(
+      t.organisationId,
+      t.type,
+    ),
+    index("improvement_register_items_org_owner_due_idx").on(
+      t.organisationId,
+      t.ownerId,
+      t.dueAt,
+    ),
+    index("improvement_register_items_source_case_idx").on(t.sourceCaseId),
+    index("improvement_register_items_source_proposal_idx").on(
+      t.sourceProposalId,
+    ),
+  ],
+);
+
+export const improvementRegisterLinks = pgTable(
+  "improvement_register_links",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    improvementId: text("improvement_id")
+      .notNull()
+      .references(() => improvementRegisterItems.id, { onDelete: "cascade" }),
+    linkKind: improvementLinkKindEnum("link_kind").notNull(),
+    targetId: text("target_id").notNull(),
+    isSource: boolean("is_source").notNull().default(false),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("improvement_register_links_improvement_idx").on(t.improvementId),
+    index("improvement_register_links_org_kind_target_idx").on(
+      t.organisationId,
+      t.linkKind,
+      t.targetId,
+    ),
+    uniqueIndex("improvement_register_links_unique_idx").on(
+      t.improvementId,
+      t.linkKind,
+      t.targetId,
+    ),
+  ],
+);
+
+export const improvementRegisterEvents = pgTable(
+  "improvement_register_events",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    improvementId: text("improvement_id")
+      .notNull()
+      .references(() => improvementRegisterItems.id, { onDelete: "cascade" }),
+    eventType: improvementRegisterEventTypeEnum("event_type").notNull(),
+    fromStatus: improvementRegisterStatusEnum("from_status"),
+    toStatus: improvementRegisterStatusEnum("to_status"),
+    actorId: text("actor_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    payload: jsonb("payload").notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("improvement_register_events_improvement_idx").on(
+      t.improvementId,
+      t.createdAt,
+    ),
+    index("improvement_register_events_org_type_idx").on(
+      t.organisationId,
+      t.eventType,
+    ),
+  ],
+);
+
+export type ImprovementRegisterItem =
+  typeof improvementRegisterItems.$inferSelect;
+
+export type ImprovementRegisterLink =
+  typeof improvementRegisterLinks.$inferSelect;
+
+export type ImprovementRegisterEvent =
+  typeof improvementRegisterEvents.$inferSelect;
+
 export type Case = typeof cases.$inferSelect;
 export type CaseTask = typeof caseTasks.$inferSelect;
 export type Observable = typeof observables.$inferSelect;

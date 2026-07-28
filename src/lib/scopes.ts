@@ -145,6 +145,16 @@ export const KNOWN_SCOPES = [
     label:
       "Execute registered investigation commands, cancel in-flight runs, and save results as evidence",
   },
+  {
+    value: "improvements:read",
+    label:
+      "Read the detection/control/process improvement register, suggestions, and dashboard",
+  },
+  {
+    value: "improvements:write",
+    label:
+      "Create, link, validate, close, reopen, and sync external ticket refs on improvement register items",
+  },
 ] as const;
 
 export type ScopeValue = (typeof KNOWN_SCOPES)[number]["value"];

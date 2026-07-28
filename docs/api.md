@@ -1253,3 +1253,56 @@ Saves the result as case evidence, preserving command name/version, redacted par
 ```
 Link result to org-scoped entities/alerts. Scope: `investigation:execute`.
 
+## Improvement register
+
+Durable detection, control, and process improvements linked to cases and post-incident reviews (issue #66). Distinct from lightweight review improvement proposals under `/api/v1/reviews/{id}/improvements` — promote those into the register with `POST /api/v1/improvement-register/from-proposal`.
+
+Types: `detection_gap`, `logging_gap`, `integration_defect`, `playbook_defect`, `security_control_gap`, `process_failure`, `training_need`, `documentation_gap`.
+
+Statuses: `open` → `in_review` → `accepted` → `in_progress` → `validated` → `closed`, plus `reopened`, `rejected`, `deferred`. Closing requires a validation method + evidence; reopen preserves prior closure history in events.
+
+### `GET|POST /api/v1/improvement-register`
+List (filters: `status`, `type`, `ownerId`, `caseId`, `overdueOnly`, `limit`) or create. Create may set immutable `caseId` / `reviewId` source links. Scope: `improvements:read` / `improvements:write`. When case-linked, case compartment access is required for create/edit.
+
+### `GET|PATCH /api/v1/improvement-register/{id}`
+Read or update fields (title, description, evidence, severity, residual risk, status, owner, due date, playbook). Closing and reopening use dedicated endpoints. Sensitive evidence is redacted unless the actor has `view_sensitive` on a linked case.
+
+### `POST /api/v1/improvement-register/{id}/links` / `DELETE .../links/{linkId}`
+Link additional cases, reviews, proposals, or playbooks. Multiple cases raise `recurrenceCount` (distinct case links). Immutable source links (`isSource: true`) cannot be deleted.
+
+### `POST /api/v1/improvement-register/{id}/close`
+```json
+{ "validationMethod": "retest", "validationEvidence": "Detection rule shipped; retest case CASE-123 clean." }
+```
+Validation methods: `retest`, `monitoring`, `peer_review`, `document_review`, `exercise`, `other`. Records actor + timestamp.
+
+### `POST /api/v1/improvement-register/{id}/reopen`
+```json
+{ "reason": "Recurred in CASE-456" }
+```
+Clears current validation fields but retains prior closure/validation in the event log (`priorClosure` payload).
+
+### `POST /api/v1/improvement-register/{id}/ticket-sync`
+Bounded external ticket reference only:
+```json
+{ "externalTicketRef": "ENG-42", "externalTicketUrl": "https://…", "syncState": "synced" }
+```
+or `{ "conflict": true, "error": "…" }`. Never replaces Kelpie owner, links, status, recurrence, or audit history.
+
+### `GET /api/v1/improvement-register/{id}/events`
+Append-only lifecycle history (created, linked, validated, closed, reopened, ticket_synced, ticket_conflict, …).
+
+### `POST /api/v1/improvement-register/suggestions`
+```json
+{ "type": "detection_gap", "title": "Missing EDR telemetry on Linux fleet", "description": "…" }
+```
+Returns ranked candidates with `matchedFields` explanations. Response always includes `"autoMerge": false` — suggestions never merge records.
+
+### `GET /api/v1/improvement-register/dashboard`
+Recurring categories (`byType`, `highRecurrence`), severity, owners, overdue actions, validation-pending work, and totals.
+
+### `POST /api/v1/improvement-register/from-proposal`
+```json
+{ "proposalId": "pir_imp_…", "severity": "high", "dueAt": "2026-08-01T00:00:00.000Z" }
+```
+Promotes a #64 review improvement proposal into the register with immutable source links. Idempotent on `proposalId`. Marks the proposal `accepted` when still proposed/deferred.
