@@ -1,8 +1,14 @@
 import { db } from "@/db";
-import { timelineEvents, users } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { customFieldDefinitions, timelineEvents, users } from "@/db/schema";
+import { and, eq, desc } from "drizzle-orm";
 import { format } from "date-fns";
+import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/session";
+import {
+  authorizeCase,
+  redactTimelineEventPayload,
+  resolveUserActor,
+} from "@/lib/access";
 
 type Props = { params: Promise<{ id: string }> };
 
@@ -23,25 +29,49 @@ const EVENT_LABELS: Record<string, string> = {
   automation_run: "Agent automation",
   attack_mapping_changed: "ATT&CK mapping",
   attack_story_changed: "Attack story",
+  custom_field_changed: "Custom field",
   custom: "Update",
 };
 
 export default async function CaseTimelinePage({ params }: Props) {
   const { id } = await params;
-  await requireUser();
-  const events = await db
-    .select({
-      id: timelineEvents.id,
-      eventType: timelineEvents.eventType,
-      payload: timelineEvents.payload,
-      occurredAt: timelineEvents.occurredAt,
-      actorName: users.name,
-    })
-    .from(timelineEvents)
-    .leftJoin(users, eq(users.id, timelineEvents.actorId))
-    .where(eq(timelineEvents.caseId, id))
-    .orderBy(desc(timelineEvents.occurredAt))
-    .limit(500);
+  const user = await requireUser();
+  const actor = await resolveUserActor(user.organisationId, user.id);
+  if (!actor) notFound();
+  const gate = await authorizeCase(
+    user.organisationId,
+    id,
+    actor,
+    "view_metadata",
+  );
+  if (!gate.ok) notFound();
+
+  const [events, sensitiveDefs] = await Promise.all([
+    db
+      .select({
+        id: timelineEvents.id,
+        eventType: timelineEvents.eventType,
+        payload: timelineEvents.payload,
+        occurredAt: timelineEvents.occurredAt,
+        actorName: users.name,
+      })
+      .from(timelineEvents)
+      .leftJoin(users, eq(users.id, timelineEvents.actorId))
+      .where(eq(timelineEvents.caseId, id))
+      .orderBy(desc(timelineEvents.occurredAt))
+      .limit(500),
+    db
+      .select({ key: customFieldDefinitions.key })
+      .from(customFieldDefinitions)
+      .where(
+        and(
+          eq(customFieldDefinitions.organisationId, user.organisationId),
+          eq(customFieldDefinitions.sensitive, true),
+        ),
+      ),
+  ]);
+
+  const sensitiveFieldKeys = new Set(sensitiveDefs.map((d) => d.key));
 
   return (
     <div className="kelpie-card p-5">
@@ -55,25 +85,33 @@ export default async function CaseTimelinePage({ params }: Props) {
         <p className="text-sm text-slate-500">No events yet.</p>
       ) : (
         <ol className="space-y-3">
-          {events.map((e) => (
-            <li
-              key={e.id}
-              className="flex gap-3 border-b border-[color:var(--color-navy-800)] pb-3 last:border-b-0 last:pb-0"
-            >
-              <span className="text-[10px] uppercase tracking-wider text-[color:var(--color-tan-400)] font-medium w-32 shrink-0 pt-0.5">
-                {EVENT_LABELS[e.eventType] ?? e.eventType}
-              </span>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm text-slate-200">
-                  {summarisePayload(e.eventType, e.payload as Record<string, unknown>)}
+          {events.map((e) => {
+            const payload = redactTimelineEventPayload(
+              e.eventType,
+              e.payload as Record<string, unknown>,
+              gate.permissions,
+              { sensitiveFieldKeys },
+            );
+            return (
+              <li
+                key={e.id}
+                className="flex gap-3 border-b border-[color:var(--color-navy-800)] pb-3 last:border-b-0 last:pb-0"
+              >
+                <span className="text-[10px] uppercase tracking-wider text-[color:var(--color-tan-400)] font-medium w-32 shrink-0 pt-0.5">
+                  {EVENT_LABELS[e.eventType] ?? e.eventType}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-slate-200">
+                    {summarisePayload(e.eventType, payload)}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-0.5">
+                    {format(e.occurredAt, "PP p")} ·{" "}
+                    {e.actorName ?? "system"}
+                  </div>
                 </div>
-                <div className="text-xs text-slate-500 mt-0.5">
-                  {format(e.occurredAt, "PP p")} ·{" "}
-                  {e.actorName ?? "system"}
-                </div>
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ol>
       )}
     </div>
@@ -122,6 +160,13 @@ function summarisePayload(
       return <>{String(payload.playbook_name ?? "")} — {String(payload.steps ?? 0)} steps</>;
     case "comment":
       return <>{String(payload.preview ?? "")}</>;
+    case "custom_field_changed":
+      return (
+        <>
+          {String(payload.label ?? payload.key ?? "Field")} →{" "}
+          <code>{String(payload.value ?? "")}</code>
+        </>
+      );
     case "case_created":
       return (
         <>

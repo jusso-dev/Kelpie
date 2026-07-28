@@ -36,5 +36,6 @@ export {
   filterCasesForActor,
   redactCustomFields,
   redactContentBlock,
+  redactTimelineEventPayload,
   type AuthorizeCaseResult,
 } from "./authorize";

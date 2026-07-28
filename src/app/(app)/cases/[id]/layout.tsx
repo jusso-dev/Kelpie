@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { requireUser } from "@/lib/session";
+import { authorizeCase, resolveUserActor } from "@/lib/access";
 import {
   SeverityBadge,
   StatusBadge,
@@ -36,6 +37,18 @@ type Props = {
 export default async function CaseLayout({ children, params }: Props) {
   const { id } = await params;
   const user = await requireUser();
+  const actor = await resolveUserActor(user.organisationId, user.id);
+  if (!actor) notFound();
+  // view_metadata required for case shell; missing/forbidden → identical 404
+  // so compartment denials are not distinguishable from unknown ids.
+  const gate = await authorizeCase(
+    user.organisationId,
+    id,
+    actor,
+    "view_metadata",
+  );
+  if (!gate.ok) notFound();
+
   const [c] = await db
     .select()
     .from(cases)

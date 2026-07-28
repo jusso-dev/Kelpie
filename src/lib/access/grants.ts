@@ -173,6 +173,16 @@ export async function createAccessGrant(
   const caseRow = await requireCase(organisationId, caseId);
   const reason = assertReason(input.reason);
   const permissions = normalisePermissions(input.permissions);
+  // Only organisation admins may grant administer_access (privilege escalation guard).
+  if (
+    permissions.includes("administer_access") &&
+    actor.role !== "admin"
+  ) {
+    throw new AccessError(
+      "Only organisation admins can grant administer_access",
+      403,
+    );
+  }
   const objectType = input.objectType ?? "case";
   const objectId = objectType === "case" ? null : (input.objectId ?? null);
   if (objectType !== "case" && !objectId) {
@@ -375,8 +385,11 @@ export async function breakGlassAccess(
       "edit",
     ],
   );
-  // Break-glass never grants administer_access.
-  const filtered = permissions.filter((p) => p !== "administer_access");
+  // Break-glass never grants administer_access or export (export is
+  // higher-risk and must be explicitly granted by an administrator).
+  const filtered = permissions.filter(
+    (p) => p !== "administer_access" && p !== "export",
+  );
   if (filtered.length === 0) {
     throw new AccessError("No valid break-glass permissions", 400);
   }

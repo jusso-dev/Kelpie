@@ -5,6 +5,11 @@ import { ArrowUpRight, Filter, Search, X } from "lucide-react";
 import { db } from "@/db";
 import { cases, queues, teamMembers, users } from "@/db/schema";
 import { requireUser } from "@/lib/session";
+import {
+  caseKnowExistsSql,
+  filterCasesForActor,
+  resolveUserActor,
+} from "@/lib/access";
 import { caseSlaAtRiskSql } from "@/lib/sla";
 import { listQueuesCore, listTeamsCore } from "@/lib/queues-core";
 import { listWatchedCaseIdsCore } from "@/lib/watchers-core";
@@ -101,6 +106,10 @@ export default async function CasesPage({
   searchParams: RawSearchParams;
 }) {
   const user = await requireUser();
+  const accessActor = await resolveUserActor(user.organisationId, user.id);
+  if (!accessActor) {
+    throw new Error("Unable to resolve access actor for session user");
+  }
   const actor: CaseViewActor = {
     id: user.id,
     organisationId: user.organisationId,
@@ -243,7 +252,11 @@ export default async function CasesPage({
     userId: user.id,
     watchedCaseIds,
   };
-  const filters = buildCaseFilterClauses(currentConfig, filterCtx);
+  const filters = [
+    ...buildCaseFilterClauses(currentConfig, filterCtx),
+    // Compartment: drop cases the actor must not know exist (#61).
+    caseKnowExistsSql(accessActor),
+  ];
   const where = and(...filters);
 
   const pageSize = currentConfig.pageSize;
@@ -303,6 +316,13 @@ export default async function CasesPage({
     .orderBy(...orderBy)
     .limit(pageSize)
     .offset((page - 1) * pageSize);
+
+  // Redact titles/summaries the actor can know exist but not fully view.
+  const visibleRows = await filterCasesForActor(
+    user.organisationId,
+    accessActor,
+    rows,
+  );
 
   const columns: CaseViewColumn[] =
     currentConfig.columns.length > 0
@@ -494,7 +514,7 @@ export default async function CasesPage({
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? (
+            {visibleRows.length === 0 ? (
               <tr>
                 <td
                   colSpan={(canBulk ? 1 : 0) + columns.length}
@@ -513,7 +533,7 @@ export default async function CasesPage({
                 </td>
               </tr>
             ) : (
-              rows.map((c) => (
+              visibleRows.map((c) => (
                 <tr key={c.id}>
                   {canBulk ? (
                     <td>

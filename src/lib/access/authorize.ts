@@ -237,3 +237,42 @@ export function redactContentBlock<
     redacted: true,
   } as T & { redacted: boolean };
 }
+
+/**
+ * Redact timeline event payloads that may carry sensitive custom-field values
+ * or comment previews. Safe for both new events (value already redacted at
+ * write) and legacy rows that stored raw values.
+ */
+export function redactTimelineEventPayload(
+  eventType: string,
+  payload: Record<string, unknown> | null | undefined,
+  permissions: Set<AccessPermission>,
+  opts?: {
+    /** Keys of custom fields known to be sensitive in this org. */
+    sensitiveFieldKeys?: Set<string>;
+  },
+): Record<string, unknown> {
+  if (!payload || typeof payload !== "object") return {};
+  const out = { ...payload };
+
+  if (eventType === "custom_field_changed") {
+    const key = typeof out.key === "string" ? out.key : null;
+    const markedSensitive =
+      out.sensitive === true ||
+      (key !== null && opts?.sensitiveFieldKeys?.has(key) === true);
+    if (markedSensitive && !hasPermission(permissions, "view_sensitive")) {
+      out.value = REDACTED_PLACEHOLDER;
+      out.sensitive = true;
+    }
+    return out;
+  }
+
+  if (eventType === "comment") {
+    if (out.sensitive === true && !hasPermission(permissions, "view_sensitive")) {
+      out.preview = REDACTED_PLACEHOLDER;
+    }
+    return out;
+  }
+
+  return out;
+}

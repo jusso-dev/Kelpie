@@ -11,6 +11,7 @@ import { AlertTriangle, CheckCircle2, Filter, ListChecks, X } from "lucide-react
 import { db } from "@/db";
 import { cases, caseTasks, users } from "@/db/schema";
 import { requireUser } from "@/lib/session";
+import { caseKnowExistsSql, resolveUserActor } from "@/lib/access";
 import TaskInboxRow from "@/components/task-inbox-row";
 
 const PAGE_SIZE = 50;
@@ -89,6 +90,8 @@ export default async function TasksPage({
   searchParams: RawSearchParams;
 }) {
   const user = await requireUser();
+  const actor = await resolveUserActor(user.organisationId, user.id);
+  if (!actor) throw new Error("User actor could not be resolved");
   const [rawParams, team] = await Promise.all([
     searchParams,
     db
@@ -98,7 +101,11 @@ export default async function TasksPage({
       .orderBy(asc(users.name)),
   ]);
   const params = normaliseParams(rawParams, team);
-  const filters = [eq(cases.organisationId, user.organisationId)];
+  const filters = [
+    eq(cases.organisationId, user.organisationId),
+    // Compartment filter via cases join (issue #61).
+    caseKnowExistsSql(actor),
+  ];
 
   if (params.status === "open") {
     filters.push(sql`${caseTasks.status} <> 'done'`);
@@ -127,6 +134,10 @@ export default async function TasksPage({
   }
 
   const where = and(...filters);
+  const orgKnowExists = and(
+    eq(cases.organisationId, user.organisationId),
+    caseKnowExistsSql(actor),
+  );
   const [metrics] = await db
     .select({
       total: count(),
@@ -137,7 +148,7 @@ export default async function TasksPage({
     })
     .from(caseTasks)
     .innerJoin(cases, eq(cases.id, caseTasks.caseId))
-    .where(eq(cases.organisationId, user.organisationId));
+    .where(orgKnowExists);
 
   const [filtered] = await db
     .select({ total: count() })

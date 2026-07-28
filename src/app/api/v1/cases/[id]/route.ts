@@ -12,6 +12,7 @@ import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
 import {
   authorizeCase,
   redactCustomFields,
+  redactTimelineEventPayload,
   resolveTokenActor,
 } from "@/lib/access";
 import {
@@ -90,11 +91,24 @@ export async function GET(
   const customFields: Record<string, unknown> = {};
   for (const f of redactedFields) customFields[f.key] = f.value;
 
+  const sensitiveFieldKeys = new Set(
+    customFieldRows.filter((f) => f.sensitive).map((f) => f.key),
+  );
+  const recentTimeline = timeline.map((ev) => ({
+    ...ev,
+    payload: redactTimelineEventPayload(
+      ev.eventType,
+      ev.payload as Record<string, unknown>,
+      gate.permissions,
+      { sensitiveFieldKeys },
+    ),
+  }));
+
   return NextResponse.json({
     ...c,
     observables: obs,
     tasks,
-    recent_timeline: timeline,
+    recent_timeline: recentTimeline,
     custom_fields: customFields,
     custom_fields_detail: redactedFields,
     access: {
