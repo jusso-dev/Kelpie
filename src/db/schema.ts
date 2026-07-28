@@ -481,12 +481,30 @@ export const cases = pgTable(
       onDelete: "set null",
     }),
     containedAt: timestamp("contained_at", { withTimezone: true }),
+    // Set on first transition into eradicated (mirrors containedAt / resolvedAt).
+    eradicatedAt: timestamp("eradicated_at", { withTimezone: true }),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     slaState: jsonb("sla_state").notNull().default(sql`'{}'::jsonb`),
     version: integer("version").notNull().default(0),
     sourceSystem: text("source_system"),
     sourceReference: text("source_reference"),
     sourceUrl: text("source_url"),
+    // Template the case was opened from, when known. Used to resolve
+    // template-scoped case-closure policies (issue #57). Null for free-form
+    // or connector-created cases.
+    templateId: text("template_id").references(() => caseTemplates.id, {
+      onDelete: "set null",
+    }),
+    // Denormalised latest-closure fields for list/detail display. Full
+    // history lives in case_closure_snapshots and survives reopen.
+    closureDetermination: text("closure_determination"),
+    rootCause: text("root_cause"),
+    businessImpact: text("business_impact"),
+    lessonsLearned: text("lessons_learned"),
+    closedBy: text("closed_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    activeClosureSnapshotId: text("active_closure_snapshot_id"),
     // Team queue ownership, distinct from `assigneeId` (the individual
     // primary owner). A case can sit in a queue with no individual owner at
     // all.
@@ -1024,6 +1042,10 @@ export const caseTasks = pgTable(
       onDelete: "set null",
     }),
     playbookStepId: text("playbook_step_id"),
+    // When true, a case-closure policy with `required_tasks_complete` will
+    // refuse close until this task is `done` (issue #57). Playbook steps
+    // that carry `isRequired: true` stamp this on task creation.
+    isRequired: boolean("is_required").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -1872,6 +1894,174 @@ export const caseTemplates = pgTable(
       t.organisationId,
       t.catalogueKey,
     ),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Case closure policies (issue #57)                                          */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Versioned case-closure policies. Behaviour lives only on immutable
+ * `case_closure_policy_versions` rows: editing requirements always inserts a
+ * new version and bumps `currentVersion`. Historical closes keep the version
+ * id they evaluated, so a later edit never silently rewrites past requirements.
+ * A policy is either org-default (`templateId` null + `isDefault`) or
+ * template-scoped (`templateId` set). Only one default per org, and only one
+ * active policy per template, are enforced at the application layer.
+ */
+export const caseClosurePolicies = pgTable(
+  "case_closure_policies",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    templateId: text("template_id").references(() => caseTemplates.id, {
+      onDelete: "cascade",
+    }),
+    isDefault: boolean("is_default").notNull().default(false),
+    isActive: boolean("is_active").notNull().default(true),
+    currentVersion: integer("current_version").notNull().default(1),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("case_closure_policies_org_idx").on(t.organisationId),
+    index("case_closure_policies_org_template_idx").on(
+      t.organisationId,
+      t.templateId,
+    ),
+    uniqueIndex("case_closure_policies_org_default_idx")
+      .on(t.organisationId)
+      .where(sql`${t.isDefault} = true and ${t.isActive} = true`),
+    uniqueIndex("case_closure_policies_org_template_active_idx")
+      .on(t.organisationId, t.templateId)
+      .where(sql`${t.templateId} is not null and ${t.isActive} = true`),
+  ],
+);
+
+/**
+ * Immutable snapshot of a policy's requirements at a point in time. The
+ * `requirements` JSON is the only shape the shared closure evaluator reads —
+ * UI, REST, and automation all resolve a version row and pass it through the
+ * same path. See `src/lib/closure/types.ts`.
+ */
+export const caseClosurePolicyVersions = pgTable(
+  "case_closure_policy_versions",
+  {
+    id: text("id").primaryKey(),
+    policyId: text("policy_id")
+      .notNull()
+      .references(() => caseClosurePolicies.id, { onDelete: "cascade" }),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    /** Array of ClosureRequirementConfig (validated in policy-core). */
+    requirements: jsonb("requirements").notNull().default(sql`'[]'::jsonb`),
+    /**
+     * When true, a privileged override also needs a second distinct approver
+     * (two-person rule). Configured per version so historical closes keep the
+     * gate they were closed under.
+     */
+    requireTwoPersonOverride: boolean("require_two_person_override")
+      .notNull()
+      .default(false),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("case_closure_policy_versions_policy_ver_idx").on(
+      t.policyId,
+      t.version,
+    ),
+    index("case_closure_policy_versions_org_idx").on(t.organisationId),
+  ],
+);
+
+/**
+ * One row per successful close. Reopen never deletes or mutates the
+ * evaluation payload — it only stamps reopenedAt/reopenedBy/reopenReason so
+ * prior closure decisions stay reportable and auditable.
+ */
+export const caseClosureSnapshots = pgTable(
+  "case_closure_snapshots",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    policyId: text("policy_id").references(() => caseClosurePolicies.id, {
+      onDelete: "set null",
+    }),
+    policyVersionId: text("policy_version_id").references(
+      () => caseClosurePolicyVersions.id,
+      { onDelete: "set null" },
+    ),
+    policyVersion: integer("policy_version"),
+    disposition: text("disposition").notNull(),
+    determination: text("determination"),
+    rootCause: text("root_cause"),
+    conclusion: text("conclusion").notNull(),
+    businessImpact: text("business_impact"),
+    lessonsLearned: text("lessons_learned"),
+    /** Full evaluated checklist: ClosureRequirementResult[]. */
+    requirementsEvaluated: jsonb("requirements_evaluated")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    failedRequirements: jsonb("failed_requirements")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    closedBy: text("closed_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    closedAt: timestamp("closed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    approverId: text("approver_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    wasOverride: boolean("was_override").notNull().default(false),
+    overrideReason: text("override_reason"),
+    overrideActorId: text("override_actor_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    /** Failed-requirement checklist captured at override time. */
+    overrideFailedSnapshot: jsonb("override_failed_snapshot"),
+    caseVersionAtClose: integer("case_version_at_close").notNull(),
+    reopenedAt: timestamp("reopened_at", { withTimezone: true }),
+    reopenedBy: text("reopened_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    reopenReason: text("reopen_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("case_closure_snapshots_case_idx").on(t.caseId, t.closedAt),
+    index("case_closure_snapshots_org_idx").on(t.organisationId, t.closedAt),
+    index("case_closure_snapshots_active_idx")
+      .on(t.caseId)
+      .where(sql`${t.reopenedAt} is null`),
   ],
 );
 
@@ -3366,6 +3556,10 @@ export type CaseWatcher = typeof caseWatchers.$inferSelect;
 export type ShiftHandoff = typeof shiftHandoffs.$inferSelect;
 export type EscalationPolicy = typeof escalationPolicies.$inferSelect;
 export type EscalationPolicyRun = typeof escalationPolicyRuns.$inferSelect;
+export type CaseClosurePolicy = typeof caseClosurePolicies.$inferSelect;
+export type CaseClosurePolicyVersion =
+  typeof caseClosurePolicyVersions.$inferSelect;
+export type CaseClosureSnapshot = typeof caseClosureSnapshots.$inferSelect;
 export type BulkOperation = typeof bulkOperations.$inferSelect;
 export type AttackCatalogVersion = typeof attackCatalogVersions.$inferSelect;
 export type AttackTechniqueRow = typeof attackTechniques.$inferSelect;

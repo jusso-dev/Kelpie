@@ -118,6 +118,13 @@ async function applyOne(
     }
     case "set_status": {
       if (!params.status) throw new Error("status is required");
+      // Closing requires the policy-aware close path (issue #57). Bulk status
+      // cannot supply disposition / override, so refuse `closed` here.
+      if (params.status === "closed") {
+        throw new Error(
+          "Bulk set_status cannot close cases; use the close case action with disposition",
+        );
+      }
       await setCaseStatusCore(organisationId, actorId, caseId, params.status);
       return;
     }

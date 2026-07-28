@@ -64,7 +64,8 @@
     "test:attack-mapping-api": "tsx scripts/test-attack-mapping-api.ts",
     "test:content-blocks-core": "tsx scripts/test-content-blocks-core.ts",
     "test:visual": "tsx scripts/visual-smoke.ts",
-    "test:token-scopes": "tsx scripts/test-token-scopes.ts"
+    "test:token-scopes": "tsx scripts/test-token-scopes.ts",
+    "test:case-closure": "tsx scripts/test-case-closure.ts"
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "^3.1095.0",
