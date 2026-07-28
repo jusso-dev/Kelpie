@@ -99,6 +99,14 @@ export const KNOWN_SCOPES = [
     label:
       "Pause/resume integrations, run connection tests, resolve sync conflicts, and change sync policy",
   },
+  {
+    value: "case_views:read",
+    label: "Read saved case views, counts, and widgets",
+  },
+  {
+    value: "case_views:write",
+    label: "Create, update, delete, and set defaults for saved case views",
+  },
 ] as const;
 
 export type ScopeValue = (typeof KNOWN_SCOPES)[number]["value"];
