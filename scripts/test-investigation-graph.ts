@@ -339,18 +339,25 @@ async function seedInvestigationGraph() {
   });
 
   // Stored analyst edge with full provenance
-  const stored = await createGraphEdgeCore(orgAId, userAId, caseA, {
-    sourceNodeType: "ip",
-    sourceNodeId: entity.entity.id,
-    targetNodeType: "domain",
-    targetNodeId: domain.entity.id,
-    edgeType: "resolved_to",
-    confidence: 75,
-    provenance: "analyst",
-    source: "manual_investigation",
-    observedAtStart: "2026-07-01T10:06:00.000Z",
-    reason: "PTR and passive DNS agree",
-  });
+  const seedPerms = await permissionsFor(orgAId, caseA, actorA());
+  const stored = await createGraphEdgeCore(
+    orgAId,
+    userAId,
+    caseA,
+    {
+      sourceNodeType: "ip",
+      sourceNodeId: entity.entity.id,
+      targetNodeType: "domain",
+      targetNodeId: domain.entity.id,
+      edgeType: "resolved_to",
+      confidence: 75,
+      provenance: "analyst",
+      source: "manual_investigation",
+      observedAtStart: "2026-07-01T10:06:00.000Z",
+      reason: "PTR and passive DNS agree",
+    },
+    { actor: actorA(), permissions: seedPerms },
+  );
 
   // ATT&CK mapping + story entry
   await db.insert(attackTechniqueMappings).values({
@@ -435,6 +442,38 @@ async function testBuildAndFilter(seed: Awaited<ReturnType<typeof seedInvestigat
     graph.edges.some((e) => e.edgeType === "belongs_to_case" && !e.stored),
     "derived belongs_to_case edge present",
   );
+  // One directed case↔alert edge only (belongs_to_case); no invented reverse.
+  const alertCaseEdges = graph.edges.filter(
+    (e) =>
+      !e.stored &&
+      e.derivedFrom === "case_alerts" &&
+      ((e.sourceNodeId.startsWith("alert:") && e.targetNodeId.startsWith("case:")) ||
+        (e.sourceNodeId.startsWith("case:") && e.targetNodeId.startsWith("alert:"))),
+  );
+  assert.equal(alertCaseEdges.length, 1, "exactly one case↔alert derived edge");
+  assert.equal(alertCaseEdges[0]!.edgeType, "belongs_to_case");
+  assert.ok(
+    !graph.edges.some((e) => e.edgeType === "triggered_alert" && !e.stored),
+    "no invented triggered_alert reverse edge",
+  );
+  // entity_id on evidence is related_to, not typed observed_on.
+  assert.ok(
+    graph.edges.some(
+      (e) =>
+        e.derivedFrom === "evidence_items.entity_id" &&
+        e.edgeType === "related_to" &&
+        e.sourceNodeId === `evidence:${seed.evidenceAId}`,
+    ),
+    "evidence entity_id derives related_to only",
+  );
+  assert.ok(
+    !graph.edges.some(
+      (e) =>
+        e.derivedFrom === "evidence_items.entity_id" &&
+        e.edgeType === "observed_on",
+    ),
+    "evidence entity_id does not invent observed_on",
+  );
   assert.ok(
     graph.edges.some(
       (e) =>
@@ -450,6 +489,26 @@ async function testBuildAndFilter(seed: Awaited<ReturnType<typeof seedInvestigat
     graph.edges.every((e) => e.provenance && e.source),
     "every edge exposes provenance and source",
   );
+
+  // Timeline must not leak endpoint types/ids (audit side-channel).
+  const [createdTl] = await db
+    .select()
+    .from(timelineEvents)
+    .where(
+      and(
+        eq(timelineEvents.caseId, caseA),
+        eq(timelineEvents.eventType, "investigation_graph_edge_created"),
+      ),
+    )
+    .limit(1);
+  assert.ok(createdTl, "edge create wrote timeline event");
+  const tlPayload = createdTl.payload as Record<string, unknown>;
+  assert.equal(tlPayload.edgeId, seed.storedEdgeId);
+  assert.equal(tlPayload.edgeType, "resolved_to");
+  assert.ok(!("sourceNodeType" in tlPayload), "timeline omits sourceNodeType");
+  assert.ok(!("sourceNodeId" in tlPayload), "timeline omits sourceNodeId");
+  assert.ok(!("targetNodeType" in tlPayload), "timeline omits targetNodeType");
+  assert.ok(!("targetNodeId" in tlPayload), "timeline omits targetNodeId");
 
   // minConfidence filters known low confidence but keeps null/structural
   const filtered = await buildCaseGraphCore({
@@ -598,6 +657,49 @@ async function testAccessRedaction(seed: Awaited<ReturnType<typeof seedInvestiga
     "sensitive evidence visible with view_sensitive",
   );
 
+  // createGraphEdgeCore must 404 on sensitive evidence without view_sensitive.
+  await assert.rejects(
+    () =>
+      createGraphEdgeCore(
+        orgAId,
+        userAId,
+        caseA,
+        {
+          sourceNodeType: "evidence",
+          sourceNodeId: seed.evidenceBId,
+          targetNodeType: "case",
+          targetNodeId: caseA,
+          edgeType: "related_to",
+          provenance: "analyst",
+          source: "sensitive-edge-attempt",
+        },
+        { actor: actorA(), permissions: permsNoSensitive },
+      ),
+    (err: unknown) =>
+      err instanceof InvestigationGraphError &&
+      err.status === 404 &&
+      err.message === "Evidence item not found on case",
+  );
+
+  // With view_sensitive, create against the same evidence succeeds.
+  const allowed = await createGraphEdgeCore(
+    orgAId,
+    userAId,
+    caseA,
+    {
+      sourceNodeType: "evidence",
+      sourceNodeId: seed.evidenceBId,
+      targetNodeType: "case",
+      targetNodeId: caseA,
+      edgeType: "related_to",
+      provenance: "analyst",
+      source: "sensitive-edge-ok",
+    },
+    { actor: actorA(), permissions: permsSensitive },
+  );
+  assert.ok(allowed.id);
+  await removeGraphEdgeCore(orgAId, userAId, caseA, allowed.id);
+
   console.log("ok: access redaction omits sensitive evidence from topology/counts");
 }
 
@@ -621,15 +723,21 @@ async function testTenantIsolation(seed: Awaited<ReturnType<typeof seedInvestiga
   // Cross-tenant create must fail
   await assert.rejects(
     () =>
-      createGraphEdgeCore(orgBId, userBId, caseB, {
-        sourceNodeType: "case",
-        sourceNodeId: caseB,
-        targetNodeType: "ip",
-        targetNodeId: seed.entityId,
-        edgeType: "related_to",
-        provenance: "analyst",
-        source: "cross-tenant-attempt",
-      }),
+      createGraphEdgeCore(
+        orgBId,
+        userBId,
+        caseB,
+        {
+          sourceNodeType: "case",
+          sourceNodeId: caseB,
+          targetNodeType: "ip",
+          targetNodeId: seed.entityId,
+          edgeType: "related_to",
+          provenance: "analyst",
+          source: "cross-tenant-attempt",
+        },
+        { actor: actorB(), permissions: permsB },
+      ),
     (err: unknown) =>
       err instanceof InvestigationGraphError && err.status === 404,
   );

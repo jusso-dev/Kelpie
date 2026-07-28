@@ -161,6 +161,7 @@ export async function POST(req: Request, { params }: Params) {
       user?.id ?? auth.token.createdBy,
       id,
       parsed.data,
+      { actor, permissions: gate.permissions },
     );
     return NextResponse.json({ edge }, { status: 201 });
   } catch (err) {

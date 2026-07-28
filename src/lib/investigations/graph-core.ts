@@ -444,11 +444,70 @@ export async function assertNodeInCase(
   }
 }
 
+/**
+ * Same redaction gate as buildCaseGraphCore: sensitive evidence endpoints
+ * require view_sensitive (or an object grant). Fail closed with 404 — no
+ * existence oracle for restricted evidence via edge create.
+ */
+async function assertEvidenceEndpointAccessible(
+  organisationId: string,
+  caseId: string,
+  evidenceId: string,
+  access: {
+    actor: AccessActor;
+    permissions: Set<AccessPermission>;
+  },
+): Promise<void> {
+  const [row] = await db
+    .select({
+      id: evidenceItems.id,
+      attachmentId: attachments.id,
+      attachmentSensitive: attachments.sensitive,
+    })
+    .from(evidenceItems)
+    .leftJoin(
+      attachments,
+      and(
+        eq(attachments.id, evidenceItems.attachmentId),
+        eq(attachments.organisationId, organisationId),
+      ),
+    )
+    .where(
+      and(
+        eq(evidenceItems.organisationId, organisationId),
+        eq(evidenceItems.caseId, caseId),
+        eq(evidenceItems.id, evidenceId),
+      ),
+    )
+    .limit(1);
+  if (!row) {
+    throw new InvestigationGraphError("Evidence item not found on case", 404);
+  }
+  if (!row.attachmentSensitive) return;
+
+  const accessCtx = await loadCaseAccessContext(organisationId, caseId);
+  const grants = accessCtx?.grants ?? [];
+  const canSee = canViewSensitiveObject(access.permissions, {
+    sensitive: true,
+    objectType: "evidence",
+    objectId: row.attachmentId ?? row.id,
+    grants,
+    actor: access.actor,
+  });
+  if (!canSee) {
+    throw new InvestigationGraphError("Evidence item not found on case", 404);
+  }
+}
+
 export async function createGraphEdgeCore(
   organisationId: string,
   actorId: string | null,
   caseId: string,
   input: GraphEdgeCreateInput,
+  access: {
+    actor: AccessActor;
+    permissions: Set<AccessPermission>;
+  },
 ): Promise<InvestigationGraphEdge> {
   validateGraphEdgeInput(input);
   const caseRow = await loadCaseInOrg(caseId, organisationId);
@@ -466,6 +525,24 @@ export async function createGraphEdgeCore(
     input.targetNodeType,
     input.targetNodeId,
   );
+
+  // Gate sensitive evidence endpoints the same way as graph build.
+  if (input.sourceNodeType === "evidence") {
+    await assertEvidenceEndpointAccessible(
+      organisationId,
+      caseId,
+      input.sourceNodeId,
+      access,
+    );
+  }
+  if (input.targetNodeType === "evidence") {
+    await assertEvidenceEndpointAccessible(
+      organisationId,
+      caseId,
+      input.targetNodeId,
+      access,
+    );
+  }
 
   const id = newId("igedge");
   try {
@@ -498,6 +575,7 @@ export async function createGraphEdgeCore(
       .returning();
     if (!row) throw new InvestigationGraphError("Failed to create edge", 500);
 
+    // Opaque timeline payload only — no endpoint types/ids (audit side-channel).
     await writeTimelineEvent({
       caseId,
       actorId,
@@ -507,10 +585,6 @@ export async function createGraphEdgeCore(
         edgeType: row.edgeType,
         provenance: row.provenance,
         source: row.source,
-        sourceNodeType: row.sourceNodeType,
-        sourceNodeId: row.sourceNodeId,
-        targetNodeType: row.targetNodeType,
-        targetNodeId: row.targetNodeId,
         confidence: row.confidence,
       },
     });
@@ -626,8 +700,6 @@ export async function buildCaseGraphCore(opts: {
   const caseRow = await loadCaseInOrg(caseId, organisationId);
   if (!caseRow) throw new InvestigationGraphError("Case not found", 404);
 
-  const canViewSensitive = hasPermission(permissions, "view_sensitive");
-
   // ── Load source rows (org + case scoped) ──────────────────────────────
   const caseAlertRows = await db
     .select({
@@ -688,7 +760,13 @@ export async function buildCaseGraphCore(opts: {
       attachmentId: attachments.id,
     })
     .from(evidenceItems)
-    .leftJoin(attachments, eq(attachments.id, evidenceItems.attachmentId))
+    .leftJoin(
+      attachments,
+      and(
+        eq(attachments.id, evidenceItems.attachmentId),
+        eq(attachments.organisationId, organisationId),
+      ),
+    )
     .where(
       and(
         eq(evidenceItems.organisationId, organisationId),
@@ -900,7 +978,7 @@ export async function buildCaseGraphCore(opts: {
     edges.push(edge);
   };
 
-  // case_alerts → belongs_to_case (alert → case) + triggered_alert inverse concept as belongs
+  // case_alerts → single directed edge: alert belongs_to_case (do not invent reverse)
   if (!evidenceOnly) {
     for (const a of caseAlertRows) {
       const alertNodeId = nodeKey("alert", a.alertId);
@@ -918,21 +996,6 @@ export async function buildCaseGraphCore(opts: {
         observedAtEnd: null,
         creatorId: a.addedBy,
         reason: a.isPrimary ? "primary alert" : null,
-        stored: false,
-        derivedFrom: "case_alerts",
-      });
-      pushEdge({
-        id: `derived:triggered_alert:${a.linkId}`,
-        sourceNodeId: caseNodeId,
-        targetNodeId: alertNodeId,
-        edgeType: "triggered_alert",
-        confidence: null,
-        provenance,
-        source: a.detectionSource || "case_alerts",
-        observedAtStart: iso(a.detectedAt ?? a.linkedAt),
-        observedAtEnd: null,
-        creatorId: a.addedBy,
-        reason: null,
         stored: false,
         derivedFrom: "case_alerts",
       });
@@ -1018,11 +1081,12 @@ export async function buildCaseGraphCore(opts: {
         if (!nodesByKey.has(targetId) && entityLink) {
           // already added above
         }
+        // entity_id is a weak link — related_to only; do not invent observed_on.
         pushEdge({
           id: `derived:evidence_entity:${row.item.id}`,
           sourceNodeId: eNode,
           targetNodeId: targetId,
-          edgeType: "observed_on",
+          edgeType: "related_to",
           confidence: row.item.confidence,
           provenance,
           source: row.item.source || "evidence_items",
