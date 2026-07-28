@@ -1,6 +1,10 @@
 /**
  * Sanitise inbound email HTML before any storage or display.
  * Never render provider HTML unsanitised (issue #42 acceptance).
+ *
+ * Tag matching must treat `/` as an attribute separator (`<img/src=x onerror=…>`
+ * is a valid browser HTML quirk). DIY sanitizers remain residual-risk for mXSS;
+ * keep the allowlist tight and re-strip residual event handlers.
  */
 
 const ALLOWED_TAGS = new Set([
@@ -61,43 +65,54 @@ function isSafeHref(href: string): boolean {
  */
 export function sanitizeEmailHtml(input: string | null | undefined): string {
   if (!input) return "";
-  // Remove script/style blocks wholesale before tag walk.
+  // Remove high-risk blocks wholesale before tag walk.
   let html = input
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<script\b[\s\S]*?<\/script>/gi, "")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, "")
     .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, "")
-    .replace(/<object\b[^>]*>[\s\S]*?<\/object>/gi, "")
+    .replace(/<iframe\b[\s\S]*?<\/iframe>/gi, "")
+    .replace(/<object\b[\s\S]*?<\/object>/gi, "")
     .replace(/<embed\b[^>]*\/?>/gi, "")
-    .replace(/<form\b[^>]*>[\s\S]*?<\/form>/gi, "");
+    .replace(/<form\b[\s\S]*?<\/form>/gi, "")
+    .replace(/<svg\b[\s\S]*?<\/svg>/gi, "")
+    .replace(/<math\b[\s\S]*?<\/math>/gi, "");
 
+  // Match tags allowing `/` as a separator after the name (HTML browser quirk).
+  // Capture: full tag, whether closing, name, rest of attributes region.
   html = html.replace(
-    /<\/?([a-zA-Z0-9:-]+)(\s[^>]*)?>/g,
-    (tag, rawName: string) => {
+    /<\s*(\/?)\s*([a-zA-Z][a-zA-Z0-9:-]*)\b([^>]*)>/g,
+    (_full, closer: string, rawName: string, attrs: string) => {
       const name = rawName.toLowerCase().replace(/^.*:/, "");
       if (!ALLOWED_TAGS.has(name)) return "";
-      if (tag.startsWith("</")) return `</${name}>`;
+      if (closer === "/") return `</${name}>`;
       if (name === "br" || name === "hr") return `<${name}>`;
       if (name === "a") {
-        const hrefMatch = tag.match(/\bhref\s*=\s*(["'])(.*?)\1/i);
-        const href = hrefMatch?.[2] ?? "";
+        // Accept both space-separated and slash-separated attribute forms.
+        const hrefMatch =
+          attrs.match(/\bhref\s*=\s*(["'])(.*?)\1/i) ??
+          attrs.match(/\bhref\s*=\s*([^\s"'=<>`]+)/i);
+        const href = hrefMatch?.[2] ?? hrefMatch?.[1] ?? "";
         if (!isSafeHref(href)) return "<a>";
         return `<a href="${escapeHtml(href)}" rel="nofollow noreferrer noopener">`;
       }
+      // Drop all attributes on remaining allowed tags.
       return `<${name}>`;
     },
   );
 
-  // Strip any leftover on* handlers that survived partial attributes.
-  return html.replace(/\son[a-z]+\s*=\s*(["']).*?\1/gi, "");
+  // Defence-in-depth: strip any leftover event handlers / javascript: URLs.
+  return html
+    .replace(/\son[a-z]+\s*=\s*(["']).*?\1/gi, "")
+    .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, "")
+    .replace(/javascript\s*:/gi, "");
 }
 
 /** Collapse HTML to plain text when no text/plain part is available. */
 export function htmlToPlainText(input: string | null | undefined): string {
   if (!input) return "";
   return input
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<script\b[\s\S]*?<\/script>/gi, "")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, "")
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/p>/gi, "\n\n")
     .replace(/<\/div>/gi, "\n")

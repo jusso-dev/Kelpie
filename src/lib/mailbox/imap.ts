@@ -6,6 +6,9 @@
 
 import net from "node:net";
 import tls from "node:tls";
+import { lookup as dnsLookup } from "node:dns/promises";
+import ipaddr from "ipaddr.js";
+import { isPublicAddress } from "@/lib/outbound-request";
 import type { ImapConnectionMeta, ImapSecrets, NormalizedMailMessage } from "./types";
 import { parseRfc822 } from "./parse";
 import { MAX_POLL_MESSAGES } from "./types";
@@ -16,6 +19,33 @@ export class ImapError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ImapError";
+  }
+}
+
+/** Refuse IMAP targets that resolve to private/link-local/metadata addresses. */
+export async function assertSafeImapHost(host: string): Promise<void> {
+  const hostname = host.trim().replace(/^\[|\]$/g, "");
+  if (!hostname) throw new ImapError("IMAP host is required");
+  if (process.env.KELPIE_ALLOW_PRIVATE_NETWORKS === "true") return;
+
+  if (ipaddr.isValid(hostname)) {
+    if (!isPublicAddress(hostname)) {
+      throw new ImapError(`IMAP host is a non-public address: ${hostname}`);
+    }
+    return;
+  }
+
+  let addresses: Array<{ address: string }>;
+  try {
+    addresses = await dnsLookup(hostname, { all: true, order: "verbatim" });
+  } catch {
+    throw new ImapError(`IMAP host could not be resolved: ${hostname}`);
+  }
+  if (addresses.length === 0) {
+    throw new ImapError(`IMAP host could not be resolved: ${hostname}`);
+  }
+  if (addresses.some(({ address }) => !isPublicAddress(address))) {
+    throw new ImapError(`IMAP host resolves to a non-public address: ${hostname}`);
   }
 }
 
@@ -253,6 +283,7 @@ export async function fetchImapMessages(
   if (!opts.meta.username) throw new ImapError("IMAP username is required");
   if (!opts.secrets.password) throw new ImapError("IMAP password is required");
 
+  await assertSafeImapHost(opts.meta.host);
   const socket = await connectTls(opts.meta.host, port);
   const session = new ImapSession(socket);
   try {

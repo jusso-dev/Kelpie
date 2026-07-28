@@ -3,7 +3,7 @@
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
-import { mailboxConnections, users } from "@/db/schema";
+import { caseTemplates, mailboxConnections, users } from "@/db/schema";
 import { CASE_ENUMS } from "@/lib/cases-core";
 import { encryptCredentials } from "@/lib/mailbox/crypto";
 import {
@@ -14,6 +14,7 @@ import {
   publicMailboxConnection,
   retryMailboxMessage,
 } from "@/lib/mailbox/core";
+import { assertSafeImapHost } from "@/lib/mailbox/imap";
 import {
   INTAKE_MODES,
   MAILBOX_PROVIDERS,
@@ -59,10 +60,14 @@ function parseClassification(raw: string) {
 }
 
 function buildImapMeta(formData: FormData): ImapConnectionMeta {
-  const host = formValue(formData, "host");
+  const host = formValue(formData, "host").trim();
   const port = Number(formValue(formData, "port") || "993");
   const username = formValue(formData, "username");
   if (!host) throw new Error("IMAP host is required");
+  // Block credentials-in-host and path-shaped hosts before DNS policy.
+  if (/[/\s@]/.test(host) || host.includes("://")) {
+    throw new Error("IMAP host must be a bare hostname or IP");
+  }
   if (!username) throw new Error("IMAP username is required");
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error("IMAP port is invalid");
@@ -100,6 +105,7 @@ export async function createMailboxConnection(formData: FormData) {
 
   if (provider === "imap") {
     connectionMeta = buildImapMeta(formData);
+    await assertSafeImapHost(connectionMeta.host);
     const password = formValue(formData, "password");
     if (!password) throw new Error("IMAP password is required");
     credentialsEncrypted = encryptCredentials({ password });
@@ -125,6 +131,21 @@ export async function createMailboxConnection(formData: FormData) {
     if (!assignee) throw new Error("Default assignee not found in organisation");
   }
 
+  const defaultTemplateId = formValue(formData, "default_template_id") || null;
+  if (defaultTemplateId) {
+    const [template] = await db
+      .select({ id: caseTemplates.id })
+      .from(caseTemplates)
+      .where(
+        and(
+          eq(caseTemplates.id, defaultTemplateId),
+          eq(caseTemplates.organisationId, user.organisationId),
+        ),
+      )
+      .limit(1);
+    if (!template) throw new Error("Default template not found in organisation");
+  }
+
   const tagsRaw = formValue(formData, "default_tags");
   const defaultTags = normalizeTags(
     tagsRaw
@@ -145,7 +166,7 @@ export async function createMailboxConnection(formData: FormData) {
       formValue(formData, "default_classification"),
     ),
     defaultAssigneeId,
-    defaultTemplateId: formValue(formData, "default_template_id") || null,
+    defaultTemplateId,
     defaultTags,
     credentialsEncrypted,
     connectionMeta,

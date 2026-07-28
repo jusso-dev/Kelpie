@@ -50,6 +50,8 @@ function testSanitize() {
     <html><body>
       <script>alert('xss')</script>
       <img src=x onerror="alert(1)">
+      <img/src=x onerror=alert(1)>
+      <script/src=//evil.example></script>
       <a href="javascript:alert(1)">bad</a>
       <a href="https://example.com/report">ok</a>
       <p onclick="evil()">Hello <strong>world</strong></p>
@@ -63,6 +65,7 @@ function testSanitize() {
   assert.doesNotMatch(clean, /javascript:/i);
   assert.doesNotMatch(clean, /<style/i);
   assert.doesNotMatch(clean, /<img/i);
+  assert.doesNotMatch(clean, /evil\.example/i);
   assert.match(clean, /https:\/\/example\.com\/report/);
   assert.match(clean, /<strong>world<\/strong>/);
 

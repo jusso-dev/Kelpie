@@ -94,8 +94,14 @@ async function tryAcquirePollLock(
   return row ?? null;
 }
 
+/**
+ * Release only if we still own the lock (pollLockUntil matches the value we
+ * set at acquire). A slower poll that overran POLL_LOCK_MS must not clobber
+ * the successor's lock or cursor.
+ */
 async function releasePollLock(
   connectionId: string,
+  expectedLockUntil: Date,
   patch: Partial<typeof mailboxConnections.$inferInsert>,
 ) {
   await db
@@ -105,7 +111,12 @@ async function releasePollLock(
       pollLockUntil: null,
       updatedAt: new Date(),
     })
-    .where(eq(mailboxConnections.id, connectionId));
+    .where(
+      and(
+        eq(mailboxConnections.id, connectionId),
+        eq(mailboxConnections.pollLockUntil, expectedLockUntil),
+      ),
+    );
 }
 
 function attachmentMetaOnly(atts: MailAttachmentDescriptor[]) {
@@ -511,6 +522,10 @@ export async function pollMailboxConnection(
   if (!connection) {
     return empty({ skipped: true });
   }
+  const ownedLockUntil = connection.pollLockUntil;
+  if (!ownedLockUntil) {
+    return empty({ skipped: true });
+  }
 
   redactedPollLog(connection.id, connection.organisationId, "start");
 
@@ -529,7 +544,7 @@ export async function pollMailboxConnection(
       else failed++;
     }
 
-    await releasePollLock(connectionId, {
+    await releasePollLock(connectionId, ownedLockUntil, {
       cursor: nextCursor,
       lastSuccessAt: new Date(),
       lastError: null,
@@ -561,7 +576,7 @@ export async function pollMailboxConnection(
       .replace(/client_secret[=:]\s*\S+/gi, "client_secret=[redacted]")
       .replace(/Bearer\s+\S+/gi, "Bearer [redacted]");
 
-    await releasePollLock(connectionId, {
+    await releasePollLock(connectionId, ownedLockUntil, {
       lastError: safeMessage,
       lastErrorAt: new Date(),
     });
@@ -671,40 +686,83 @@ export async function approveMailboxMessage(opts: {
   );
   if (!connection) throw new Error("Mailbox connection not found");
 
+  // Claim the row before creating a case so concurrent dismiss cannot race
+  // into a case that then overwrites dismissed status.
+  const [claimed] = await db
+    .update(mailboxMessages)
+    .set({
+      status: "importing",
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(mailboxMessages.id, msg.id),
+        eq(mailboxMessages.organisationId, opts.organisationId),
+        or(
+          eq(mailboxMessages.status, "pending_review"),
+          eq(mailboxMessages.status, "failed"),
+        ),
+      ),
+    )
+    .returning();
+  if (!claimed) {
+    throw new Error("Message is no longer available for approval");
+  }
+
   const normalized: NormalizedMailMessage = {
-    providerMessageId: msg.providerMessageId,
-    receivedAt: msg.receivedAt,
-    sentAt: msg.sentAt,
-    from: msg.fromAddress
-      ? { address: msg.fromAddress, name: msg.fromName }
+    providerMessageId: claimed.providerMessageId,
+    receivedAt: claimed.receivedAt,
+    sentAt: claimed.sentAt,
+    from: claimed.fromAddress
+      ? { address: claimed.fromAddress, name: claimed.fromName }
       : null,
-    to: ((msg.toAddresses as string[]) ?? []).map((address) => ({ address })),
-    cc: ((msg.ccAddresses as string[]) ?? []).map((address) => ({ address })),
-    subject: msg.subject ?? "(no subject)",
-    bodyText: msg.bodyText ?? "",
-    bodyHtmlSanitized: msg.bodyHtmlSanitized ?? "",
+    to: ((claimed.toAddresses as string[]) ?? []).map((address) => ({ address })),
+    cc: ((claimed.ccAddresses as string[]) ?? []).map((address) => ({ address })),
+    subject: claimed.subject ?? "(no subject)",
+    bodyText: claimed.bodyText ?? "",
+    bodyHtmlSanitized: claimed.bodyHtmlSanitized ?? "",
     attachments: [], // bytes not retained in review queue; original re-fetched only in live poll path
-    rawMessage: msg.bodyText
+    rawMessage: claimed.bodyText
       ? Buffer.from(
           [
-            `Message-ID: <${msg.providerMessageId}>`,
-            `From: ${msg.fromAddress ?? "unknown"}`,
-            `Subject: ${msg.subject ?? ""}`,
+            `Message-ID: <${claimed.providerMessageId}>`,
+            `From: ${claimed.fromAddress ?? "unknown"}`,
+            `Subject: ${claimed.subject ?? ""}`,
             "Content-Type: text/plain; charset=utf-8",
             "",
-            msg.bodyText,
+            claimed.bodyText,
           ].join("\r\n"),
           "utf8",
         )
       : null,
   };
 
-  const created = await createCaseFromMailboxMessage({
-    connection,
-    message: normalized,
-    actorId: opts.actorId,
-    mailboxMessageId: msg.id,
-  });
+  let created: { caseId: string; caseNumber: string; created: boolean };
+  try {
+    created = await createCaseFromMailboxMessage({
+      connection,
+      message: normalized,
+      actorId: opts.actorId,
+      mailboxMessageId: claimed.id,
+    });
+  } catch (error) {
+    await db
+      .update(mailboxMessages)
+      .set({
+        status: "failed",
+        failureReason:
+          error instanceof Error ? error.message.slice(0, 500) : "Approve failed",
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(mailboxMessages.id, claimed.id),
+          eq(mailboxMessages.organisationId, opts.organisationId),
+          eq(mailboxMessages.status, "importing"),
+        ),
+      );
+    throw error;
+  }
 
   await db
     .update(mailboxMessages)
@@ -717,8 +775,9 @@ export async function approveMailboxMessage(opts: {
     })
     .where(
       and(
-        eq(mailboxMessages.id, msg.id),
+        eq(mailboxMessages.id, claimed.id),
         eq(mailboxMessages.organisationId, opts.organisationId),
+        eq(mailboxMessages.status, "importing"),
       ),
     );
 
