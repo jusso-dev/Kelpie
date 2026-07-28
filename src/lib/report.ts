@@ -12,6 +12,10 @@ import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { findTechnique } from "@/data/mitre";
 import { listMappingsForCase, type MappingView } from "@/lib/attack/mapping-core";
 import { listStoryCore, type StoryEntryView } from "@/lib/attack/story-core";
+import {
+  listReportContentBlocksCore,
+  type ContentBlockView,
+} from "@/lib/content-blocks-core";
 
 export type CaseReportData = {
   case: Case;
@@ -43,6 +47,8 @@ export type CaseReportData = {
   comments: Array<{ id: string; body: string; createdAt: Date; authorName: string | null }>;
   attackMappings: MappingView[];
   attackStory: StoryEntryView[];
+  /** Ordered content blocks selected for export (excludes sensitive by default). */
+  contentBlocks: ContentBlockView[];
 };
 
 export async function loadCaseReport(
@@ -121,9 +127,10 @@ export async function loadCaseReport(
     .where(eq(comments.caseId, caseId))
     .orderBy(asc(comments.createdAt));
 
-  const [attackMappings, attackStory] = await Promise.all([
+  const [attackMappings, attackStory, contentBlocks] = await Promise.all([
     listMappingsForCase(organisationId, caseId),
     listStoryCore(organisationId, caseId),
+    listReportContentBlocksCore(organisationId, caseId),
   ]);
 
   return {
@@ -143,6 +150,7 @@ export async function loadCaseReport(
     comments: commentRows,
     attackMappings,
     attackStory,
+    contentBlocks,
   };
 }
 
@@ -179,6 +187,8 @@ function summarisePayload(eventType: string, payload: unknown): string {
       return `${p.playbook_name ?? ""} (${p.steps ?? 0} steps)`;
     case "comment":
       return String(p.preview ?? "");
+    case "content_block_changed":
+      return `${p.action ?? "changed"}${p.title ? `: ${p.title}` : ""}${p.revision != null ? ` (rev ${p.revision})` : ""}`;
     case "sla_breach":
       return `gate=${p.gate} +${p.minutes_over}m`;
     default:
@@ -251,6 +261,20 @@ export function renderCaseMarkdown(data: CaseReportData): string {
       if (e.description) lines.push(`   ${e.description}`);
     }
     lines.push("");
+  }
+  if (data.contentBlocks.length > 0) {
+    lines.push("## Investigation notes", "");
+    for (const b of data.contentBlocks) {
+      lines.push(
+        `### ${b.title}`,
+        "",
+        `- Type: ${b.type.replace(/_/g, " ")}`,
+        `- TLP: ${b.tlp.replace("_", "+")} · PAP: ${b.pap}`,
+        `- Revision: ${b.revisionNumber}`,
+        "",
+      );
+      if (b.content) lines.push(b.content, "");
+    }
   }
   if (data.observables.length > 0) {
     lines.push("## Observables", "");

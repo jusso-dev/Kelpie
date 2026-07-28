@@ -245,6 +245,24 @@ function CaseReport({ data }: { data: CaseReportData }) {
           </>
         ) : null}
 
+        {data.contentBlocks.length > 0 ? (
+          <>
+            <Text style={styles.sectionTitle}>Investigation notes</Text>
+            {data.contentBlocks.map((b) => (
+              <View key={b.id} style={{ marginBottom: 8 }}>
+                <Text style={styles.bulletText}>
+                  {b.title} ({b.type.replace(/_/g, " ")}, rev {b.revisionNumber})
+                </Text>
+                {b.content ? (
+                  <Text style={styles.para}>
+                    {b.content.length > 800 ? `${b.content.slice(0, 797)}...` : b.content}
+                  </Text>
+                ) : null}
+              </View>
+            ))}
+          </>
+        ) : null}
+
         {data.observables.length > 0 ? (
           <>
             <Text style={styles.sectionTitle}>Observables</Text>
