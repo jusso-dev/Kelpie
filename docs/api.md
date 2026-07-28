@@ -32,8 +32,11 @@ Errors return `{ "error": "..." }` with an appropriate HTTP status (`400` invali
 | `attack:write` | Attach, update, and remove ATT&CK technique mappings and attack-story entries |
 | `content_blocks:read` | Read structured investigation content blocks and revision history |
 | `content_blocks:write` | Create, edit, archive, reorder, promote, and link structured investigation content blocks |
+| `reports:read` | Read report templates, previews, export history, and download released reports |
+| `reports:write` | Generate case reports, request release approval, and manage report schedules |
+| `reports:admin` | Create/version report templates and approve report release (sensitive; admin-issued tokens) |
 
-**Empty scopes grant nothing.** A token whose `scopes` array is empty fails every scope check (`403`). Sensitive scopes (`alerts:raw_payload:read`, `evidence:override`, `audit:read`) are never implied. Migration `0026_empty_token_scopes` rewrites any pre-existing empty-scope tokens to an explicit non-sensitive set so ordinary integrations keep working without retaining those sensitive powers — re-issue tokens that intentionally need sensitive scopes from Settings after upgrading.
+**Empty scopes grant nothing.** A token whose `scopes` array is empty fails every scope check (`403`). Sensitive scopes (`alerts:raw_payload:read`, `evidence:override`, `audit:read`, `cases:override_closure`, `reports:admin`) are never implied. Migration `0026_empty_token_scopes` rewrites any pre-existing empty-scope tokens to an explicit non-sensitive set so ordinary integrations keep working without retaining those sensitive powers — re-issue tokens that intentionally need sensitive scopes from Settings after upgrading.
 
 ## Cases
 
@@ -730,6 +733,73 @@ Append-only revision list ordered by `revisionNumber`.
 Returns `201 { "link": { ... } }`. Cross-organisation or wrong-case targets return `404`.
 
 ### `DELETE /api/v1/cases/{caseId}/content-blocks/{blockId}/links/{linkId}`
+
+## Controlled case reports (templates + exports)
+
+Reusable, versioned report templates with audience ceilings (TLP/PAP), redaction preview, BullMQ PDF/JSON generation, SHA-256 stamps, optional release approval, and scheduled generation into organisation export history. Files are organisation-scoped via the evidence storage abstraction. Unsafe Markdown/HTML is sanitised; redaction preview never reveals hidden content.
+
+Variants: `executive`, `technical`, `regulatory`, `post_incident`.
+
+Section keys: `summary`, `metadata`, `tasks`, `observables`, `timeline`, `comments`, `evidence_inventory`, `ttp_mappings`, `attack_story`, `related_cases`, `custom_fields`, `investigation_blocks`, `post_incident_review`, `closure`.
+
+Baseline templates (seeded per organisation, idempotent by `catalogueKey`): executive summary, technical incident report, post-incident review, regulatory export.
+
+### `GET /api/v1/report-templates`
+Optional `includeInactive=true`. Seeds missing baseline templates, then lists active templates with current version sections and inclusion rules. Scope: `reports:read`.
+
+### `POST /api/v1/report-templates`
+Create a custom template (version 1). Scope: `reports:admin`.
+
+### `GET /api/v1/report-templates/{id}`
+Optional `?version=N` to read a historical version. Includes version history list. Scope: `reports:read`.
+
+### `PATCH /api/v1/report-templates/{id}`
+Metadata updates in place; changes to sections/rules/ceilings/approval insert a new immutable version. Scope: `reports:admin`.
+
+### `POST /api/v1/cases/{caseId}/reports/preview`
+```json
+{
+  "templateId": "rpt_...",
+  "format": "pdf",
+  "sectionOverrides": { "comments": true, "observables": false }
+}
+```
+Returns selected sections, data revision, content fingerprint, redaction summary (included/excluded/masked — no hidden raw values), and a Markdown preview. Scope: `reports:read`.
+
+### `POST /api/v1/cases/{caseId}/reports`
+```json
+{
+  "templateId": "rpt_...",
+  "format": "json",
+  "processInline": false
+}
+```
+Creates an export (`pending` → BullMQ `generate-case-report`). When `requireApproval` on the template version is true, status becomes `awaiting_approval` after render; otherwise `completed`. Set `processInline: true` only for tests/offline workers. Scope: `reports:write`. Responses never include `storageKey`.
+
+### `GET /api/v1/cases/{caseId}/reports`
+Export history for the case. Scope: `reports:read`.
+
+### `GET /api/v1/reports/{exportId}`
+Export status plus pending approval binding (if any). Scope: `reports:read`.
+
+### `POST /api/v1/reports/{exportId}/approve`
+```json
+{ "decision": "approve" }
+```
+or `"reject"`. Re-checks live case data revision against the bound fingerprint; invalidates if data/template binding drifted (`409`). Scope: `reports:admin`. Token must have been issued by a user (`createdBy`).
+
+### `GET /api/v1/reports/{exportId}/download`
+Downloads the file when status is `completed` or `released`. Verifies SHA-256. Header `x-kelpie-sha256` echoes the digest. Scope: `reports:read`.
+
+### `POST /api/v1/cases/{caseId}/reports/schedule`
+```json
+{
+  "templateId": "rpt_...",
+  "format": "pdf",
+  "intervalMinutes": 1440
+}
+```
+Destination is always `{ "kind": "export_history" }` — arbitrary external destinations are out of scope. Worker job `run-report-schedules` re-checks template activity and case membership at execution time. Scope: `reports:write`.
 
 ## Webhooks (outbound)
 

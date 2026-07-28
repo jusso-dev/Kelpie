@@ -26,6 +26,7 @@ import {
   BASELINE_TEMPLATES,
   PLAYBOOK_CATALOGUE_VERSION,
 } from "./playbook-catalogue";
+import { seedBaselineReportTemplates } from "./reports/templates-core";
 
 export type BaselineSeedResult = {
   playbooksCreated: number;
@@ -38,6 +39,8 @@ export type BaselineSeedResult = {
    * catalogue key. This repairs a dangling link; it never touches any other
    * field on the template, so it is not "overwriting a local edit". */
   templatesRelinked: number;
+  reportTemplatesCreated: number;
+  reportTemplatesSkipped: number;
 };
 
 export async function seedBaselineOrganisationData(
@@ -166,12 +169,16 @@ export async function seedBaselineOrganisationData(
     templatesCreated++;
   }
 
+  const reportSeed = await seedBaselineReportTemplates(organisationId);
+
   return {
     playbooksCreated,
     templatesCreated,
     playbooksSkipped,
     templatesSkipped,
     templatesRelinked,
+    reportTemplatesCreated: reportSeed.created,
+    reportTemplatesSkipped: reportSeed.skipped,
   };
 }
 

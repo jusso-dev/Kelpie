@@ -17,7 +17,9 @@ export type KelpieJobName =
   | "scan-evidence"
   | "export-audit-events"
   | "purge-audit-events"
-  | "refresh-attack-catalog";
+  | "refresh-attack-catalog"
+  | "generate-case-report"
+  | "run-report-schedules";
 
 export type KelpieJobData = {
   feedId?: string;
@@ -26,6 +28,7 @@ export type KelpieJobData = {
   auditExportJobId?: string;
   attackCatalogSourceUrl?: string;
   attackCatalogActorId?: string;
+  reportExportId?: string;
 };
 
 export function redisConnection(worker = false): ConnectionOptions {

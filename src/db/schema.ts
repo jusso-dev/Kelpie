@@ -2861,6 +2861,43 @@ export const auditExportStatusEnum = pgEnum("audit_export_status", [
   "failed",
 ]);
 
+/** Audience variant for reusable case report templates (issue #47). */
+export const reportVariantEnum = pgEnum("report_variant", [
+  "executive",
+  "technical",
+  "regulatory",
+  "post_incident",
+]);
+
+export const reportExportFormatEnum = pgEnum("report_export_format", [
+  "pdf",
+  "json",
+]);
+
+/**
+ * Lifecycle of a controlled case-report export:
+ * - pending/processing: BullMQ render in flight
+ * - awaiting_approval: file generated, held until release approval
+ * - completed: downloadable without an approval gate
+ * - released: downloadable after approval
+ * - failed: terminal failure (retry creates a new export row)
+ */
+export const reportExportStatusEnum = pgEnum("report_export_status", [
+  "pending",
+  "processing",
+  "awaiting_approval",
+  "completed",
+  "released",
+  "failed",
+]);
+
+export const reportApprovalStatusEnum = pgEnum("report_approval_status", [
+  "pending",
+  "approved",
+  "rejected",
+  "invalidated",
+]);
+
 /**
  * Append-only organisation-wide audit trail. A `BEFORE UPDATE` trigger (see
  * migration 0020) rejects every update except the `actor_id -> NULL`
@@ -2939,6 +2976,257 @@ export const auditExportJobs = pgTable(
   },
   (t) => [
     index("audit_export_jobs_org_idx").on(t.organisationId, t.createdAt),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Controlled case report templates + exports (issue #47)                     */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Admin-managed reusable report template. Behaviour for generation always
+ * resolves through an immutable `report_template_versions` row so historical
+ * exports stay reproducible after later edits.
+ */
+export const reportTemplates = pgTable(
+  "report_templates",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    variant: reportVariantEnum("variant").notNull(),
+    isActive: boolean("is_active").notNull().default(true),
+    currentVersion: integer("current_version").notNull().default(1),
+    /**
+     * Stable catalogue identity for baseline defaults (executive / technical /
+     * post-incident). Null for organisation-authored templates.
+     */
+    catalogueKey: text("catalogue_key"),
+    catalogueVersion: integer("catalogue_version"),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("report_templates_org_idx").on(t.organisationId),
+    index("report_templates_org_variant_idx").on(t.organisationId, t.variant),
+    uniqueIndex("report_templates_org_catalogue_key_idx").on(
+      t.organisationId,
+      t.catalogueKey,
+    ),
+  ],
+);
+
+/**
+ * Immutable snapshot of template sections / inclusion rules / classification
+ * ceiling. Editing a template inserts a new version and bumps
+ * `report_templates.currentVersion`.
+ */
+export const reportTemplateVersions = pgTable(
+  "report_template_versions",
+  {
+    id: text("id").primaryKey(),
+    templateId: text("template_id")
+      .notNull()
+      .references(() => reportTemplates.id, { onDelete: "cascade" }),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    /**
+     * Ordered ReportSectionConfig[] — see src/lib/reports/types.ts.
+     * Shape is validated in application code, not the DB.
+     */
+    sections: jsonb("sections").notNull().default(sql`'[]'::jsonb`),
+    /**
+     * Inclusion / audience rules (max TLP/PAP, optional section defaults).
+     * See ReportInclusionRules in src/lib/reports/types.ts.
+     */
+    inclusionRules: jsonb("inclusion_rules").notNull().default(sql`'{}'::jsonb`),
+    requireApproval: boolean("require_approval").notNull().default(false),
+    maxTlp: tlpEnum("max_tlp").notNull().default("amber"),
+    maxPap: papEnum("max_pap").notNull().default("amber"),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("report_template_versions_template_ver_idx").on(
+      t.templateId,
+      t.version,
+    ),
+    index("report_template_versions_org_idx").on(t.organisationId),
+  ],
+);
+
+/**
+ * One generated export of a case under a specific template version. Files are
+ * organisation-scoped via the evidence storage abstraction (`putFile`).
+ * Approval binds `contentFingerprint` + `dataRevision` + template version.
+ */
+export const reportExports = pgTable(
+  "report_exports",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    templateId: text("template_id").references(() => reportTemplates.id, {
+      onDelete: "set null",
+    }),
+    templateVersionId: text("template_version_id").references(
+      () => reportTemplateVersions.id,
+      { onDelete: "set null" },
+    ),
+    templateVersionNumber: integer("template_version_number").notNull(),
+    variant: reportVariantEnum("variant").notNull(),
+    format: reportExportFormatEnum("format").notNull(),
+    status: reportExportStatusEnum("status").notNull().default("pending"),
+    /** Ordered section keys actually rendered after selection + rules. */
+    selectedSections: jsonb("selected_sections")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** SHA-256 of the bound selection + template version + data revision. */
+    contentFingerprint: text("content_fingerprint"),
+    /** Opaque revision stamp of case data used for the export. */
+    dataRevision: text("data_revision"),
+    maxTlp: tlpEnum("max_tlp").notNull(),
+    maxPap: papEnum("max_pap").notNull(),
+    requireApproval: boolean("require_approval").notNull().default(false),
+    storageKey: text("storage_key"),
+    sha256: text("sha256"),
+    sizeBytes: integer("size_bytes"),
+    /** RedactionPreview summary — never contains hidden raw values. */
+    redactionSummary: jsonb("redaction_summary")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    /** Friendly error for failed jobs; never stack traces to the UI. */
+    error: text("error"),
+    requestedBy: text("requested_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    releasedBy: text("released_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    releasedAt: timestamp("released_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    /** Optional schedule that produced this export (re-checks perms at run). */
+    scheduleId: text("schedule_id"),
+  },
+  (t) => [
+    index("report_exports_org_case_idx").on(t.organisationId, t.caseId, t.createdAt),
+    index("report_exports_org_status_idx").on(t.organisationId, t.status),
+    index("report_exports_template_idx").on(t.templateId),
+  ],
+);
+
+/**
+ * Optional release approval bound to exact preview/data/template revision.
+ * Invalidated when any bound field would change (new generation, data edit,
+ * template bump, audience/destination change).
+ */
+export const reportExportApprovals = pgTable(
+  "report_export_approvals",
+  {
+    id: text("id").primaryKey(),
+    exportId: text("export_id")
+      .notNull()
+      .references(() => reportExports.id, { onDelete: "cascade" }),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    status: reportApprovalStatusEnum("status").notNull().default("pending"),
+    boundContentFingerprint: text("bound_content_fingerprint").notNull(),
+    boundTemplateVersionId: text("bound_template_version_id").notNull(),
+    boundDataRevision: text("bound_data_revision").notNull(),
+    requestedBy: text("requested_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    decidedBy: text("decided_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    invalidateReason: text("invalidate_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("report_export_approvals_export_idx").on(t.exportId),
+    index("report_export_approvals_org_status_idx").on(
+      t.organisationId,
+      t.status,
+    ),
+  ],
+);
+
+/**
+ * Scheduled report generation with explicit destination policy. Jobs re-check
+ * permissions and classification at execution time (never trust schedule-time
+ * grant alone). Destination is limited to org-scoped download history for
+ * this slice — no arbitrary external destinations.
+ */
+export const reportSchedules = pgTable(
+  "report_schedules",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    templateId: text("template_id")
+      .notNull()
+      .references(() => reportTemplates.id, { onDelete: "cascade" }),
+    caseId: text("case_id").references(() => cases.id, { onDelete: "cascade" }),
+    format: reportExportFormatEnum("format").notNull().default("pdf"),
+    /**
+     * Destination policy: { kind: "export_history" } only for now.
+     * Arbitrary destinations are out of scope.
+     */
+    destinationPolicy: jsonb("destination_policy")
+      .notNull()
+      .default(sql`'{"kind":"export_history"}'::jsonb`),
+    /** Optional analyst overrides of optional sections. */
+    sectionOverrides: jsonb("section_overrides")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    /** Cron-like interval in minutes (minimum 60). */
+    intervalMinutes: integer("interval_minutes").notNull().default(1440),
+    isActive: boolean("is_active").notNull().default(true),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    lastExportId: text("last_export_id"),
+    lastError: text("last_error"),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("report_schedules_org_active_idx").on(t.organisationId, t.isActive),
+    index("report_schedules_next_run_idx").on(t.nextRunAt),
   ],
 );
 
@@ -4816,6 +5104,11 @@ export type AutomationRunRow = typeof automationRuns.$inferSelect;
 export type KillSwitchRow = typeof killSwitches.$inferSelect;
 export type EnrichmentRunRow = typeof enrichmentRuns.$inferSelect;
 export type AuditExportJobRow = typeof auditExportJobs.$inferSelect;
+export type ReportTemplate = typeof reportTemplates.$inferSelect;
+export type ReportTemplateVersion = typeof reportTemplateVersions.$inferSelect;
+export type ReportExport = typeof reportExports.$inferSelect;
+export type ReportExportApproval = typeof reportExportApprovals.$inferSelect;
+export type ReportSchedule = typeof reportSchedules.$inferSelect;
 export type TiFeed = typeof tiFeeds.$inferSelect;
 export type TiIndicator = typeof tiIndicators.$inferSelect;
 export type CaseSource = typeof caseSources.$inferSelect;
