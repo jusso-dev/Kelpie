@@ -2937,6 +2937,7 @@ export const auditActorTypeEnum = pgEnum("audit_actor_type", [
   "user",
   "api_token",
   "system",
+  "external",
 ]);
 
 export const auditExportFormatEnum = pgEnum("audit_export_format", [
@@ -5845,9 +5846,400 @@ export const investigationGraphEdges = pgTable(
 );
 
 /* ────────────────────────────────────────────────────────────────────────── */
-/* Vendor news watchlist                                                      */
+/* Restricted stakeholder portal (issue #63)                                  */
+/*                                                                            */
+/* External collaborators are NOT organisation members and do not share the  */
+/* BetterAuth staff session path. Access is always invitation + session      */
+/* token scoped to a single case and purpose, with TLP/PAP ceilings.         */
 /* ────────────────────────────────────────────────────────────────────────── */
 
+/** Role templates for external portal access. Capabilities are discrete. */
+export const stakeholderRoleEnum = pgEnum("stakeholder_role", [
+  "update_reader",
+  "evidence_provider",
+  "respondent",
+  "approver",
+]);
+
+export const stakeholderInviteStatusEnum = pgEnum("stakeholder_invite_status", [
+  "pending",
+  "accepted",
+  "revoked",
+  "expired",
+]);
+
+export const stakeholderEvidenceRequestStatusEnum = pgEnum(
+  "stakeholder_evidence_request_status",
+  ["open", "fulfilled", "cancelled", "expired"],
+);
+
+export const stakeholderApprovalStatusEnum = pgEnum(
+  "stakeholder_approval_status",
+  ["pending", "approved", "rejected", "cancelled"],
+);
+
+/**
+ * External identity distinct from `users`. Never grants org membership,
+ * never appears in member pickers, and cannot authenticate via BetterAuth.
+ */
+export const externalCollaborators = pgTable(
+  "external_collaborators",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    displayName: text("display_name").notNull(),
+    organisationLabel: text("organisation_label"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("external_collaborators_org_email_idx").on(
+      t.organisationId,
+      t.email,
+    ),
+    index("external_collaborators_org_idx").on(t.organisationId),
+  ],
+);
+
+/**
+ * Case/purpose-scoped invitation. Token is stored hashed only; plaintext is
+ * shown once at creation. Revocation kills sessions immediately.
+ */
+export const stakeholderInvitations = pgTable(
+  "stakeholder_invitations",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    collaboratorId: text("collaborator_id")
+      .notNull()
+      .references(() => externalCollaborators.id, { onDelete: "cascade" }),
+    role: stakeholderRoleEnum("role").notNull(),
+    /** Free-text purpose shown to the external party (why they were invited). */
+    purpose: text("purpose").notNull(),
+    status: stakeholderInviteStatusEnum("status").notNull().default("pending"),
+    /** SHA-256 hex of invite token (prefix `kstk_`). Never store plaintext. */
+    tokenHash: text("token_hash").notNull(),
+    /** Optional single-use: first successful accept burns the invite token. */
+    singleUse: boolean("single_use").notNull().default(true),
+    maxTlp: tlpEnum("max_tlp").notNull().default("amber"),
+    maxPap: papEnum("max_pap").notNull().default("amber"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokedBy: text("revoked_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    revokeReason: text("revoke_reason"),
+    invitedBy: text("invited_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("stakeholder_invitations_token_hash_idx").on(t.tokenHash),
+    index("stakeholder_invitations_org_case_idx").on(
+      t.organisationId,
+      t.caseId,
+    ),
+    index("stakeholder_invitations_collaborator_idx").on(t.collaboratorId),
+    index("stakeholder_invitations_org_status_idx").on(
+      t.organisationId,
+      t.status,
+    ),
+  ],
+);
+
+/**
+ * Token-based external session distinct from BetterAuth staff sessions.
+ * Bearer/cookie value is hashed; revocation of the invite kills all sessions.
+ */
+export const stakeholderSessions = pgTable(
+  "stakeholder_sessions",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    invitationId: text("invitation_id")
+      .notNull()
+      .references(() => stakeholderInvitations.id, { onDelete: "cascade" }),
+    collaboratorId: text("collaborator_id")
+      .notNull()
+      .references(() => externalCollaborators.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    /** SHA-256 hex of session token (prefix `ksts_`). */
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("stakeholder_sessions_token_hash_idx").on(t.tokenHash),
+    index("stakeholder_sessions_invitation_idx").on(t.invitationId),
+    index("stakeholder_sessions_org_case_idx").on(t.organisationId, t.caseId),
+  ],
+);
+
+/** Analyst-authored status updates visible to invited stakeholders. */
+export const stakeholderUpdates = pgTable(
+  "stakeholder_updates",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    /** Null = visible to every active invite on the case (within ceilings). */
+    invitationId: text("invitation_id").references(
+      () => stakeholderInvitations.id,
+      { onDelete: "cascade" },
+    ),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    tlp: tlpEnum("tlp").notNull().default("amber"),
+    pap: papEnum("pap").notNull().default("amber"),
+    publishedBy: text("published_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    publishedAt: timestamp("published_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("stakeholder_updates_org_case_idx").on(t.organisationId, t.caseId),
+    index("stakeholder_updates_invitation_idx").on(t.invitationId),
+  ],
+);
+
+/** Request for the external party to upload evidence into the case. */
+export const stakeholderEvidenceRequests = pgTable(
+  "stakeholder_evidence_requests",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    invitationId: text("invitation_id")
+      .notNull()
+      .references(() => stakeholderInvitations.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    instructions: text("instructions").notNull(),
+    status: stakeholderEvidenceRequestStatusEnum("status")
+      .notNull()
+      .default("open"),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    fulfilledAttachmentId: text("fulfilled_attachment_id").references(
+      () => attachments.id,
+      { onDelete: "set null" },
+    ),
+    fulfilledAt: timestamp("fulfilled_at", { withTimezone: true }),
+    requestedBy: text("requested_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("stakeholder_evidence_requests_org_case_idx").on(
+      t.organisationId,
+      t.caseId,
+    ),
+    index("stakeholder_evidence_requests_invitation_idx").on(t.invitationId),
+    index("stakeholder_evidence_requests_status_idx").on(
+      t.organisationId,
+      t.status,
+    ),
+  ],
+);
+
+/**
+ * External contribution (response / comment). Always attributed and visually
+ * distinct from staff comments via `source = 'external'`.
+ */
+export const stakeholderResponses = pgTable(
+  "stakeholder_responses",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    invitationId: text("invitation_id")
+      .notNull()
+      .references(() => stakeholderInvitations.id, { onDelete: "cascade" }),
+    collaboratorId: text("collaborator_id")
+      .notNull()
+      .references(() => externalCollaborators.id, { onDelete: "cascade" }),
+    /** Optional link to a staff update or free-form question thread. */
+    inReplyToUpdateId: text("in_reply_to_update_id").references(
+      () => stakeholderUpdates.id,
+      { onDelete: "set null" },
+    ),
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("stakeholder_responses_org_case_idx").on(t.organisationId, t.caseId),
+    index("stakeholder_responses_invitation_idx").on(t.invitationId),
+  ],
+);
+
+/** Approval request for an external approver role. */
+export const stakeholderApprovals = pgTable(
+  "stakeholder_approvals",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    invitationId: text("invitation_id")
+      .notNull()
+      .references(() => stakeholderInvitations.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    description: text("description").notNull(),
+    status: stakeholderApprovalStatusEnum("status").notNull().default("pending"),
+    decisionNote: text("decision_note"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    requestedBy: text("requested_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("stakeholder_approvals_org_case_idx").on(t.organisationId, t.caseId),
+    index("stakeholder_approvals_invitation_idx").on(t.invitationId),
+    index("stakeholder_approvals_status_idx").on(t.organisationId, t.status),
+  ],
+);
+
+/** Read receipts for shared updates (and optionally other shared items). */
+export const stakeholderReadReceipts = pgTable(
+  "stakeholder_read_receipts",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    invitationId: text("invitation_id")
+      .notNull()
+      .references(() => stakeholderInvitations.id, { onDelete: "cascade" }),
+    collaboratorId: text("collaborator_id")
+      .notNull()
+      .references(() => externalCollaborators.id, { onDelete: "cascade" }),
+    updateId: text("update_id")
+      .notNull()
+      .references(() => stakeholderUpdates.id, { onDelete: "cascade" }),
+    readAt: timestamp("read_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("stakeholder_read_receipts_unique_idx").on(
+      t.invitationId,
+      t.updateId,
+    ),
+    index("stakeholder_read_receipts_update_idx").on(t.updateId),
+  ],
+);
+
+/**
+ * Append-only audit of every external portal access and contribution.
+ * Complements organisation `audit_events` (also written with actor_type
+ * `external`) so case-level external activity is queryable without org-wide
+ * audit export.
+ */
+export const stakeholderAccessEvents = pgTable(
+  "stakeholder_access_events",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    invitationId: text("invitation_id").references(
+      () => stakeholderInvitations.id,
+      { onDelete: "set null" },
+    ),
+    collaboratorId: text("collaborator_id").references(
+      () => externalCollaborators.id,
+      { onDelete: "set null" },
+    ),
+    sessionId: text("session_id").references(() => stakeholderSessions.id, {
+      onDelete: "set null",
+    }),
+    action: text("action").notNull(),
+    targetType: text("target_type"),
+    targetId: text("target_id"),
+    metadata: jsonb("metadata").notNull().default(sql`'{}'::jsonb`),
+    sourceIp: text("source_ip"),
+    userAgent: text("user_agent"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("stakeholder_access_events_org_case_idx").on(
+      t.organisationId,
+      t.caseId,
+      t.occurredAt,
+    ),
+    index("stakeholder_access_events_invitation_idx").on(t.invitationId),
+    index("stakeholder_access_events_action_idx").on(
+      t.organisationId,
+      t.action,
+    ),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Type exports                                                               */
+/* ────────────────────────────────────────────────────────────────────────── */
 
 export type IntegrationConnectionState =
   typeof integrationConnectionStates.$inferSelect;
@@ -5962,6 +6354,16 @@ export type CaseCompartmentMember = typeof caseCompartmentMembers.$inferSelect;
 export type CaseAccessGrant = typeof caseAccessGrants.$inferSelect;
 export type CaseAccessEvent = typeof caseAccessEvents.$inferSelect;
 export type InvestigationGraphEdge = typeof investigationGraphEdges.$inferSelect;
+export type ExternalCollaborator = typeof externalCollaborators.$inferSelect;
+export type StakeholderInvitation = typeof stakeholderInvitations.$inferSelect;
+export type StakeholderSession = typeof stakeholderSessions.$inferSelect;
+export type StakeholderUpdate = typeof stakeholderUpdates.$inferSelect;
+export type StakeholderEvidenceRequest =
+  typeof stakeholderEvidenceRequests.$inferSelect;
+export type StakeholderResponse = typeof stakeholderResponses.$inferSelect;
+export type StakeholderApproval = typeof stakeholderApprovals.$inferSelect;
+export type StakeholderReadReceipt = typeof stakeholderReadReceipts.$inferSelect;
+export type StakeholderAccessEvent = typeof stakeholderAccessEvents.$inferSelect;
 
 export type PlaybookStepPhase =
   | "triage"

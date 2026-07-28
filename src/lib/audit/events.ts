@@ -3,7 +3,7 @@ import { auditEvents } from "@/db/schema";
 import { newId } from "@/lib/utils";
 import { redactAuditSnapshot } from "./redact";
 
-export type AuditActorType = "user" | "api_token" | "system";
+export type AuditActorType = "user" | "api_token" | "system" | "external";
 
 export interface AuditContext {
   requestId?: string | null;

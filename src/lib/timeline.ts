@@ -55,6 +55,11 @@ export type TimelineEventType =
   | "correlation_suggestion_rejected"
   | "source_sync"
   | "investigation_command"
+| "stakeholder_invite"
+  | "stakeholder_update"
+  | "stakeholder_response"
+  | "stakeholder_evidence"
+  | "stakeholder_approval"
   | "custom";
 
 export async function writeTimelineEvent(opts: {

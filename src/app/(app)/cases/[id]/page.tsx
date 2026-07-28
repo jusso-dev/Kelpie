@@ -60,6 +60,11 @@ import { serialiseContext } from "@/lib/asset-context/context-core";
 import { getPriorityScoringSettings } from "@/lib/asset-context/settings";
 import { effectiveContextFields } from "@/lib/asset-context/effective";
 import CasePriorityPanel from "@/components/case-priority-panel";
+import StakeholderPanel from "@/components/stakeholder-panel";
+import {
+  listCaseExternalContributions,
+  listStakeholderInvites,
+} from "@/lib/stakeholder";
 
 type Props = { params: Promise<{ id: string }> };
 
@@ -132,6 +137,8 @@ export default async function CaseOverviewPage({ params }: Props) {
     attackStory,
     prioritySettings,
     investigationGraph,
+    stakeholderInvites,
+    externalContributions,
   ] = await Promise.all([
     getCustomFieldsForEntity(user.organisationId, c.id),
     listAvailableActions(user.organisationId, c.id),
@@ -154,6 +161,8 @@ export default async function CaseOverviewPage({ params }: Props) {
       nodeLimit: 100,
       edgeLimit: 200,
     }).catch(() => null),
+    listStakeholderInvites(user.organisationId, c.id),
+    listCaseExternalContributions(user.organisationId, c.id),
   ]);
   let priority = await getCasePriorityCore(user.organisationId, c.id);
   if (!priority) {
@@ -549,6 +558,25 @@ export default async function CaseOverviewPage({ params }: Props) {
             otherCase: r.otherCase,
           }))}
           suggestions={suggestions}
+        />
+
+        <StakeholderPanel
+          caseId={c.id}
+          canWrite={canEdit}
+          initialInvites={stakeholderInvites.map((i) => ({
+            id: i.id,
+            role: i.role,
+            purpose: i.purpose,
+            status: i.status,
+            maxTlp: i.maxTlp,
+            maxPap: i.maxPap,
+            expiresAt: i.expiresAt.toISOString(),
+            collaboratorEmail: i.collaboratorEmail,
+            collaboratorName: i.collaboratorName,
+            singleUse: i.singleUse,
+            createdAt: i.createdAt.toISOString(),
+          }))}
+          contributions={externalContributions}
         />
 
         <div className="kelpie-card p-5">

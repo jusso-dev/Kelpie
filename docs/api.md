@@ -924,6 +924,60 @@ Playbook revision / detection improvement / control gap proposals linked back to
 ### `GET /api/v1/reviews/reporting`
 Summary: overdue reviews, open required reviews, reviews still open after case close, overdue/open follow-ups, recurring themes, improvement counts by kind.
 
+## Stakeholder portal (external collaborators)
+
+Restricted, case-scoped portal for IT owners, vendors, legal, HR, and customers (issue #63). External parties are **not** organisation members and do **not** use BetterAuth staff sessions.
+
+### Staff API (bearer API token)
+
+#### `GET /api/v1/cases/{caseId}/stakeholder-invites`
+List invitations for a case. Scope: `cases:read`.
+
+#### `POST /api/v1/cases/{caseId}/stakeholder-invites`
+```json
+{
+  "email": "vendor@example.com",
+  "displayName": "Vendor SOC",
+  "role": "evidence_provider",
+  "purpose": "Upload firewall logs for KP-2026-0042",
+  "maxTlp": "amber",
+  "maxPap": "amber",
+  "expiresInHours": 72,
+  "singleUse": true
+}
+```
+Roles: `update_reader` | `evidence_provider` | `respondent` | `approver`.
+
+Returns `201` with `{ "id", "token", "expiresAt", "role", "status" }`. The plaintext `token` (prefix `kstk_`) is shown **once**; only a SHA-256 hash is stored.
+
+Sharing is denied (`403`) when:
+- the inviter lacks case **export** permission (compartment / restricted visibility), or
+- case TLP/PAP exceeds the invitation ceiling.
+
+Scope: `cases:write`.
+
+#### `GET /api/v1/cases/{caseId}/stakeholder-invites/{inviteId}`
+Analyst **preview** of the exact redacted external view. Scope: `cases:read`.
+
+#### `DELETE /api/v1/cases/{caseId}/stakeholder-invites/{inviteId}`
+Revoke invitation; optional body `{ "reason": "..." }`. Immediately revokes all active external sessions for that invite. Scope: `cases:write`.
+
+### External portal API (not BetterAuth)
+
+External sessions use token prefix `ksts_` via `Authorization: Bearer` or the `kelpie_stakeholder_session` cookie. These tokens never grant staff access.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/portal/accept` | Exchange invite token → session (`{ "token": "kstk_..." }`) |
+| `GET` | `/api/portal/me` | Redacted case portal view (no org/member enumeration) |
+| `POST` | `/api/portal/responses` | Post external response (`respondent`) |
+| `POST` | `/api/portal/updates/{updateId}/read` | Read receipt |
+| `POST` | `/api/portal/evidence-requests/{id}/upload` | Multipart file upload (`evidence_provider`) — same quarantine/custody pipeline as #44 |
+| `POST` | `/api/portal/approvals/{id}` | `{ "decision": "approved" \| "rejected", "note"? }` |
+| `POST` | `/api/portal/logout` | Revoke current session |
+
+UI entry: `/portal?token=kstk_...`. Invalid, expired, revoked, and replayed tokens all return the same `401`. Wrong object IDs return `404` (no existence oracle). External contributions are attributed as `source: "external"` on the case timeline and in reports.
+
 ## Webhooks (outbound)
 
 Configure under **Settings → Outbound webhooks**. Each delivery is signed:
