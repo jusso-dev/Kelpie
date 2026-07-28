@@ -56,6 +56,9 @@
     "test:playbook-catalogue": "tsx scripts/test-playbook-catalogue.ts",
     "test:playbooks-api": "tsx scripts/test-playbooks-api.ts",
     "test:team-queues": "tsx scripts/test-team-queues.ts",
+    "test:attack-core": "tsx scripts/test-attack-core.ts",
+    "test:attack-catalog-import": "tsx scripts/test-attack-catalog-import.ts",
+    "test:attack-mapping-api": "tsx scripts/test-attack-mapping-api.ts",
     "test:visual": "tsx scripts/visual-smoke.ts"
   },
   "dependencies": {

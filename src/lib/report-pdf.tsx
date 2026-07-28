@@ -212,6 +212,39 @@ function CaseReport({ data }: { data: CaseReportData }) {
           </>
         ) : null}
 
+        {data.attackMappings.length > 0 ? (
+          <>
+            <Text style={styles.sectionTitle}>ATT&CK technique mappings</Text>
+            {data.attackMappings.map((m) => (
+              <View key={m.id} style={styles.bullet}>
+                <Text style={styles.bulletDot}>•</Text>
+                <Text style={styles.bulletText}>
+                  {m.techniqueId}
+                  {m.technique.name ? ` — ${m.technique.name}` : ""}
+                  {m.technique.deprecated ? " [deprecated]" : ""}
+                  {" — "}
+                  {m.entityType}, confidence {m.confidence ?? "n/a"}, source {m.source}
+                </Text>
+              </View>
+            ))}
+          </>
+        ) : null}
+
+        {data.attackStory.length > 0 ? (
+          <>
+            <Text style={styles.sectionTitle}>Attack story</Text>
+            {data.attackStory.map((e, index) => (
+              <View key={e.id} style={styles.bullet}>
+                <Text style={styles.bulletDot}>{index + 1}.</Text>
+                <Text style={styles.bulletText}>
+                  {e.title} ({e.provenance})
+                  {e.techniqueId ? ` — ${e.techniqueId}` : ""}
+                </Text>
+              </View>
+            ))}
+          </>
+        ) : null}
+
         {data.observables.length > 0 ? (
           <>
             <Text style={styles.sectionTitle}>Observables</Text>

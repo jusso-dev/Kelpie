@@ -21,6 +21,8 @@ const EVENT_LABELS: Record<string, string> = {
   sla_breach: "SLA breach",
   response_action: "Response action",
   automation_run: "Agent automation",
+  attack_mapping_changed: "ATT&CK mapping",
+  attack_story_changed: "Attack story",
   custom: "Update",
 };
 
@@ -137,6 +139,20 @@ function summarisePayload(
         <>
           Agent profile <code>{String(payload.targetProfile ?? "?")}</code>:{" "}
           {String(payload.status ?? "unknown")}
+        </>
+      );
+    case "attack_mapping_changed":
+      return (
+        <>
+          {String(payload.action ?? "changed")} <code>{String(payload.technique_id ?? "")}</code> on{" "}
+          {String(payload.entity_type ?? "entity")}
+        </>
+      );
+    case "attack_story_changed":
+      return (
+        <>
+          {String(payload.action ?? "changed")}
+          {payload.title ? `: ${String(payload.title)}` : ""}
         </>
       );
     default:

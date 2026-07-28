@@ -44,6 +44,8 @@ export type TimelineEventType =
   | "watcher_removed"
   | "escalation_triggered"
   | "bulk_operation"
+  | "attack_mapping_changed"
+  | "attack_story_changed"
   | "custom";
 
 export async function writeTimelineEvent(opts: {

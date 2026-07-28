@@ -13,6 +13,7 @@ import {
   foreignKey,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import type { PlaybookGuidanceCategory } from "@/lib/attack/playbook-guidance";
 
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Enums                                                                      */
@@ -116,6 +117,46 @@ export const caseWaitingReasonEnum = pgEnum("case_waiting_reason", [
   "none",
   "third_party",
   "approval",
+]);
+
+/**
+ * `alert` is included so #55 (normalized alerts/entities/evidence) has a
+ * ready-made attach point once it lands on main; `mapping-core.ts` rejects
+ * writes for `alert` today with a clear "not yet supported" error rather than
+ * skipping tenant-scoped existence validation for a table that does not exist
+ * yet, since accepting an unverified entity id would be a tenant-isolation
+ * gap, not a feature.
+ */
+export const attackMappingEntityTypeEnum = pgEnum("attack_mapping_entity_type", [
+  "case",
+  "alert",
+  "observable",
+  "evidence",
+  "task",
+]);
+
+export const attackDomainEnum = pgEnum("attack_domain", [
+  "enterprise",
+  "mobile",
+  "ics",
+]);
+
+export const attackCatalogSourceEnum = pgEnum("attack_catalog_source", [
+  "bundled_baseline",
+  "url_import",
+]);
+
+export const attackCatalogStatusEnum = pgEnum("attack_catalog_status", [
+  "pending",
+  "active",
+  "superseded",
+  "failed",
+  "rolled_back",
+]);
+
+export const attackStoryProvenanceEnum = pgEnum("attack_story_provenance", [
+  "analyst",
+  "provider",
 ]);
 
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -2701,6 +2742,249 @@ export const ssoLoginStates = pgTable("sso_login_states", {
     .defaultNow(),
 });
 
+/* ────────────────────────────────────────────────────────────────────────── */
+/* ATT&CK technique mapping and investigation coverage (issue #48)           */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * One imported snapshot of the (organisation-independent) ATT&CK technique
+ * catalog. Each version is a self-contained, complete snapshot: an import
+ * carries forward every technique id ever seen in an earlier active version
+ * that is absent from the new source, marking it `deprecated` on the new
+ * technique row rather than dropping it — this is what keeps a deprecated
+ * technique readable on a historical case mapping without any fallback join
+ * across versions. Exactly one row is ever `active` at a time; a failed
+ * import is rolled back (the pending version and its technique rows deleted
+ * in the same transaction) rather than left half-written.
+ */
+export const attackCatalogVersions = pgTable(
+  "attack_catalog_versions",
+  {
+    id: text("id").primaryKey(),
+    version: text("version").notNull(),
+    source: attackCatalogSourceEnum("source").notNull(),
+    sourceUrl: text("source_url"),
+    status: attackCatalogStatusEnum("status").notNull().default("pending"),
+    techniqueCount: integer("technique_count").notNull().default(0),
+    tacticCount: integer("tactic_count").notNull().default(0),
+    error: text("error"),
+    importedBy: text("imported_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    importedAt: timestamp("imported_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    activatedAt: timestamp("activated_at", { withTimezone: true }),
+    supersededAt: timestamp("superseded_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("attack_catalog_versions_status_idx").on(t.status),
+    uniqueIndex("attack_catalog_versions_version_idx").on(t.version),
+  ],
+);
+
+/**
+ * A technique row scoped to one catalog version. `techniqueId` (e.g.
+ * `T1059.001`) is the stable, organisation-independent ATT&CK identifier —
+ * `attackTechniqueMappings.techniqueId` references this string directly
+ * rather than this table's surrogate `id`, so a mapping keeps resolving
+ * across catalog version changes without a migration.
+ */
+export const attackTechniques = pgTable(
+  "attack_techniques",
+  {
+    id: text("id").primaryKey(),
+    catalogVersionId: text("catalog_version_id")
+      .notNull()
+      .references(() => attackCatalogVersions.id, { onDelete: "cascade" }),
+    techniqueId: text("technique_id").notNull(),
+    name: text("name").notNull(),
+    domain: attackDomainEnum("domain").notNull().default("enterprise"),
+    /** Array of `{ id: string, name: string }` tactic references. */
+    tactics: jsonb("tactics").notNull().default(sql`'[]'::jsonb`),
+    isSubtechnique: boolean("is_subtechnique").notNull().default(false),
+    parentTechniqueId: text("parent_technique_id"),
+    platforms: jsonb("platforms").notNull().default(sql`'[]'::jsonb`),
+    dataSources: jsonb("data_sources").notNull().default(sql`'[]'::jsonb`),
+    description: text("description"),
+    url: text("url"),
+    deprecated: boolean("deprecated").notNull().default(false),
+    revoked: boolean("revoked").notNull().default(false),
+    supersededByTechniqueId: text("superseded_by_technique_id"),
+    attackVersion: text("attack_version"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("attack_techniques_version_technique_idx").on(
+      t.catalogVersionId,
+      t.techniqueId,
+    ),
+    index("attack_techniques_technique_idx").on(t.techniqueId),
+  ],
+);
+
+/**
+ * An analyst-recorded link between one ATT&CK technique and one entity
+ * (case, observable, evidence item, task — `alert` is reserved for #55).
+ * `techniqueId` is the stable ATT&CK id (not a foreign key to
+ * `attack_techniques.id`), so a mapping keeps resolving after a catalog
+ * refresh retires the technique row it was created against; `catalogVersionId`
+ * is kept only as best-effort provenance of which catalog was active at
+ * mapping time. The unique index is the duplicate-mapping guard the
+ * acceptance criteria require.
+ */
+export const attackTechniqueMappings = pgTable(
+  "attack_technique_mappings",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    entityType: attackMappingEntityTypeEnum("entity_type").notNull(),
+    entityId: text("entity_id").notNull(),
+    caseId: text("case_id").references(() => cases.id, {
+      onDelete: "cascade",
+    }),
+    techniqueId: text("technique_id").notNull(),
+    catalogVersionId: text("catalog_version_id").references(
+      () => attackCatalogVersions.id,
+      { onDelete: "set null" },
+    ),
+    confidence: integer("confidence"),
+    source: text("source").notNull().default("analyst"),
+    notes: text("notes"),
+    detectionNotes: text("detection_notes"),
+    responseNotes: text("response_notes"),
+    /** Analyst-entered free text only — never populated automatically. */
+    actorAttribution: text("actor_attribution"),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedBy: text("updated_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("attack_mappings_unique_idx").on(
+      t.organisationId,
+      t.entityType,
+      t.entityId,
+      t.techniqueId,
+    ),
+    index("attack_mappings_org_technique_idx").on(
+      t.organisationId,
+      t.techniqueId,
+    ),
+    index("attack_mappings_org_entity_idx").on(
+      t.organisationId,
+      t.entityType,
+      t.entityId,
+    ),
+    index("attack_mappings_case_idx").on(t.caseId),
+    check(
+      "attack_mappings_confidence_range",
+      sql.raw(
+        `"confidence" is null or ("confidence" >= 0 and "confidence" <= 100)`,
+      ),
+    ),
+  ],
+);
+
+/**
+ * One explicit step in a case's analyst/provider-ordered "attack story".
+ * `sequenceIndex` is the only thing that determines display order — it is
+ * set by an analyst (or copied from a provider-supplied sequence) and is
+ * never inferred from `occurredAt`, which is kept only as optional
+ * contextual timing, per the acceptance criterion that ordering must not
+ * claim causality from timestamps alone.
+ */
+export const attackStoryEntries = pgTable(
+  "attack_story_entries",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    mappingId: text("mapping_id").references(() => attackTechniqueMappings.id, {
+      onDelete: "set null",
+    }),
+    techniqueId: text("technique_id"),
+    sequenceIndex: integer("sequence_index").notNull(),
+    title: text("title").notNull(),
+    description: text("description"),
+    provenance: attackStoryProvenanceEnum("provenance").notNull().default("analyst"),
+    sourceRef: text("source_ref"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("attack_story_case_sequence_idx").on(t.caseId, t.sequenceIndex),
+    index("attack_story_org_case_idx").on(t.organisationId, t.caseId),
+  ],
+);
+
+/**
+ * Optional, versioned D3FEND countermeasure mapping. Links a D3FEND
+ * technique to this organisation's own playbook step and/or response action,
+ * so playbook/response guidance can be cross-referenced against a defensive
+ * countermeasure catalog without Kelpie ever inferring the link itself.
+ */
+export const d3fendMappings = pgTable(
+  "d3fend_mappings",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    catalogVersion: text("catalog_version").notNull(),
+    d3fendTechniqueId: text("d3fend_technique_id").notNull(),
+    d3fendTechniqueName: text("d3fend_technique_name").notNull(),
+    attackTechniqueIds: jsonb("attack_technique_ids")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    playbookId: text("playbook_id").references(() => playbooks.id, {
+      onDelete: "cascade",
+    }),
+    playbookStepId: text("playbook_step_id"),
+    responseActionId: text("response_action_id").references(
+      () => responseActions.id,
+      { onDelete: "cascade" },
+    ),
+    notes: text("notes"),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("d3fend_mappings_org_idx").on(t.organisationId),
+    index("d3fend_mappings_playbook_idx").on(t.playbookId),
+    index("d3fend_mappings_response_action_idx").on(t.responseActionId),
+    check(
+      "d3fend_mappings_scope_target",
+      sql.raw(`"playbook_id" is not null or "response_action_id" is not null`),
+    ),
+  ],
+);
+
 export type Organisation = typeof organisations.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type TwoFactor = typeof twoFactors.$inferSelect;
@@ -2761,6 +3045,11 @@ export type ShiftHandoff = typeof shiftHandoffs.$inferSelect;
 export type EscalationPolicy = typeof escalationPolicies.$inferSelect;
 export type EscalationPolicyRun = typeof escalationPolicyRuns.$inferSelect;
 export type BulkOperation = typeof bulkOperations.$inferSelect;
+export type AttackCatalogVersion = typeof attackCatalogVersions.$inferSelect;
+export type AttackTechniqueRow = typeof attackTechniques.$inferSelect;
+export type AttackTechniqueMapping = typeof attackTechniqueMappings.$inferSelect;
+export type AttackStoryEntry = typeof attackStoryEntries.$inferSelect;
+export type D3fendMapping = typeof d3fendMappings.$inferSelect;
 
 export type PlaybookStepPhase =
   | "triage"
@@ -2770,6 +3059,10 @@ export type PlaybookStepPhase =
   | "recovery"
   | "communications"
   | "closure";
+
+/** Documented guidance categories a playbook step's description covers. */
+export { PLAYBOOK_GUIDANCE_CATEGORIES } from "@/lib/attack/playbook-guidance";
+export type { PlaybookGuidanceCategory } from "@/lib/attack/playbook-guidance";
 
 export type PlaybookStep = {
   id: string;
@@ -2788,6 +3081,10 @@ export type PlaybookStep = {
    * automatically from a playbook step, and the response-action approval gate
    * (see `responseActionRuns`) is enforced independently. */
   requiresApproval?: boolean;
+  /** ATT&CK technique ids this step's guidance addresses. */
+  attackTechniqueIds?: string[];
+  /** Which of investigation/detection/containment/recovery this step documents. */
+  guidanceCategories?: PlaybookGuidanceCategory[];
 };
 
 /**

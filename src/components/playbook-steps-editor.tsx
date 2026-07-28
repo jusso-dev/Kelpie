@@ -3,12 +3,18 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import {
+  PLAYBOOK_GUIDANCE_CATEGORIES,
+  type PlaybookGuidanceCategory,
+} from "@/lib/attack/playbook-guidance";
 
 type DraftStep = {
   title: string;
   description: string;
   offsetMinutes: number;
   isRequired: boolean;
+  attackTechniqueIds: string[];
+  guidanceCategories: PlaybookGuidanceCategory[];
 };
 
 const STARTING: DraftStep[] = [
@@ -17,6 +23,8 @@ const STARTING: DraftStep[] = [
     description: "Open the case, confirm scope, set severity.",
     offsetMinutes: 15,
     isRequired: true,
+    attackTechniqueIds: [],
+    guidanceCategories: [],
   },
 ];
 
@@ -43,8 +51,30 @@ export default function PlaybookStepsEditor({
   function add() {
     setSteps((prev) => [
       ...prev,
-      { title: "", description: "", offsetMinutes: 60, isRequired: true },
+      {
+        title: "",
+        description: "",
+        offsetMinutes: 60,
+        isRequired: true,
+        attackTechniqueIds: [],
+        guidanceCategories: [],
+      },
     ]);
+  }
+
+  function toggleGuidance(i: number, category: PlaybookGuidanceCategory) {
+    setSteps((prev) =>
+      prev.map((s, idx) =>
+        idx === i
+          ? {
+              ...s,
+              guidanceCategories: s.guidanceCategories.includes(category)
+                ? s.guidanceCategories.filter((c) => c !== category)
+                : [...s.guidanceCategories, category],
+            }
+          : s,
+      ),
+    );
   }
 
   return (
@@ -108,6 +138,44 @@ export default function PlaybookStepsEditor({
                 Required
               </label>
             </div>
+            <div className="kelpie-field">
+              <label htmlFor={`step-techniques-${i}`} className="kelpie-label">
+                ATT&CK technique ids this step documents (comma separated)
+              </label>
+              <input
+                id={`step-techniques-${i}`}
+                className="kelpie-input"
+                placeholder="T1566, T1566.001"
+                value={s.attackTechniqueIds.join(", ")}
+                onChange={(e) =>
+                  update(i, {
+                    attackTechniqueIds: e.target.value
+                      .split(",")
+                      .map((v) => v.trim().toUpperCase())
+                      .filter(Boolean),
+                  })
+                }
+              />
+            </div>
+            <fieldset className="flex flex-wrap gap-3">
+              <legend className="text-xs text-slate-400 mb-1">
+                Guidance categories this step&apos;s description documents
+              </legend>
+              {PLAYBOOK_GUIDANCE_CATEGORIES.map((category) => (
+                <label
+                  key={category}
+                  className="text-xs text-slate-400 inline-flex items-center gap-1 capitalize"
+                >
+                  <input
+                    type="checkbox"
+                    className="kelpie-checkbox"
+                    checked={s.guidanceCategories.includes(category)}
+                    onChange={() => toggleGuidance(i, category)}
+                  />
+                  {category}
+                </label>
+              ))}
+            </fieldset>
           </div>
         ))}
       </div>

@@ -18,6 +18,18 @@ import type { ScopeValue } from "@/lib/scopes";
 import { tokenHasScope } from "@/lib/scopes";
 import { getThreatLandscapeData } from "@/lib/threat-landscape";
 import { TI_INDICATOR_TYPES } from "@/lib/ti/indicator-types";
+import { searchTechniques } from "@/lib/attack/catalog-core";
+import {
+  MAPPING_ENTITY_TYPES,
+  attachTechniqueCore,
+  listMappingsForCase,
+  listMappingsForEntity,
+} from "@/lib/attack/mapping-core";
+import {
+  getCaseTemplateCoverage,
+  getOrgCoverageStats,
+  getPlaybookCoverage,
+} from "@/lib/attack/coverage-core";
 
 export const dynamic = "force-dynamic";
 
@@ -79,6 +91,35 @@ const playbooksListInput = z.object({
 
 const playbookGetInput = z.object({
   playbookId: z.string().trim().min(1).max(128),
+});
+
+const attackTechniquesSearchInput = z.object({
+  query: z.string().trim().max(256).optional(),
+  tactic: z.string().trim().max(64).optional(),
+  includeDeprecated: z.boolean().optional(),
+  limit: z.number().int().min(1).max(200).optional(),
+});
+
+const attackMappingsListInput = z
+  .object({
+    caseId: z.string().trim().min(1).max(128).optional(),
+    entityType: z.enum(MAPPING_ENTITY_TYPES).optional(),
+    entityId: z.string().trim().min(1).max(128).optional(),
+  })
+  .refine((v) => Boolean(v.caseId) || (Boolean(v.entityType) && Boolean(v.entityId)), {
+    message: "Provide caseId, or both entityType and entityId",
+  });
+
+const attackTechniqueAttachInput = z.object({
+  entityType: z.enum(MAPPING_ENTITY_TYPES),
+  entityId: z.string().trim().min(1).max(128),
+  techniqueId: z.string().trim().min(1).max(32),
+  confidence: z.number().int().min(0).max(100).nullable().optional(),
+  source: z.string().trim().max(64).optional(),
+  notes: z.string().max(10_000).nullable().optional(),
+  detectionNotes: z.string().max(10_000).nullable().optional(),
+  responseNotes: z.string().max(10_000).nullable().optional(),
+  actorAttribution: z.string().max(500).nullable().optional(),
 });
 
 const tools = [
@@ -282,6 +323,74 @@ const tools = [
       additionalProperties: false,
     },
   },
+  {
+    name: "attack_techniques_search",
+    title: "Search ATT&CK techniques",
+    description:
+      "Search the organisation-independent ATT&CK technique catalog by id, name, or tactic. Deprecated techniques are excluded unless includeDeprecated is set.",
+    scope: "attack:read" as ScopeValue,
+    readOnly: true,
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Technique id or name substring." },
+        tactic: { type: "string", description: "Exact ATT&CK tactic id, e.g. 'lateral-movement'." },
+        includeDeprecated: { type: "boolean", description: "Include deprecated techniques." },
+        limit: { type: "integer", minimum: 1, maximum: 200, default: 50 },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "attack_mappings_list",
+    title: "List ATT&CK technique mappings",
+    description:
+      "List ATT&CK technique mappings, either every mapping touching a case (its own mapping plus its observables/evidence/tasks) or the mappings on one specific entity. Includes confidence, source, notes, detection/response notes, and actor attribution.",
+    scope: "attack:read" as ScopeValue,
+    readOnly: true,
+    inputSchema: {
+      type: "object",
+      properties: {
+        caseId: { type: "string", description: "Case identifier. Returns every mapping touching this case." },
+        entityType: { type: "string", enum: [...MAPPING_ENTITY_TYPES] },
+        entityId: { type: "string" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "attack_coverage_get",
+    title: "Get ATT&CK coverage",
+    description:
+      "Get organisation-wide ATT&CK coverage: mapped techniques by tactic, mappings still missing detection/response notes, and playbook/case-template coverage gaps by investigation/detection/containment/recovery guidance category.",
+    scope: "attack:read" as ScopeValue,
+    readOnly: true,
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "attack_technique_attach",
+    title: "Attach an ATT&CK technique mapping",
+    description:
+      "Attach an ATT&CK technique to a case, observable, evidence item, or task, recording confidence, source, notes, detection notes, response notes, and analyst-entered actor attribution. Rejects a duplicate mapping for the same technique on the same entity.",
+    scope: "attack:write" as ScopeValue,
+    readOnly: false,
+    inputSchema: {
+      type: "object",
+      properties: {
+        entityType: { type: "string", enum: [...MAPPING_ENTITY_TYPES] },
+        entityId: { type: "string" },
+        techniqueId: { type: "string", description: "e.g. T1059 or T1059.001" },
+        confidence: { type: "integer", minimum: 0, maximum: 100 },
+        source: { type: "string", description: "e.g. analyst, detection_rule, threat_intel, provider" },
+        notes: { type: "string" },
+        detectionNotes: { type: "string" },
+        responseNotes: { type: "string" },
+        actorAttribution: { type: "string", description: "Analyst-entered only; never inferred automatically." },
+      },
+      required: ["entityType", "entityId", "techniqueId"],
+      additionalProperties: false,
+    },
+  },
 ] as const;
 
 type JsonRpcId = string | number | null;
@@ -451,6 +560,31 @@ async function callTool(
     }
     return toolResult(playbook);
   }
+  if (name === "attack_techniques_search") {
+    const input = attackTechniquesSearchInput.parse(args);
+    return toolResult({ techniques: await searchTechniques(input) });
+  }
+  if (name === "attack_mappings_list") {
+    const input = attackMappingsListInput.parse(args);
+    const mappings = input.caseId
+      ? await listMappingsForCase(organisationId, input.caseId)
+      : await listMappingsForEntity(organisationId, input.entityType!, input.entityId!);
+    return toolResult({ mappings });
+  }
+  if (name === "attack_coverage_get") {
+    noInput.parse(args);
+    const [stats, playbookCoverage, templateCoverage] = await Promise.all([
+      getOrgCoverageStats(organisationId),
+      getPlaybookCoverage(organisationId),
+      getCaseTemplateCoverage(organisationId),
+    ]);
+    return toolResult({ stats, playbookCoverage, templateCoverage });
+  }
+  if (name === "attack_technique_attach") {
+    const input = attackTechniqueAttachInput.parse(args);
+    const mapping = await attachTechniqueCore(organisationId, null, input);
+    return toolResult({ mapping });
+  }
   throw new Error("Unknown tool");
 }
 
@@ -496,7 +630,7 @@ export async function POST(req: Request) {
       capabilities: { tools: { listChanged: false } },
       serverInfo: { name: "kelpie", version: "0.2.0" },
       instructions:
-        "Read-only access to organisation threat intelligence, Threat landscape, Cyber brief, and watched-vendor matches.",
+        "Access to organisation threat intelligence, Threat landscape, Cyber brief, watched-vendor matches, case relationships, evidence, and ATT&CK technique mappings/coverage. Most tools are read-only; attack_technique_attach is the one tool that writes data (see each tool's readOnlyHint).",
     });
   }
   if (message.method === "ping") return rpcResult(id, {});
@@ -504,15 +638,21 @@ export async function POST(req: Request) {
     return rpcResult(id, {
       tools: tools
         .filter((tool) => tokenHasScope(auth.token.scopes, tool.scope))
-        .map(({ scope: _scope, ...tool }) => ({
-          ...tool,
-          annotations: {
-            readOnlyHint: true,
-            destructiveHint: false,
-            idempotentHint: true,
-            openWorldHint: true,
-          },
-        })),
+        .map((full) => {
+          const readOnly = "readOnly" in full ? full.readOnly : true;
+          const { scope: _scope, readOnly: _readOnly, ...tool } = full as typeof full & {
+            readOnly?: boolean;
+          };
+          return {
+            ...tool,
+            annotations: {
+              readOnlyHint: readOnly,
+              destructiveHint: false,
+              idempotentHint: readOnly,
+              openWorldHint: true,
+            },
+          };
+        }),
     });
   }
   if (message.method === "tools/call") {
