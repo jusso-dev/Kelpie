@@ -7,9 +7,12 @@ import TokenCreator from "@/components/token-creator";
 import SlaSettings from "@/components/sla-settings";
 import TokenList from "@/components/token-list";
 import TeamManagement from "@/components/team-management";
+import McpOnboarding from "@/components/mcp-onboarding";
+import { resolvePublicMcpUrl } from "@/lib/mcp/onboarding";
 
 export default async function SettingsPage() {
   const user = await requireUser();
+  const publicMcpUrl = resolvePublicMcpUrl();
   const [tokens, teamMembers, slaRows] = await Promise.all([
     db
       .select()
@@ -149,6 +152,21 @@ export default async function SettingsPage() {
             timeToContainMinutes: p.timeToContainMinutes,
             timeToResolveMinutes: p.timeToResolveMinutes,
           }))}
+          isAdmin={isAdmin}
+        />
+      </section>
+
+      <section className="kelpie-section" id="mcp-agent-setup">
+        <div className="kelpie-section-header">
+          <h2>MCP agent setup</h2>
+          <p>
+            Copyable Streamable HTTP endpoint, least-privilege token scopes,
+            client configs, and AGENTS.md instructions for AI agents.
+          </p>
+        </div>
+        <McpOnboarding
+          publicUrl={publicMcpUrl}
+          organisationName={user.organisationName}
           isAdmin={isAdmin}
         />
       </section>

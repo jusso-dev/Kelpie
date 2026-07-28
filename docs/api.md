@@ -489,8 +489,16 @@ Accept: application/json, text/event-stream
 Content-Type: application/json
 ```
 
+**Administrators should onboard agents from Settings → MCP agent setup** rather
+than assembling endpoint, scopes, client config, and instructions by hand. That
+UI derives the public endpoint from the configured `APP_URL`, issues a
+least-privilege token (secret shown once), and copies connection details,
+client configuration, an `AGENTS.md` block, and the canonical `LLM.txt` prompt.
+Tool-to-scope mappings in Settings are generated from the same catalogue the
+MCP route serves (`src/lib/mcp/catalogue.ts`) so documentation cannot drift.
+
 Configure an MCP client with the endpoint above and a Kelpie API token carrying
-one or more machine-data scopes. Available tools:
+one or more machine-data scopes. Available tools (canonical catalogue):
 
 - `search_threat_intelligence` — `threat_intelligence:read`
 - `get_threat_landscape` — `threat_landscape:read`
@@ -511,9 +519,9 @@ Every tool except `attack_technique_attach` is read-only (see each tool's
 `readOnlyHint` in `tools/list`). Tool discovery only returns tools permitted by
 the token's scopes. `playbooks_list`/`playbooks_get` are the recommended way for
 an agent to discover Kelpie's playbook catalogue; see `/LLM.txt` in the
-repository root for a full copyable prompt describing how an agent should
-use them, and `docs/playbooks.md` for the catalogue's structure and a worked
-example.
+repository root (also copyable from Settings → MCP agent setup and Guides) for
+a full agent prompt, and `docs/playbooks.md` for the catalogue's structure and a
+worked example.
 
 ## Comments
 
