@@ -13,6 +13,7 @@ Errors return `{ "error": "..." }` with an appropriate HTTP status (`400` invali
 | Scope | Allows |
 | --- | --- |
 | `cases:read` / `cases:write` | Read or create/update cases |
+| `cases:override_closure` | Override case-closure policy requirements (sensitive; only grant to admin-issued tokens) |
 | `tasks:read` / `tasks:write` | Read or create/update tasks |
 | `observables:read` / `observables:write` | Search or add observables |
 | `comments:read` / `comments:write` | Read or post comments |
@@ -100,6 +101,44 @@ Full case with embedded `observables`, `tasks`, and a `recent_timeline` slice (5
 
 ### `PATCH /api/v1/cases/{id}`
 Any subset of `status, severity, classification, tlp, pap, assigneeId, title, summary`. Status transitions stamp the lifecycle milestones and fire the `case.status_changed` webhook.
+
+`status: "closed"` is rejected here (`400`). Use `POST /api/v1/cases/{id}/close` so the shared closure validator runs. Reopening a closed case also requires `POST /api/v1/cases/{id}/reopen` with a reason.
+
+### `POST /api/v1/cases/{id}/close`
+Closes a case through the organisation (or template) closure policy. Same validator as the UI.
+
+```json
+{
+  "disposition": "resolved",
+  "conclusion": "Contained and eradicated; recovery verified.",
+  "determination": "true_positive",
+  "rootCause": "Phishing credential harvest",
+  "businessImpact": "None material",
+  "lessonsLearned": "Faster MFA enrolment",
+  "approverId": "user_…",
+  "reviewedRelatedCaseIds": ["case_…"],
+  "postIncidentReviewCompleted": true,
+  "version": 3,
+  "override": false,
+  "overrideReason": null
+}
+```
+
+- `disposition` (required): `resolved` | `false_positive` | `duplicate` | `benign` | `risk_accepted`
+- `conclusion` (required): analyst narrative
+- `version` (optional): optimistic concurrency; `409 version_conflict` when stale
+- Unmet requirements → `422 { "error": "closure_requirements_not_met", "evaluation": { … } }` with a per-requirement checklist (`missing` lists exact tasks/fields/alerts/…)
+- Privileged override: set `override: true` + `overrideReason` (≥3 chars). Requires `cases:override_closure` on the token (or admin in the UI). When the policy version has two-person override, `approverId` must be a distinct admin in the same organisation.
+- Success returns `{ ok, version, snapshot_id, was_override, evaluation }`. A closure snapshot is always persisted and retained across reopen.
+
+### `POST /api/v1/cases/{id}/reopen`
+```json
+{ "reason": "New IOC matched in TI feed", "nextStatus": "in_progress", "version": 4 }
+```
+Prior closure snapshots stay on the case (stamped with `reopenedAt` / `reopenReason`). `reason` is required (≥3 chars).
+
+### `GET|POST /api/v1/cases/{id}/closure-check`
+Preview policy evaluation without mutating the case (`cases:read`). GET uses placeholder disposition fields; POST accepts the same disposition body as close (without override). Also returns historical `snapshots` on GET.
 
 ## Tasks
 

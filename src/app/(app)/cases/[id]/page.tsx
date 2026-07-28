@@ -9,6 +9,8 @@ import { and, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import CaseCloseForm from "@/components/case-close-form";
+import CaseReopenForm from "@/components/case-reopen-form";
+import { listClosureSnapshotsCore } from "@/lib/closure/close-core";
 import { CaseControls } from "@/components/case-controls";
 import { MITRE_TECHNIQUES, findTechnique } from "@/data/mitre";
 import MitrePicker from "@/components/mitre-picker";
@@ -55,9 +57,14 @@ export default async function CaseOverviewPage({ params }: Props) {
     .limit(1);
   if (!c) notFound();
 
-  const [orgUsers, orgPlaybooks, runs] = await Promise.all([
+  const [orgUsers, orgPlaybooks, runs, closureSnapshots] = await Promise.all([
     db
-      .select({ id: users.id, name: users.name, email: users.email })
+      .select({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        role: users.role,
+      })
       .from(users)
       .where(eq(users.organisationId, user.organisationId)),
     db
@@ -79,6 +86,7 @@ export default async function CaseOverviewPage({ params }: Props) {
       .from(playbookRuns)
       .innerJoin(playbooks, eq(playbooks.id, playbookRuns.playbookId))
       .where(eq(playbookRuns.caseId, id)),
+    listClosureSnapshotsCore(user.organisationId, id),
   ]);
 
   const techniques = (c.mitreTechniques as string[]) ?? [];
@@ -240,14 +248,95 @@ export default async function CaseOverviewPage({ params }: Props) {
               Closed {c.closedAt ? format(c.closedAt, "PPpp") : ""}
             </p>
             <p className="text-sm text-slate-200">
-              <span className="text-slate-500">Reason:</span> {c.closureReason}
+              <span className="text-slate-500">Disposition:</span> {c.closureReason}
             </p>
+            {c.closureDetermination ? (
+              <p className="text-sm text-slate-200 mt-1">
+                <span className="text-slate-500">Determination:</span>{" "}
+                {c.closureDetermination}
+              </p>
+            ) : null}
             <p className="text-sm text-slate-200 mt-2 whitespace-pre-wrap">
               {c.closureSummary}
             </p>
+            {c.rootCause ? (
+              <p className="text-sm text-slate-300 mt-2">
+                <span className="text-slate-500">Root cause:</span> {c.rootCause}
+              </p>
+            ) : null}
+            {c.businessImpact ? (
+              <p className="text-sm text-slate-300 mt-1">
+                <span className="text-slate-500">Business impact:</span>{" "}
+                {c.businessImpact}
+              </p>
+            ) : null}
+            {c.lessonsLearned ? (
+              <p className="text-sm text-slate-300 mt-1">
+                <span className="text-slate-500">Lessons learned:</span>{" "}
+                {c.lessonsLearned}
+              </p>
+            ) : null}
+            {closureSnapshots.length > 0 ? (
+              <div className="mt-4 space-y-2 border-t border-slate-800 pt-3">
+                <h3 className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Closure history
+                </h3>
+                {closureSnapshots.map((s) => (
+                  <div
+                    key={s.id}
+                    className="rounded border border-slate-800 bg-slate-950/40 p-2 text-xs text-slate-400"
+                  >
+                    <p>
+                      {format(s.closedAt, "PPpp")}
+                      {s.wasOverride ? (
+                        <span className="ml-2 text-amber-400">override</span>
+                      ) : null}
+                      {s.reopenedAt ? (
+                        <span className="ml-2 text-sky-400">
+                          reopened {format(s.reopenedAt, "PPpp")}
+                        </span>
+                      ) : (
+                        <span className="ml-2 text-emerald-400">active</span>
+                      )}
+                    </p>
+                    <p className="mt-0.5">
+                      Disposition: {s.disposition}
+                      {s.policyVersion != null
+                        ? ` · policy v${s.policyVersion}`
+                        : ""}
+                    </p>
+                    {s.wasOverride && s.overrideReason ? (
+                      <p className="mt-0.5 text-amber-200/80">
+                        Override: {s.overrideReason}
+                      </p>
+                    ) : null}
+                    {s.reopenReason ? (
+                      <p className="mt-0.5">Reopen reason: {s.reopenReason}</p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {canEdit ? (
+              <CaseReopenForm
+                caseId={c.id}
+                caseNumber={c.caseNumber}
+                version={c.version}
+              />
+            ) : null}
           </div>
         ) : (
-          <CaseCloseForm caseId={c.id} caseNumber={c.caseNumber} />
+          <CaseCloseForm
+            caseId={c.id}
+            caseNumber={c.caseNumber}
+            version={c.version}
+            canOverride={user.role === "admin"}
+            orgUsers={orgUsers.map((u) => ({
+              id: u.id,
+              name: u.name,
+              role: u.role,
+            }))}
+          />
         )}
       </div>
 

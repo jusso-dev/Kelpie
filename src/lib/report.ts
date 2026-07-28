@@ -323,10 +323,20 @@ export function renderCaseMarkdown(data: CaseReportData): string {
       lines.push(cm.body, "");
     }
   }
-  if (c.status === "closed") {
+  if (c.status === "closed" || c.closureReason) {
     lines.push("## Closure", "");
-    if (c.closureReason) lines.push(`- Reason: **${c.closureReason}**`);
+    if (c.closureReason) lines.push(`- Disposition: **${c.closureReason}**`);
+    if (c.closureDetermination) {
+      lines.push(`- Determination: **${c.closureDetermination}**`);
+    }
     if (c.closureSummary) lines.push("", c.closureSummary, "");
+    if (c.rootCause) lines.push("", `**Root cause:** ${c.rootCause}`, "");
+    if (c.businessImpact) {
+      lines.push(`**Business impact:** ${c.businessImpact}`, "");
+    }
+    if (c.lessonsLearned) {
+      lines.push(`**Lessons learned:** ${c.lessonsLearned}`, "");
+    }
   }
   return lines.join("\n");
 }

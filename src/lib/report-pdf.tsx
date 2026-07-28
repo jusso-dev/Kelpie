@@ -312,14 +312,32 @@ function CaseReport({ data }: { data: CaseReportData }) {
           </>
         ) : null}
 
-        {c.status === "closed" ? (
+        {c.status === "closed" || c.closureReason ? (
           <>
             <Text style={styles.sectionTitle}>Closure</Text>
             {c.closureReason ? (
-              <Text style={styles.para}>Reason: {c.closureReason}</Text>
+              <Text style={styles.para}>Disposition: {c.closureReason}</Text>
+            ) : null}
+            {c.closureDetermination ? (
+              <Text style={styles.para}>
+                Determination: {c.closureDetermination}
+              </Text>
             ) : null}
             {c.closureSummary ? (
               <Text style={styles.para}>{c.closureSummary}</Text>
+            ) : null}
+            {c.rootCause ? (
+              <Text style={styles.para}>Root cause: {c.rootCause}</Text>
+            ) : null}
+            {c.businessImpact ? (
+              <Text style={styles.para}>
+                Business impact: {c.businessImpact}
+              </Text>
+            ) : null}
+            {c.lessonsLearned ? (
+              <Text style={styles.para}>
+                Lessons learned: {c.lessonsLearned}
+              </Text>
             ) : null}
           </>
         ) : null}

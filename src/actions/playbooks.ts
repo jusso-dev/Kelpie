@@ -277,6 +277,7 @@ export async function startPlaybookOnCase(formData: FormData) {
       orderIndex: i,
       playbookRunId: runId,
       playbookStepId: step.id,
+      isRequired: step.isRequired === true,
     });
   }
   await writeTimelineEvent({

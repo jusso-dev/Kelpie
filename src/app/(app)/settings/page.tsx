@@ -106,6 +106,12 @@ export default async function SettingsPage() {
           >
             Escalation policies
           </Link>
+          <Link
+            href="/settings/closure-policies"
+            className="kelpie-btn kelpie-btn-secondary justify-center"
+          >
+            Closure policies
+          </Link>
         </div>
       </section>
 

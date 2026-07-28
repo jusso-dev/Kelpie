@@ -95,6 +95,15 @@ export async function PATCH(
   let workingVersion = parsed.data.version;
   try {
     if (parsed.data.status) {
+      if (parsed.data.status === "closed") {
+        return NextResponse.json(
+          {
+            error:
+              "Use POST /api/v1/cases/:id/close for closure (policy evaluation and disposition required)",
+          },
+          { status: 400 },
+        );
+      }
       const updated = await setCaseStatusCore(
         auth.token.organisationId,
         null,

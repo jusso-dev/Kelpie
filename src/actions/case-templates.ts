@@ -157,6 +157,7 @@ export async function applyCaseTemplate(formData: FormData) {
     dataClassificationTags: Array.isArray(tpl.defaultDataClassificationTags)
       ? (tpl.defaultDataClassificationTags as string[])
       : [],
+    templateId: tpl.id,
   });
   // Add template tasks first (order 1..N), then optionally the playbook
   // which appends its own tasks at higher order indexes.

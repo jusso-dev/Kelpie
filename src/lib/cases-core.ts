@@ -14,6 +14,16 @@ import { nextCaseNumber } from "./case-number";
 import { writeTimelineEvent } from "./timeline";
 import { normalizeTags } from "./tags";
 import { enrichNewCaseWithThreatIntel } from "./ti/case-enrichment";
+import { CaseVersionConflictError } from "./cases-errors";
+import {
+  closeCaseCore as closeCaseWithPolicy,
+  reopenCaseCore as reopenCaseWithPolicy,
+  type CloseCaseInput,
+  type ReopenCaseInput,
+} from "./closure/close-core";
+import { ClosurePathError } from "./closure/types";
+
+export { CaseVersionConflictError } from "./cases-errors";
 
 const STATUS_VALUES = [
   "open",
@@ -50,15 +60,6 @@ export const CASE_ENUMS = {
   classification: CLASSIFICATION_VALUES,
 };
 
-export class CaseVersionConflictError extends Error {
-  current: Record<string, unknown>;
-  constructor(current: Record<string, unknown>) {
-    super("case_version_conflict");
-    this.name = "CaseVersionConflictError";
-    this.current = current;
-  }
-}
-
 type CaseUpdateSet = Omit<Partial<typeof cases.$inferInsert>, "version"> & {
   version?: number | SQL;
 };
@@ -87,6 +88,8 @@ export type CreateCaseInput = {
   sourceSystem?: string | null;
   sourceReference?: string | null;
   sourceUrl?: string | null;
+  /** Case template the case was opened from (closure policy resolution). */
+  templateId?: string | null;
 };
 
 export async function createCaseCore(
@@ -133,6 +136,7 @@ export async function createCaseCore(
       sourceSystem: input.sourceSystem ?? null,
       sourceReference: input.sourceReference ?? null,
       sourceUrl: input.sourceUrl ?? null,
+      templateId: input.templateId ?? null,
     })
     .onConflictDoNothing()
     .returning({ id: cases.id, caseNumber: cases.caseNumber });
@@ -201,17 +205,27 @@ export async function setCaseStatusCore(
   if (nextStatus === "in_progress" && !existing.acknowledgedAt) {
     patch.acknowledgedAt = new Date();
   }
+  // Closing and reopening must go through the policy-aware close/reopen
+  // paths (issue #57) so disposition, snapshots, and requirements stay
+  // consistent for UI, REST, bulk, and automation callers.
+  if (nextStatus === "closed") {
+    throw new ClosurePathError(
+      "Use closeCase to close a case (disposition and policy evaluation required)",
+    );
+  }
+  if (existing.status === "closed") {
+    throw new ClosurePathError(
+      "Use reopenCase with a reopen reason to reopen a closed case",
+    );
+  }
   if (nextStatus === "contained" && !existing.containedAt) {
     patch.containedAt = new Date();
   }
-  if (
-    (nextStatus === "recovered" || nextStatus === "closed") &&
-    !existing.resolvedAt
-  ) {
-    patch.resolvedAt = new Date();
+  if (nextStatus === "eradicated" && !existing.eradicatedAt) {
+    patch.eradicatedAt = new Date();
   }
-  if (nextStatus === "closed" && !existing.closedAt) {
-    patch.closedAt = new Date();
+  if (nextStatus === "recovered" && !existing.resolvedAt) {
+    patch.resolvedAt = new Date();
   }
   const updated = await updateCaseAtomically(
     caseId,
@@ -414,32 +428,40 @@ export async function patchCaseCore(
   return updated;
 }
 
+/**
+ * Back-compat wrapper used by server actions and older call sites that only
+ * pass disposition + conclusion. New fields (determination, override, …)
+ * flow through `closeCaseWithPolicy` / `CloseCaseInput`.
+ */
 export async function closeCaseCore(
   organisationId: string,
   actorId: string | null,
   caseId: string,
   reason: string,
   summary: string,
+  extra: Omit<CloseCaseInput, "disposition" | "conclusion"> = {},
 ): Promise<void> {
-  if (!reason.trim()) throw new Error("Closure reason is required");
-  if (!summary.trim()) throw new Error("Closure summary is required");
-  const existing = await loadCaseInOrg(caseId, organisationId);
-  if (!existing) throw new Error("Case not found");
-  await db
-    .update(cases)
-    .set({
-      status: "closed",
-      closedAt: new Date(),
-      resolvedAt: existing.resolvedAt ?? new Date(),
-      closureReason: reason.trim(),
-      closureSummary: summary.trim(),
-      version: sql`${cases.version} + 1`,
-    })
-    .where(eq(cases.id, caseId));
-  await writeTimelineEvent({
-    caseId,
-    actorId,
-    eventType: "status_change",
-    payload: { from: existing.status, to: "closed", reason },
+  await closeCaseWithPolicy(organisationId, actorId, caseId, {
+    disposition: reason,
+    conclusion: summary,
+    ...extra,
   });
+}
+
+export async function closeCaseFullCore(
+  organisationId: string,
+  actorId: string | null,
+  caseId: string,
+  input: CloseCaseInput,
+) {
+  return closeCaseWithPolicy(organisationId, actorId, caseId, input);
+}
+
+export async function reopenCaseCore(
+  organisationId: string,
+  actorId: string | null,
+  caseId: string,
+  input: ReopenCaseInput,
+) {
+  return reopenCaseWithPolicy(organisationId, actorId, caseId, input);
 }

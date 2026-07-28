@@ -1,6 +1,11 @@
 export const KNOWN_SCOPES = [
   { value: "cases:read", label: "Read cases" },
   { value: "cases:write", label: "Create and update cases" },
+  {
+    value: "cases:override_closure",
+    label:
+      "Override case-closure policy requirements (sensitive; only grant to admin-issued tokens)",
+  },
   { value: "tasks:read", label: "Read tasks" },
   { value: "tasks:write", label: "Create and update tasks" },
   { value: "observables:read", label: "Read observables" },
