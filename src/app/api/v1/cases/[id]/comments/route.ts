@@ -1,21 +1,22 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
-import { cases, comments, users } from "@/db/schema";
-import { and, asc, eq } from "drizzle-orm";
+import { comments, users } from "@/db/schema";
+import { asc, eq } from "drizzle-orm";
 import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
+import {
+  authorizeCase,
+  canViewSensitiveObject,
+  hasPermission,
+  REDACTED_PLACEHOLDER,
+  resolveTokenActor,
+} from "@/lib/access";
 import { postCommentCore } from "@/lib/comments-core";
 
-const createSchema = z.object({ body: z.string().min(1) });
-
-async function caseInOrg(caseId: string, organisationId: string) {
-  const [c] = await db
-    .select({ id: cases.id })
-    .from(cases)
-    .where(and(eq(cases.id, caseId), eq(cases.organisationId, organisationId)))
-    .limit(1);
-  return c ?? null;
-}
+const createSchema = z.object({
+  body: z.string().min(1),
+  sensitive: z.boolean().optional(),
+});
 
 export async function GET(
   req: Request,
@@ -26,15 +27,39 @@ export async function GET(
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
   const { id } = await context.params;
-  if (!(await caseInOrg(id, auth.token.organisationId))) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const actor = await resolveTokenActor(auth.token);
+  const gate = await authorizeCase(
+    auth.token.organisationId,
+    id,
+    actor,
+    "view_metadata",
+  );
+  if (!gate.ok) {
+    return NextResponse.json({ error: gate.error }, { status: gate.status });
   }
   const rows = await db
     .select()
     .from(comments)
     .where(eq(comments.caseId, id))
     .orderBy(asc(comments.createdAt));
-  return NextResponse.json({ comments: rows });
+
+  const redacted = rows.map((row) => {
+    if (!row.sensitive) return { ...row, redacted: false };
+    let canView = hasPermission(gate.permissions, "view_sensitive");
+    if (!canView) {
+      canView = canViewSensitiveObject(gate.permissions, {
+        sensitive: true,
+        objectType: "comment",
+        objectId: row.id,
+        grants: gate.ctx.grants,
+        actor,
+      });
+    }
+    if (canView) return { ...row, redacted: false };
+    return { ...row, body: REDACTED_PLACEHOLDER, redacted: true };
+  });
+
+  return NextResponse.json({ comments: redacted });
 }
 
 export async function POST(
@@ -46,8 +71,15 @@ export async function POST(
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
   const { id } = await context.params;
-  if (!(await caseInOrg(id, auth.token.organisationId))) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const actor = await resolveTokenActor(auth.token);
+  const gate = await authorizeCase(
+    auth.token.organisationId,
+    id,
+    actor,
+    "edit",
+  );
+  if (!gate.ok) {
+    return NextResponse.json({ error: gate.error }, { status: gate.status });
   }
   const body = await req.json().catch(() => null);
   const parsed = createSchema.safeParse(body);
@@ -57,7 +89,7 @@ export async function POST(
       { status: 400 },
     );
   }
-  const [actor] = auth.token.createdBy
+  const [userActor] = auth.token.createdBy
     ? await db
         .select({ id: users.id, name: users.name })
         .from(users)
@@ -66,9 +98,10 @@ export async function POST(
     : [];
   const created = await postCommentCore(
     auth.token.organisationId,
-    actor ?? null,
+    userActor ?? null,
     id,
     parsed.data.body,
+    { sensitive: parsed.data.sensitive },
   );
   const [comment] = await db
     .select()

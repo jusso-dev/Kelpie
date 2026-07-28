@@ -72,7 +72,9 @@
     "test:asset-context-core": "tsx scripts/test-asset-context-core.ts",
     "test:integration-health": "tsx scripts/test-integration-health.ts",
     "test:case-views-unit": "tsx scripts/test-case-views-unit.ts",
-    "test:case-views-api": "tsx scripts/test-case-views-api.ts"
+    "test:case-views-api": "tsx scripts/test-case-views-api.ts",
+    "test:access-evaluate": "tsx scripts/test-access-evaluate.ts",
+    "test:access-core": "tsx scripts/test-access-core.ts"
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "^3.1095.0",

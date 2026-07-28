@@ -352,6 +352,58 @@ export const evidenceRelationshipTypeEnum = pgEnum("evidence_relationship_type",
 ]);
 
 /**
+ * Case visibility / need-to-know compartments (issue #61).
+ * `organisation` is the default open-within-tenant mode; the other three
+ * restrict who may know a case exists or read its content.
+ */
+export const caseVisibilityModeEnum = pgEnum("case_visibility_mode", [
+  "organisation",
+  "selected_teams",
+  "explicit_members",
+  "restricted",
+]);
+
+/** Independent case/object access permissions (issue #61). */
+export const accessPermissionEnum = pgEnum("access_permission", [
+  "know_exists",
+  "view_metadata",
+  "view_sensitive",
+  "edit",
+  "export",
+  "administer_access",
+]);
+
+export const accessSubjectTypeEnum = pgEnum("access_subject_type", [
+  "user",
+  "team",
+]);
+
+/**
+ * Object types that can carry independent sensitivity / grants. `case` means
+ * the grant applies to the whole case compartment.
+ */
+export const accessObjectTypeEnum = pgEnum("access_object_type", [
+  "case",
+  "custom_field",
+  "content_block",
+  "comment",
+  "evidence",
+  "alert",
+  "entity",
+]);
+
+export const accessEventActionEnum = pgEnum("access_event_action", [
+  "visibility_changed",
+  "compartment_updated",
+  "grant_created",
+  "grant_revoked",
+  "break_glass",
+  "sensitive_viewed",
+  "export_denied",
+  "access_denied",
+]);
+
+/**
  * Ordered case narrative content blocks (issue #58). Separate from conversational
  * comments and raw timeline noise: findings, decisions, and report sections that
  * analysts deliberately promote into the investigation record.
@@ -646,6 +698,16 @@ export const cases = pgTable(
     // this pointer to the surviving canonical case. Null while the case is
     // active / not superseded.
     supersededByCaseId: text("superseded_by_case_id"),
+    /**
+     * Need-to-know visibility mode (issue #61). Defaults to organisation so
+     * existing cases keep open-within-tenant behaviour. Bump
+     * `accessPolicyVersion` on every visibility / grant / revoke change so
+     * authz caches keyed by org+actor+version stay coherent.
+     */
+    visibilityMode: caseVisibilityModeEnum("visibility_mode")
+      .notNull()
+      .default("organisation"),
+    accessPolicyVersion: integer("access_policy_version").notNull().default(1),
   },
   (t) => [
     uniqueIndex("cases_org_number_idx").on(t.organisationId, t.caseNumber),
@@ -679,6 +741,7 @@ export const cases = pgTable(
     index("cases_org_superseded_idx")
       .on(t.organisationId, t.supersededByCaseId)
       .where(sql`${t.supersededByCaseId} is not null`),
+    index("cases_org_visibility_idx").on(t.organisationId, t.visibilityMode),
     foreignKey({
       columns: [t.supersededByCaseId],
       foreignColumns: [t.id],
@@ -737,6 +800,166 @@ export const teamMembers = pgTable(
   (t) => [
     uniqueIndex("team_members_team_user_idx").on(t.teamId, t.userId),
     index("team_members_org_user_idx").on(t.organisationId, t.userId),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Case compartments & access grants (issue #61)                              */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/** Teams allowed into a case when visibility_mode = selected_teams. */
+export const caseCompartmentTeams = pgTable(
+  "case_compartment_teams",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    addedBy: text("added_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("case_compartment_teams_case_team_idx").on(t.caseId, t.teamId),
+    index("case_compartment_teams_org_case_idx").on(t.organisationId, t.caseId),
+    index("case_compartment_teams_team_idx").on(t.teamId),
+  ],
+);
+
+/** Explicit members when visibility_mode = explicit_members. */
+export const caseCompartmentMembers = pgTable(
+  "case_compartment_members",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    addedBy: text("added_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("case_compartment_members_case_user_idx").on(t.caseId, t.userId),
+    index("case_compartment_members_org_case_idx").on(
+      t.organisationId,
+      t.caseId,
+    ),
+    index("case_compartment_members_user_idx").on(t.userId),
+  ],
+);
+
+/**
+ * Reason-required, time-bounded access grants. Revocation sets revoked_at
+ * rather than deleting so history stays complete. Break-glass grants set
+ * is_break_glass and always carry a non-empty reason + expiry.
+ */
+export const caseAccessGrants = pgTable(
+  "case_access_grants",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    subjectType: accessSubjectTypeEnum("subject_type").notNull(),
+    subjectId: text("subject_id").notNull(),
+    /** Permissions granted; empty array is never meaningful (deny). */
+    permissions: jsonb("permissions").notNull().default(sql`'[]'::jsonb`),
+    /**
+     * Object scope. `case` (default) applies to the whole case. Other types
+     * grant only on a specific sensitive object id.
+     */
+    objectType: accessObjectTypeEnum("object_type").notNull().default("case"),
+    objectId: text("object_id"),
+    reason: text("reason").notNull(),
+    grantedBy: text("granted_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    grantedAt: timestamp("granted_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokedBy: text("revoked_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    revokeReason: text("revoke_reason"),
+    isBreakGlass: boolean("is_break_glass").notNull().default(false),
+  },
+  (t) => [
+    index("case_access_grants_org_case_idx").on(t.organisationId, t.caseId),
+    index("case_access_grants_subject_idx").on(
+      t.organisationId,
+      t.subjectType,
+      t.subjectId,
+    ),
+    index("case_access_grants_active_idx")
+      .on(t.caseId, t.subjectType, t.subjectId)
+      .where(sql`${t.revokedAt} is null`),
+  ],
+);
+
+/**
+ * Append-only access history for grants, revocations, break-glass, and
+ * visibility changes. Distinct from ordinary timeline so sensitive access
+ * metadata is not mixed into analyst-facing case chatter.
+ */
+export const caseAccessEvents = pgTable(
+  "case_access_events",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    action: accessEventActionEnum("action").notNull(),
+    subjectType: accessSubjectTypeEnum("subject_type"),
+    subjectId: text("subject_id"),
+    permissions: jsonb("permissions"),
+    objectType: accessObjectTypeEnum("object_type"),
+    objectId: text("object_id"),
+    reason: text("reason"),
+    grantId: text("grant_id"),
+    effectiveFrom: timestamp("effective_from", { withTimezone: true }),
+    effectiveUntil: timestamp("effective_until", { withTimezone: true }),
+    /** Non-sensitive metadata only — never store field values or bodies. */
+    metadata: jsonb("metadata").notNull().default(sql`'{}'::jsonb`),
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("case_access_events_org_case_idx").on(
+      t.organisationId,
+      t.caseId,
+      t.occurredAt,
+    ),
+    index("case_access_events_org_action_idx").on(t.organisationId, t.action),
   ],
 );
 
@@ -1464,6 +1687,8 @@ export const comments = pgTable(
     source: text("source").notNull().default("user"),
     body: text("body").notNull(),
     mentions: jsonb("mentions").notNull().default(sql`'[]'::jsonb`),
+    /** When true, body requires `view_sensitive` (issue #61). */
+    sensitive: boolean("sensitive").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -1531,6 +1756,8 @@ export const attachments = pgTable(
     acquiredAt: timestamp("acquired_at", { withTimezone: true }),
     examinerNotes: text("examiner_notes"),
     labels: jsonb("labels").notNull().default(sql`'[]'::jsonb`),
+    /** When true, content/download requires `view_sensitive` (issue #61). */
+    sensitive: boolean("sensitive").notNull().default(false),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     deletedBy: text("deleted_by").references(() => users.id, {
       onDelete: "set null",
@@ -3533,6 +3760,11 @@ export const customFieldDefinitions = pgTable(
     required: boolean("required").notNull().default(false),
     orderIndex: integer("order_index").notNull().default(0),
     isActive: boolean("is_active").notNull().default(true),
+    /**
+     * When true, field values require `view_sensitive` (issue #61). Definition
+     * metadata (key/label/type) remains visible with `view_metadata`.
+     */
+    sensitive: boolean("sensitive").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -4633,6 +4865,10 @@ export type CaseContentBlock = typeof caseContentBlocks.$inferSelect;
 export type CaseContentBlockRevision =
   typeof caseContentBlockRevisions.$inferSelect;
 export type CaseContentBlockLink = typeof caseContentBlockLinks.$inferSelect;
+export type CaseCompartmentTeam = typeof caseCompartmentTeams.$inferSelect;
+export type CaseCompartmentMember = typeof caseCompartmentMembers.$inferSelect;
+export type CaseAccessGrant = typeof caseAccessGrants.$inferSelect;
+export type CaseAccessEvent = typeof caseAccessEvents.$inferSelect;
 
 export type PlaybookStepPhase =
   | "triage"

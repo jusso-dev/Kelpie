@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { customFieldDefinitions, customFieldValues } from "@/db/schema";
 import { and, asc, eq, inArray } from "drizzle-orm";
+import { REDACTED_PLACEHOLDER } from "./access";
 import { newId } from "./utils";
 import { writeTimelineEvent } from "./timeline";
 
@@ -23,6 +24,8 @@ export type CustomFieldDefinitionView = {
   required: boolean;
   orderIndex: number;
   isActive: boolean;
+  /** When true, values require view_sensitive (issue #61). */
+  sensitive: boolean;
 };
 
 export type CustomFieldWithValue = CustomFieldDefinitionView & {
@@ -53,6 +56,7 @@ export async function listFieldDefinitions(
     required: r.required,
     orderIndex: r.orderIndex,
     isActive: r.isActive,
+    sensitive: Boolean(r.sensitive),
   }));
 }
 
@@ -177,6 +181,7 @@ export async function setCustomFieldValue(
     required: def.required,
     orderIndex: def.orderIndex,
     isActive: def.isActive,
+    sensitive: Boolean(def.sensitive),
   };
   const value = coerceValue(view, raw);
 
@@ -195,11 +200,17 @@ export async function setCustomFieldValue(
     });
 
   if (opts.writeTimeline && (opts.entity ?? def.entity) === "case") {
+    // Never write raw sensitive values into the append-only timeline (issue #61).
     await writeTimelineEvent({
       caseId: entityId,
       actorId,
       eventType: "custom_field_changed",
-      payload: { key: def.key, label: def.label, value },
+      payload: {
+        key: def.key,
+        label: def.label,
+        value: def.sensitive ? REDACTED_PLACEHOLDER : value,
+        sensitive: Boolean(def.sensitive),
+      },
     });
   }
 }

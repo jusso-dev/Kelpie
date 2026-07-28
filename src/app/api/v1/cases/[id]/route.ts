@@ -10,6 +10,12 @@ import {
 import { and, desc, eq } from "drizzle-orm";
 import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
 import {
+  authorizeCase,
+  redactCustomFields,
+  redactTimelineEventPayload,
+  resolveTokenActor,
+} from "@/lib/access";
+import {
   CASE_ENUMS,
   CaseVersionConflictError,
   patchCaseCore,
@@ -17,6 +23,7 @@ import {
 } from "@/lib/cases-core";
 import {
   customFieldsRecord,
+  getCustomFieldsForEntity,
   setCustomFieldsByKey,
 } from "@/lib/custom-fields";
 
@@ -44,6 +51,18 @@ export async function GET(
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
   const { id } = await context.params;
+  const actor = await resolveTokenActor(auth.token);
+  // view_metadata required for full detail; missing/forbidden → identical 404.
+  const gate = await authorizeCase(
+    auth.token.organisationId,
+    id,
+    actor,
+    "view_metadata",
+  );
+  if (!gate.ok) {
+    return NextResponse.json({ error: gate.error }, { status: gate.status });
+  }
+
   const [c] = await db
     .select()
     .from(cases)
@@ -53,7 +72,7 @@ export async function GET(
     .limit(1);
   if (!c) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const [obs, tasks, timeline, customFields] = await Promise.all([
+  const [obs, tasks, timeline, customFieldRows] = await Promise.all([
     db.select().from(observables).where(eq(observables.caseId, id)),
     db.select().from(caseTasks).where(eq(caseTasks.caseId, id)),
     db
@@ -62,15 +81,41 @@ export async function GET(
       .where(eq(timelineEvents.caseId, id))
       .orderBy(desc(timelineEvents.occurredAt))
       .limit(50),
-    customFieldsRecord(auth.token.organisationId, id),
+    getCustomFieldsForEntity(auth.token.organisationId, id),
   ]);
+
+  const redactedFields = redactCustomFields(customFieldRows, gate.permissions, {
+    actor,
+    grants: gate.ctx.grants,
+  });
+  const customFields: Record<string, unknown> = {};
+  for (const f of redactedFields) customFields[f.key] = f.value;
+
+  const sensitiveFieldKeys = new Set(
+    customFieldRows.filter((f) => f.sensitive).map((f) => f.key),
+  );
+  const recentTimeline = timeline.map((ev) => ({
+    ...ev,
+    payload: redactTimelineEventPayload(
+      ev.eventType,
+      ev.payload as Record<string, unknown>,
+      gate.permissions,
+      { sensitiveFieldKeys },
+    ),
+  }));
 
   return NextResponse.json({
     ...c,
     observables: obs,
     tasks,
-    recent_timeline: timeline,
+    recent_timeline: recentTimeline,
     custom_fields: customFields,
+    custom_fields_detail: redactedFields,
+    access: {
+      permissions: [...gate.permissions],
+      accessPolicyVersion: gate.ctx.accessPolicyVersion,
+      visibilityMode: gate.ctx.visibilityMode,
+    },
   });
 }
 
@@ -83,6 +128,19 @@ export async function PATCH(
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
   const { id } = await context.params;
+  const actor = await resolveTokenActor(auth.token);
+  const editGate = await authorizeCase(
+    auth.token.organisationId,
+    id,
+    actor,
+    "edit",
+  );
+  if (!editGate.ok) {
+    return NextResponse.json(
+      { error: editGate.error },
+      { status: editGate.status },
+    );
+  }
   const body = await req.json().catch(() => null);
   const parsed = patchSchema.safeParse(body);
   if (!parsed.success) {

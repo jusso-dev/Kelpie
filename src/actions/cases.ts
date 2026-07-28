@@ -23,6 +23,52 @@ import {
   ClosureRequirementsError,
 } from "@/lib/closure/types";
 import { previewCaseClosure } from "@/lib/closure/close-core";
+import { authorizeCase, resolveUserActor } from "@/lib/access";
+
+async function requireCaseEdit(
+  organisationId: string,
+  userId: string,
+  caseId: string,
+) {
+  const actor = await resolveUserActor(organisationId, userId);
+  if (!actor) {
+    const err = new Error("Not found") as Error & { status: number };
+    err.status = 404;
+    throw err;
+  }
+  const gate = await authorizeCase(organisationId, caseId, actor, "edit");
+  if (!gate.ok) {
+    const err = new Error(gate.error) as Error & { status: number };
+    err.status = gate.status;
+    throw err;
+  }
+  return gate;
+}
+
+async function requireCaseView(
+  organisationId: string,
+  userId: string,
+  caseId: string,
+) {
+  const actor = await resolveUserActor(organisationId, userId);
+  if (!actor) {
+    const err = new Error("Not found") as Error & { status: number };
+    err.status = 404;
+    throw err;
+  }
+  const gate = await authorizeCase(
+    organisationId,
+    caseId,
+    actor,
+    "view_metadata",
+  );
+  if (!gate.ok) {
+    const err = new Error(gate.error) as Error & { status: number };
+    err.status = gate.status;
+    throw err;
+  }
+  return gate;
+}
 
 export type CaseFieldResult =
   | { ok: true; version: number }
@@ -86,6 +132,7 @@ export async function updateCaseStatus(
   expectedVersion?: number,
 ): Promise<CaseFieldResult> {
   const user = await requireRole(["admin", "analyst"]);
+  await requireCaseEdit(user.organisationId, user.id, caseId);
   let updated: { version: number };
   try {
     updated = await setCaseStatusCore(
@@ -113,6 +160,7 @@ export async function updateCaseField(
   expectedVersion?: number,
 ): Promise<CaseFieldResult> {
   const user = await requireRole(["admin", "analyst"]);
+  await requireCaseEdit(user.organisationId, user.id, caseId);
   const patch: Parameters<typeof patchCaseCore>[3] = {};
   if (field === "severity") {
     if (!(CASE_ENUMS.severity as readonly string[]).includes(value ?? "")) {
@@ -162,6 +210,7 @@ export async function updateCaseTags(
   expectedVersion?: number,
 ): Promise<CaseFieldResult> {
   const user = await requireRole(["admin", "analyst"]);
+  await requireCaseEdit(user.organisationId, user.id, caseId);
   const patch: Parameters<typeof patchCaseCore>[3] = {};
   patch[field] = values;
   try {
@@ -189,6 +238,7 @@ export async function updateCaseSummary(
   expectedVersion?: number,
 ): Promise<CaseFieldResult> {
   const user = await requireRole(["admin", "analyst"]);
+  await requireCaseEdit(user.organisationId, user.id, caseId);
   try {
     const updated = await patchCaseCore(
       user.organisationId,
@@ -220,6 +270,11 @@ export async function closeCase(formData: FormData): Promise<CloseCaseActionResu
   const caseId = String(formData.get("caseId") ?? "");
   if (!caseId) {
     return { ok: false, error: "caseId required", code: "bad_request" };
+  }
+  try {
+    await requireCaseEdit(user.organisationId, user.id, caseId);
+  } catch {
+    return { ok: false, error: "Not found", code: "bad_request" };
   }
 
   const disposition = String(formData.get("reason") ?? formData.get("disposition") ?? "");
@@ -302,6 +357,7 @@ export async function previewCloseCase(formData: FormData) {
   const user = await requireRole(["admin", "analyst", "read_only"]);
   const caseId = String(formData.get("caseId") ?? "");
   if (!caseId) throw new Error("caseId required");
+  await requireCaseView(user.organisationId, user.id, caseId);
   return previewCaseClosure(user.organisationId, caseId, {
     disposition: String(formData.get("reason") ?? formData.get("disposition") ?? ""),
     conclusion: String(formData.get("summary") ?? formData.get("conclusion") ?? ""),
@@ -328,6 +384,11 @@ export async function reopenCase(formData: FormData): Promise<CloseCaseActionRes
       : undefined;
   if (!caseId) {
     return { ok: false, error: "caseId required", code: "bad_request" };
+  }
+  try {
+    await requireCaseEdit(user.organisationId, user.id, caseId);
+  } catch {
+    return { ok: false, error: "Not found", code: "bad_request" };
   }
   try {
     const result = await reopenCaseCore(user.organisationId, user.id, caseId, {
@@ -364,6 +425,7 @@ export async function updateMitreTechniques(
   expectedVersion?: number,
 ): Promise<CaseFieldResult> {
   const user = await requireRole(["admin", "analyst"]);
+  await requireCaseEdit(user.organisationId, user.id, caseId);
   try {
     const updated = await patchCaseCore(
       user.organisationId,

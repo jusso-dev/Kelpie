@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { cases, users } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
+import { authorizeCase, resolveTokenActor } from "@/lib/access";
 import {
   EvidenceError,
   assertEvidenceExportable,
@@ -51,21 +52,32 @@ export async function GET(
     );
   }
   try {
+    const evidenceMeta = await getEvidenceInOrg(id, auth.token.organisationId);
+    if (!evidenceMeta) throw new EvidenceError("Evidence not found", 404);
+    const accessActor = await resolveTokenActor(auth.token);
+    const required = evidenceMeta.sensitive ? "view_sensitive" : "view_metadata";
+    const gate = await authorizeCase(
+      auth.token.organisationId,
+      evidenceMeta.caseId,
+      accessActor,
+      required,
+    );
+    if (!gate.ok) {
+      return NextResponse.json({ error: gate.error }, { status: gate.status });
+    }
     if (maxTlp || maxPap) {
-      const evidence = await getEvidenceInOrg(id, auth.token.organisationId);
-      if (!evidence) throw new EvidenceError("Evidence not found", 404);
       const [caseRow] = await db
         .select({ tlp: cases.tlp, pap: cases.pap })
         .from(cases)
         .where(
           and(
-            eq(cases.id, evidence.caseId),
+            eq(cases.id, evidenceMeta.caseId),
             eq(cases.organisationId, auth.token.organisationId),
           ),
         )
         .limit(1);
       if (!caseRow) throw new EvidenceError("Case not found", 404);
-      assertEvidenceExportable(evidence, caseRow, {
+      assertEvidenceExportable(evidenceMeta, caseRow, {
         maxTlp: maxTlp ?? undefined,
         maxPap: maxPap ?? undefined,
       });

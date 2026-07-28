@@ -40,6 +40,8 @@ Errors return `{ "error": "..." }` with an appropriate HTTP status (`400` invali
 ### `GET /api/v1/cases`
 Optional query: `status`, `severity`, `classification`, `tlp`, `assignee`, `openedSince`, `limit`, `source`, `technique`, `tactic`. `status=active` returns every status except `closed`. `source` filters on the exact `source_system` value (e.g. `?source=tawny`) — it is an equality match, not a prefix or substring search. `technique` filters to cases with at least one ATT&CK technique mapping matching that exact technique id (e.g. `?technique=T1566.001`); `tactic` filters to cases with at least one mapped technique belonging to that exact tactic id (e.g. `?tactic=initial-access`), evaluated against the currently active catalog version.
 
+Results are filtered by the token actor's **case compartment** policy (issue #61). Cases the actor must not know exist are omitted entirely (no count or facet leak). When an actor has `know_exists` but not `view_metadata`, `title` is replaced with `[redacted]` and `summary` is null.
+
 ### `POST /api/v1/cases`
 ```json
 {
@@ -98,9 +100,65 @@ Replay of the same `sourceSystem`/`sourceReference` — `200`:
 ```
 
 ### `GET /api/v1/cases/{id}`
-Full case with embedded `observables`, `tasks`, and a `recent_timeline` slice (50 most recent events).
+Full case with embedded `observables`, `tasks`, and a `recent_timeline` slice (50 most recent events). Requires compartment `view_metadata`. Missing cases and cases the actor must not see both return `404` with the same body. Response includes:
+
+- `custom_fields` — values with sensitive fields redacted to `"[redacted]"` when the actor lacks `view_sensitive`
+- `custom_fields_detail` — per-field metadata including `sensitive` and `redacted` flags
+- `access.permissions` / `access.accessPolicyVersion` / `access.visibilityMode`
 
 ### `PATCH /api/v1/cases/{id}`
+Requires compartment `edit` in addition to `cases:write`.
+
+## Case compartments & access (need-to-know)
+
+Visibility modes: `organisation` (default), `selected_teams`, `explicit_members`, `restricted`.
+
+Independent permissions: `know_exists`, `view_metadata`, `view_sensitive`, `edit`, `export`, `administer_access`.
+
+Deny by default on policy failure. Assigning or mentioning a user never grants access. Export is evaluated independently of view. Break-glass always requires a reason, always expires, is fully audited, and emails organisation admins.
+
+### `GET /api/v1/cases/{id}/access`
+Returns visibility mode and the caller's effective permissions. Full grant/compartment detail requires `administer_access`.
+
+### `PATCH /api/v1/cases/{id}/access`
+Change visibility mode. Requires `administer_access` + `cases:write`.
+```json
+{
+  "visibilityMode": "selected_teams",
+  "teamIds": ["team_…"],
+  "memberIds": ["user_…"],
+  "reason": "Legal hold need-to-know scope"
+}
+```
+
+### `GET /api/v1/cases/{id}/access/grants`
+### `POST /api/v1/cases/{id}/access/grants`
+Create a reason-required grant (optional `expiresAt`, optional object scope).
+```json
+{
+  "subjectType": "user",
+  "subjectId": "user_…",
+  "permissions": ["know_exists", "view_metadata", "view_sensitive"],
+  "reason": "Lead investigator assignment",
+  "expiresAt": "2026-12-01T00:00:00.000Z",
+  "objectType": "case"
+}
+```
+
+### `POST /api/v1/cases/{id}/access/grants/{grantId}/revoke`
+```json
+{ "reason": "Investigation hand-off complete" }
+```
+
+### `POST /api/v1/cases/{id}/access/break-glass`
+Emergency self-grant for a user-backed token. Default TTL 4 hours (max 24h).
+```json
+{ "reason": "Active containment decision requires case context" }
+```
+
+### `GET /api/v1/cases/{id}/access/history`
+Append-only access history (grants, revocations, break-glass, visibility changes). Never contains sensitive field values. Requires `administer_access`.
+
 Any subset of `status, severity, classification, tlp, pap, assigneeId, title, summary`. Status transitions stamp the lifecycle milestones and fire the `case.status_changed` webhook.
 
 `status: "closed"` is rejected here (`400`). Use `POST /api/v1/cases/{id}/close` so the shared closure validator runs. Reopening a closed case also requires `POST /api/v1/cases/{id}/reopen` with a reason.

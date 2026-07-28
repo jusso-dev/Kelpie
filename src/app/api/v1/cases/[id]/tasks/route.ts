@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
-import { caseTasks, cases } from "@/db/schema";
-import { and, asc, eq } from "drizzle-orm";
+import { caseTasks } from "@/db/schema";
+import { asc, eq } from "drizzle-orm";
 import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
+import { authorizeCase, resolveTokenActor } from "@/lib/access";
 import { createTaskCore } from "@/lib/tasks-core";
 
 const createSchema = z.object({
@@ -12,15 +13,6 @@ const createSchema = z.object({
   assigneeId: z.string().nullable().optional(),
   dueAt: z.string().datetime().nullable().optional(),
 });
-
-async function caseInOrg(caseId: string, organisationId: string) {
-  const [c] = await db
-    .select({ id: cases.id })
-    .from(cases)
-    .where(and(eq(cases.id, caseId), eq(cases.organisationId, organisationId)))
-    .limit(1);
-  return c ?? null;
-}
 
 export async function GET(
   req: Request,
@@ -31,8 +23,15 @@ export async function GET(
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
   const { id } = await context.params;
-  if (!(await caseInOrg(id, auth.token.organisationId))) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const actor = await resolveTokenActor(auth.token);
+  const gate = await authorizeCase(
+    auth.token.organisationId,
+    id,
+    actor,
+    "view_metadata",
+  );
+  if (!gate.ok) {
+    return NextResponse.json({ error: gate.error }, { status: gate.status });
   }
   const rows = await db
     .select()
@@ -51,8 +50,15 @@ export async function POST(
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
   const { id } = await context.params;
-  if (!(await caseInOrg(id, auth.token.organisationId))) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const actor = await resolveTokenActor(auth.token);
+  const gate = await authorizeCase(
+    auth.token.organisationId,
+    id,
+    actor,
+    "edit",
+  );
+  if (!gate.ok) {
+    return NextResponse.json({ error: gate.error }, { status: gate.status });
   }
   const body = await req.json().catch(() => null);
   const parsed = createSchema.safeParse(body);

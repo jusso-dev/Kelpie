@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { resolveUserActor } from "@/lib/access";
 import { requireUser } from "@/lib/session";
 import { loadCaseReport } from "@/lib/report";
 import { renderCasePdf } from "@/lib/report-pdf";
@@ -11,7 +12,11 @@ export async function GET(
 ) {
   const { id } = await context.params;
   const user = await requireUser();
-  const data = await loadCaseReport(user.organisationId, id);
+  const actor = await resolveUserActor(user.organisationId, user.id);
+  if (!actor) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  const data = await loadCaseReport(user.organisationId, id, { actor });
   if (!data) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }

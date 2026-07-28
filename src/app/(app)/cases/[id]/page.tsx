@@ -29,6 +29,11 @@ import {
   listSuggestionsCore,
 } from "@/lib/case-relationships-core";
 import { getCustomFieldsForEntity } from "@/lib/custom-fields";
+import {
+  authorizeCase,
+  redactCustomFields,
+  resolveUserActor,
+} from "@/lib/access";
 import { listMappingsForCase } from "@/lib/attack/mapping-core";
 import { listStoryCore } from "@/lib/attack/story-core";
 import AttackMappingsPanel from "@/components/attack-mappings-panel";
@@ -59,6 +64,16 @@ type Props = { params: Promise<{ id: string }> };
 export default async function CaseOverviewPage({ params }: Props) {
   const { id } = await params;
   const user = await requireUser();
+  const actor = await resolveUserActor(user.organisationId, user.id);
+  if (!actor) notFound();
+  const gate = await authorizeCase(
+    user.organisationId,
+    id,
+    actor,
+    "view_metadata",
+  );
+  if (!gate.ok) notFound();
+
   const [c] = await db
     .select()
     .from(cases)
@@ -146,7 +161,14 @@ export default async function CaseOverviewPage({ params }: Props) {
       effective: effectiveContextFields(row),
     };
   });
-  const canEdit = user.role === "admin" || user.role === "analyst";
+  const canEdit =
+    (user.role === "admin" || user.role === "analyst") &&
+    gate.permissions.has("edit");
+  const redactedCustomFields = redactCustomFields(
+    customFields,
+    gate.permissions,
+    { actor, grants: gate.ctx.grants },
+  );
   const sourceLabel = sourceSystemLabel(c.sourceSystem);
   // Re-validated at render time: a legacy row or a bypass of the public API's
   // ingest validation could still hold a non-http(s) `source_url`.
@@ -291,7 +313,7 @@ export default async function CaseOverviewPage({ params }: Props) {
         <CustomFieldsPanel
           caseId={c.id}
           canEdit={canEdit}
-          fields={customFields.map((f) => ({
+          fields={redactedCustomFields.map((f) => ({
             id: f.id,
             key: f.key,
             label: f.label,
@@ -299,6 +321,8 @@ export default async function CaseOverviewPage({ params }: Props) {
             options: f.options,
             required: f.required,
             value: f.value,
+            sensitive: f.sensitive,
+            redacted: f.redacted,
           }))}
         />
 

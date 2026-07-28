@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
 import {
+  authorizeCase,
+  redactContentBlock,
+  resolveTokenActor,
+} from "@/lib/access";
+import {
   CASE_CONTENT_BLOCK_TYPES,
   ContentBlockError,
   archiveContentBlockCore,
@@ -42,13 +47,27 @@ export async function GET(req: Request, { params }: Params) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
   const { id, blockId } = await params;
+  const actor = await resolveTokenActor(auth.token);
+  const gate = await authorizeCase(
+    auth.token.organisationId,
+    id,
+    actor,
+    "view_metadata",
+  );
+  if (!gate.ok) {
+    return NextResponse.json({ error: gate.error }, { status: gate.status });
+  }
   try {
     const block = await getContentBlockCore(
       auth.token.organisationId,
       id,
       blockId,
     );
-    return NextResponse.json({ block });
+    const redacted = redactContentBlock(block, gate.permissions, {
+      actor,
+      grants: gate.ctx.grants,
+    });
+    return NextResponse.json({ block: redacted });
   } catch (error) {
     if (error instanceof ContentBlockError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -63,6 +82,16 @@ export async function PATCH(req: Request, { params }: Params) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
   const { id, blockId } = await params;
+  const actor = await resolveTokenActor(auth.token);
+  const gate = await authorizeCase(
+    auth.token.organisationId,
+    id,
+    actor,
+    "edit",
+  );
+  if (!gate.ok) {
+    return NextResponse.json({ error: gate.error }, { status: gate.status });
+  }
   const body = await req.json().catch(() => null);
   const parsed = patchSchema.safeParse(body);
   if (!parsed.success) {
@@ -132,6 +161,16 @@ export async function DELETE(req: Request, { params }: Params) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
   const { id, blockId } = await params;
+  const actor = await resolveTokenActor(auth.token);
+  const gate = await authorizeCase(
+    auth.token.organisationId,
+    id,
+    actor,
+    "edit",
+  );
+  if (!gate.ok) {
+    return NextResponse.json({ error: gate.error }, { status: gate.status });
+  }
   try {
     const block = await archiveContentBlockCore(
       auth.token.organisationId,

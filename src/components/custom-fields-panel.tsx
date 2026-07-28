@@ -14,6 +14,8 @@ type Field = {
   options: string[];
   required: boolean;
   value: unknown;
+  sensitive?: boolean;
+  redacted?: boolean;
 };
 
 function toInputValue(field: Field): string {
@@ -69,7 +71,11 @@ export default function CustomFieldsPanel({
               {f.required ? " *" : ""}
             </label>
             <div className="sm:col-span-2">
-              {!canEdit ? (
+              {f.redacted ? (
+                <span className="text-sm text-slate-500 italic">
+                  {String(f.value ?? "[redacted]")}
+                </span>
+              ) : !canEdit ? (
                 <span className="text-sm text-slate-200">
                   {toInputValue(f) || <span className="text-slate-500">—</span>}
                 </span>

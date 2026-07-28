@@ -4,6 +4,11 @@ import { db } from "@/db";
 import { attackCatalogVersions, attackTechniqueMappings, attackTechniques, cases } from "@/db/schema";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { authenticateApiTokenWithScope } from "@/lib/api-tokens";
+import {
+  caseKnowExistsSql,
+  filterCasesForActor,
+  resolveTokenActor,
+} from "@/lib/access";
 import { CASE_ENUMS, createCaseCore } from "@/lib/cases-core";
 import {
   MAX_SOURCE_REFERENCE_LENGTH,
@@ -82,8 +87,13 @@ export async function GET(req: Request) {
   if (!auth.ok) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
+  const actor = await resolveTokenActor(auth.token);
   const url = new URL(req.url);
-  const filters = [eq(cases.organisationId, auth.token.organisationId)];
+  const filters = [
+    eq(cases.organisationId, auth.token.organisationId),
+    // Compartment filter: drop cases the actor must not know exist (issue #61).
+    caseKnowExistsSql(actor),
+  ];
   const status = url.searchParams.get("status");
   const severity = url.searchParams.get("severity");
   const classification = url.searchParams.get("classification");
@@ -139,7 +149,13 @@ export async function GET(req: Request) {
     .where(and(...filters))
     .orderBy(desc(cases.openedAt))
     .limit(limit);
-  return NextResponse.json({ cases: rows });
+  // Redact metadata when know_exists without view_metadata (edge grants).
+  const visible = await filterCasesForActor(
+    auth.token.organisationId,
+    actor,
+    rows,
+  );
+  return NextResponse.json({ cases: visible });
 }
 
 export async function POST(req: Request) {
