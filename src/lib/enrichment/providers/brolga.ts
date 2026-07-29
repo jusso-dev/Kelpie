@@ -5,7 +5,7 @@ import { packDispositionSummary } from "@/lib/brolga/client";
 
 /**
  * Optional enrichment via Brolga context packs.
- * Inactive until an admin enables Brolga and the engine exposes /v1/context.
+ * Inactive until an admin enables Brolga and configures its base URL.
  */
 export const brolgaProvider: EnrichmentProvider = {
   name: "brolga",

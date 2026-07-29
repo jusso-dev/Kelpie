@@ -5,15 +5,20 @@
  * graph, and context packs. Kelpie consumes compact packs for case
  * enrichment — it does not re-implement MISP/TAXII/AbuseIPDB pipelines.
  *
- * These types are Kelpie's *consumer* contract. They deliberately track the
- * Brolga roadmap (context packs, progressive disclosure, evidence handles)
- * without requiring a running Brolga instance yet. When Brolga's HTTP API
- * ships (milestone v0.5), adjust paths/fields only if the wire format drifts;
- * keep this file as the single import surface for UI and enrichment.
+ * These types are Kelpie's *consumer* contract, and Brolga now serves it.
  *
- * Wire path (planned): `POST {baseUrl}/v1/context`
- * Auth (planned): `Authorization: Bearer <token>`
+ * Wire path: `POST {baseUrl}/api/v1/context`
+ * Auth: `Authorization: Bearer <token>` — Brolga refuses to bind a reachable
+ * address without a token, so one is always required off loopback.
  * Content-Type: `application/json`
+ *
+ * Brolga serves detail level L1 today. It reports the level it *actually*
+ * served and notes the shortfall in `exclusions`, so a pack never claims more
+ * depth than it has. Progressive disclosure beyond L1 and `expansion_handles`
+ * remain roadmap.
+ *
+ * `disposition: "unknown"` means Brolga has not heard of the subject. It does
+ * not mean benign, and must not be rendered as one.
  */
 
 /** Schema id for the request body Kelpie sends. */

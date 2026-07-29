@@ -59,8 +59,8 @@ function testConfig() {
   assert.equal(enabled.baseUrl, "https://brolga.example");
   assert.equal(enabled.hasToken, true);
   assert.equal(enabled.timeoutMs, 12000);
-  assert.equal(enabled.contextPath, "/v1/context");
-  assert.equal(enabled.healthPath, "/v1/health");
+  assert.equal(enabled.contextPath, "/api/v1/context");
+  assert.equal(enabled.healthPath, "/api/v1/health");
 
   assert.equal(
     BROLGA_CONTEXT_REQUEST_SCHEMA,

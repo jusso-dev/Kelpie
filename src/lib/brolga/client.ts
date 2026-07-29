@@ -80,7 +80,7 @@ export async function testBrolgaConnection(
       return {
         ok: false,
         message:
-          "Reached host but /v1/health is not implemented yet (expected until Brolga v0.5). URL is reachable.",
+          "Reached host but /api/v1/health is not there. Check the URL points at Brolga's origin, not a path.",
         httpStatus: 404,
       };
     }
