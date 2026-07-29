@@ -3,9 +3,8 @@
  * reachable instance and a token, which CI has neither of.
  */
 import assert from "node:assert/strict";
-import { configurationFromSettings } from "../src/lib/brolga/config.ts";
-import { brolgaUrl } from "../src/lib/brolga/client.ts";
-import { safeFetch } from "../src/lib/outbound-request.ts";
+import { brolgaUrl, configurationFromSettings } from "@/lib/brolga";
+import { safeFetch } from "@/lib/outbound-request";
 
 async function main() {
   const base = process.env.BROLGA_BASE_URL;
