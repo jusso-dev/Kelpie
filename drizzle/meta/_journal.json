@@ -288,6 +288,13 @@
       "when": 1785242267207,
       "tag": "0040_improvement_register",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1785280000000,
+      "tag": "0041_remove_cisa_kev_feeds",
+      "breakpoints": true
     }
   ]
 }
