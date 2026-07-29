@@ -4,6 +4,7 @@ import { and, eq, ilike, desc } from "drizzle-orm";
 import { requireUser } from "@/lib/session";
 import Link from "next/link";
 import { TlpBadge } from "@/components/badges";
+import PageExplainer from "@/components/page-explainer";
 
 type SearchParams = Promise<{ q?: string; type?: string }>;
 
@@ -63,9 +64,7 @@ export default async function ObservablesSearchPage({
     <div className="space-y-5">
       <header>
         <h1 className="text-2xl font-semibold">Observable search</h1>
-        <p className="text-sm text-slate-400">
-          Cross-case lookup. Find every case an indicator turned up in.
-        </p>
+        <PageExplainer page="observables" />
       </header>
 
       <form className="flex flex-col gap-2 sm:flex-row sm:items-center">

@@ -6,6 +6,7 @@ import {
 } from "@/lib/asset-context/context-core";
 import { getPriorityScoringSettings } from "@/lib/asset-context/settings";
 import { effectiveContextFields } from "@/lib/asset-context/effective";
+import PageExplainer from "@/components/page-explainer";
 
 export default async function AssetContextListPage({
   searchParams,
@@ -28,10 +29,7 @@ export default async function AssetContextListPage({
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Asset & identity context</h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Organisation-scoped criticality, privilege, and exposure used for
-            case priority scoring.
-          </p>
+          <PageExplainer page="asset-context" className="mt-1" />
         </div>
         <Link
           href="/settings/asset-context"

@@ -28,6 +28,7 @@ import { BulkActionsBar } from "@/components/bulk-actions-bar";
 import { CaseViewSwitcher } from "@/components/case-view-switcher";
 import { CaseViewWidgets } from "@/components/case-view-widgets";
 import { CaseViewBulkPresets } from "@/components/case-view-bulk-presets";
+import PageExplainer from "@/components/page-explainer";
 import {
   CASE_VIEW_CLASSIFICATIONS,
   CASE_VIEW_COLUMNS,
@@ -409,10 +410,7 @@ export default async function CasesPage({
           <h1 className="text-3xl font-semibold tracking-tight text-slate-50">
             Security incidents, evidence, and response status.
           </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
-            Search the queue, isolate urgent work, and keep ownership and SLA
-            pressure visible during triage.
-          </p>
+          <PageExplainer page="cases" />
         </div>
         <div className="kelpie-panel grid grid-cols-3 gap-3 p-4">
           <QueueMetric label="Active" value={Number(metrics?.active ?? 0)} />

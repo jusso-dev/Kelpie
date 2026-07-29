@@ -15,6 +15,7 @@ import { vendorWatchlist } from "@/db/schema";
 import { requireUser } from "@/lib/session";
 import { CYBER_NEWS_SOURCES, getCyberNews } from "@/lib/cyber-news";
 import { matchingVendors, type WatchedVendor } from "@/lib/vendor-news";
+import PageExplainer from "@/components/page-explainer";
 
 const PAGE_SIZE = 12;
 const SORTS = ["newest", "oldest", "source"] as const;
@@ -179,10 +180,7 @@ export default async function CyberBriefingPage({
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-slate-50">Cyber brief</h1>
-          <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-400">
-            Recent reporting from public cyber authorities. Open the source and
-            verify details before using them in a case.
-          </p>
+          <PageExplainer page="briefing" className="mt-1 max-w-2xl" />
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <p className="text-xs text-slate-500">

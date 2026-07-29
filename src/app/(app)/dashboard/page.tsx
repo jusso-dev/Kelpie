@@ -1,9 +1,12 @@
 import { db } from "@/db";
-import { cases, observables, slaPolicies } from "@/db/schema";
-import { and, count, eq, sql, gte } from "drizzle-orm";
+import { cases, slaPolicies } from "@/db/schema";
+import { and, count, eq, sql, gte, isNull } from "drizzle-orm";
 import { requireUser } from "@/lib/session";
 import { StatusBadge, SeverityBadge } from "@/components/badges";
 import { evaluateSla } from "@/lib/sla";
+import { analystWorkloadCore } from "@/lib/queues-core";
+import PageExplainer from "@/components/page-explainer";
+import TeamCaseloadPanel from "@/components/team-caseload-panel";
 import Link from "next/link";
 import { ArrowUpRight, Clock3, ListChecks, ShieldAlert, Workflow } from "lucide-react";
 import type { ComponentType } from "react";
@@ -37,6 +40,8 @@ export default async function DashboardPage() {
 
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
+  const isAdmin = user.role === "admin";
+
   const [
     openCases,
     casesBySeverity,
@@ -45,6 +50,8 @@ export default async function DashboardPage() {
     recentCases,
     openCasesForSla,
     slaRows,
+    teamWorkload,
+    unassignedOpen,
   ] = await Promise.all([
       db
         .select({ count: count() })
@@ -106,6 +113,21 @@ export default async function DashboardPage() {
         .select()
         .from(slaPolicies)
         .where(eq(slaPolicies.organisationId, user.organisationId)),
+      isAdmin
+        ? analystWorkloadCore(user.organisationId)
+        : Promise.resolve([]),
+      isAdmin
+        ? db
+            .select({ count: count() })
+            .from(cases)
+            .where(
+              and(
+                eq(cases.organisationId, user.organisationId),
+                sql`${cases.status} <> 'closed'`,
+                isNull(cases.assigneeId),
+              ),
+            )
+        : Promise.resolve([{ count: 0 }]),
     ]);
 
   const policyBySeverity = new Map(slaRows.map((p) => [p.severity, p]));
@@ -190,6 +212,7 @@ export default async function DashboardPage() {
           <h1 className="max-w-3xl text-3xl font-semibold tracking-tight text-slate-50 sm:text-4xl">
             {timeOfDayGreeting(user.timezone)}, {user.name}.
           </h1>
+          <PageExplainer page="dashboard" />
         </div>
         <div className="kelpie-panel p-4">
           <div className="flex items-center justify-between">
@@ -222,6 +245,13 @@ export default async function DashboardPage() {
           icon={Clock3}
         />
       </section>
+
+      {isAdmin ? (
+        <TeamCaseloadPanel
+          workload={teamWorkload}
+          unassignedCount={Number(unassignedOpen[0]?.count ?? 0)}
+        />
+      ) : null}
 
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1.35fr]">
         <div className="kelpie-panel p-5">

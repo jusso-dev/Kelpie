@@ -9,6 +9,7 @@ import { listPlaybooksCore } from "@/lib/playbooks-core";
 import { BASELINE_PLAYBOOKS } from "@/lib/playbook-catalogue";
 import { OBSERVABLE_TYPES } from "@/lib/observables-core";
 import Link from "next/link";
+import PageExplainer from "@/components/page-explainer";
 
 const SEVERITIES = ["low", "medium", "high", "critical"] as const;
 const CLASSIFICATIONS = [
@@ -61,11 +62,7 @@ export default async function PlaybooksPage({
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Playbooks & templates</h1>
-          <p className="text-sm text-slate-400">
-            Playbooks define ordered steps with cadence offsets. Templates
-            prefill a new case in one click. Baseline playbooks ship with the
-            product; custom playbooks are authored by your team.
-          </p>
+          <PageExplainer page="playbooks" />
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
           {isAdmin ? <SyncCatalogueButton /> : null}

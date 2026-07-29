@@ -9,6 +9,7 @@ import { ensureCatalogInitialised, listCatalogVersions } from "@/lib/attack/cata
 import { PLAYBOOK_GUIDANCE_CATEGORIES } from "@/lib/attack/playbook-guidance";
 import { listD3fendMappingsCore } from "@/lib/attack/d3fend-core";
 import AttackCatalogAdminPanel from "@/components/attack-catalog-admin-panel";
+import PageExplainer from "@/components/page-explainer";
 
 export default async function AttackCoveragePage() {
   const user = await requireUser();
@@ -26,10 +27,7 @@ export default async function AttackCoveragePage() {
     <div className="space-y-4">
       <header>
         <h1 className="text-2xl font-semibold">ATT&CK coverage</h1>
-        <p className="text-sm text-slate-400 mt-1">
-          Organisation-wide view of mapped techniques, unresolved analyst work, and
-          playbook/case-template documentation gaps.
-        </p>
+        <PageExplainer page="attack-coverage" className="mt-1" />
       </header>
 
       {user.role === "admin" ? (

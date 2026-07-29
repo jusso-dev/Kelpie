@@ -1,13 +1,23 @@
 import Link from "next/link";
 import CopyTextButton from "@/components/copy-text-button";
+import PageExplainer from "@/components/page-explainer";
 import { LLM_AGENT_PROMPT } from "@/lib/llm-prompt";
 
 const guideLinks = [
+  ["triage-and-dashboard", "Triage and dashboard"],
+  ["case-queue-and-views", "Case queue and views"],
   ["cases-and-templates", "Cases and templates"],
+  ["queues-and-workload", "Queues and workload"],
+  ["task-inbox", "Task inbox"],
+  ["observables-and-iocs", "Observables and IOCs"],
   ["tags-and-custom-fields", "Tags and custom fields"],
   ["threat-intelligence", "Threat intelligence"],
+  ["cyber-brief-and-landscape", "Cyber brief and landscape"],
   ["integrations-and-enrichment", "Integrations and enrichment"],
   ["automation-jobs", "Automation jobs"],
+  ["attack-coverage", "ATT&CK coverage"],
+  ["asset-context", "Assets and identities"],
+  ["settings-and-roles", "Settings and roles"],
   ["api-and-mcp", "API and MCP"],
   ["playbooks-and-agents", "Playbooks and agents (LLM.txt)"],
 ] as const;
@@ -17,10 +27,7 @@ export default function GuidesPage() {
     <div className="kelpie-page max-w-6xl">
       <header>
         <h1>Guides</h1>
-        <p>
-          Practical setup and operating notes for the features that need more
-          than a button label.
-        </p>
+        <PageExplainer page="guides" />
       </header>
 
       <div className="grid gap-8 lg:grid-cols-[14rem_minmax(0,1fr)]">
@@ -47,6 +54,76 @@ export default function GuidesPage() {
 
         <div className="min-w-0 divide-y divide-[color:var(--color-navy-700)]">
           <GuideSection
+            id="triage-and-dashboard"
+            title="Triage and dashboard"
+            intro="The overview is for handoff and load awareness. Investigation still happens on the case."
+          >
+            <GuideSteps
+              steps={[
+                <>
+                  Open <LinkText href="/dashboard">Overview</LinkText> at the
+                  start of a shift. Check active cases, SLA breaches, and MTTA /
+                  MTTC / MTTR before diving into one ticket.
+                </>,
+                <>
+                  Administrators see a{" "}
+                  <strong className="font-medium text-slate-200">
+                    Team caseload
+                  </strong>{" "}
+                  panel: per-analyst active cases, severity-weighted score, and
+                  overload flags when someone is well above the team average.
+                </>,
+                <>
+                  Jump from an overloaded card into that analyst&rsquo;s cases,
+                  rebalance ownership, or pull unassigned work into a lighter
+                  queue. Full queue health lives under{" "}
+                  <LinkText href="/queues">Queues</LinkText>.
+                </>,
+                <>
+                  Treat severity bars and top classifications as prioritisation
+                  hints. Open the case for evidence, comments, and actions.
+                </>,
+              ]}
+            />
+            <GuideNote>
+              Weighting for caseload: low = 1, medium = 2, high = 4, critical =
+              8. Closed cases are excluded. Primary owner and additional
+              assignees both count toward load.
+            </GuideNote>
+          </GuideSection>
+
+          <GuideSection
+            id="case-queue-and-views"
+            title="Case queue and views"
+            intro="The case list is the day-to-day triage surface. Saved views keep a shared filter set one click away."
+          >
+            <GuideSteps
+              steps={[
+                <>
+                  Open <LinkText href="/cases">Cases</LinkText>. Use operational
+                  views (mine, unassigned, SLA warning, SLA breached, stale) for
+                  common triage cuts.
+                </>,
+                <>
+                  Combine filters (status, severity, assignee, queue, tag,
+                  source) until the list matches how your team works. Share the
+                  URL — filters are query parameters.
+                </>,
+                <>
+                  Administrators and analysts with permission can save a view so
+                  the whole team (or a team membership) reuses the same cut.
+                  Dirty state means the URL no longer matches the saved view.
+                </>,
+                <>
+                  Keep ownership and status honest: every open case should have
+                  a clear next owner (person or queue) and a status that matches
+                  reality. That is what makes SLA and caseload numbers trustworthy.
+                </>,
+              ]}
+            />
+          </GuideSection>
+
+          <GuideSection
             id="cases-and-templates"
             title="Cases and templates"
             intro="A case is the durable record for an investigation. Start with facts, then add tasks, comments, observables, evidence, and ownership as work progresses."
@@ -54,9 +131,13 @@ export default function GuidesPage() {
             <GuideSteps
               steps={[
                 <>
-                  Open <LinkText href="/cases/new">New case</LinkText> and record
-                  a clear title, factual summary, severity, and handling
-                  markings.
+                  Open <LinkText href="/cases/new">New case</LinkText> and
+                  record a clear title, factual summary, severity, and handling
+                  markings (TLP / PAP).
+                </>,
+                <>
+                  Prefer one investigation per case. Link related cases rather
+                  than stuffing unrelated activity into one timeline.
                 </>,
                 <>
                   Use <LinkText href="/playbooks">Playbooks</LinkText> for
@@ -64,9 +145,104 @@ export default function GuidesPage() {
                   initial fields and structure recur.
                 </>,
                 <>
-                  Keep one investigation per case. Use consistent tags and
-                  comments to record related activity without combining
-                  unrelated work into one timeline.
+                  Update status as the incident lifecycle moves: open →
+                  in_progress → contained → eradicated → recovered → closed.
+                  Record why you closed (or reopened) so the audit trail stays
+                  useful.
+                </>,
+                <>
+                  Comment for human narrative; timeline captures structured
+                  state changes. @mentions notify teammates — keep secrets out of
+                  notification-facing text when you can.
+                </>,
+              ]}
+            />
+          </GuideSection>
+
+          <GuideSection
+            id="queues-and-workload"
+            title="Queues and workload"
+            intro="Team queues hold work before an individual owns it. Workload shows who is carrying the heaviest active load."
+          >
+            <GuideSteps
+              steps={[
+                <>
+                  Administrators create teams and queues under{" "}
+                  <LinkText href="/queues">Queues</LinkText>. Assign analysts to
+                  teams so membership is clear.
+                </>,
+                <>
+                  Route a case to a queue when the next step is team ownership,
+                  not a named person yet. Queue assignment does not set
+                  individual owner until someone picks it up.
+                </>,
+                <>
+                  Watch per-analyst weighted load and queue aging / SLA risk.
+                  Pull work from overloaded people into lighter capacity or into
+                  an unassigned queue bucket.
+                </>,
+                <>
+                  On the admin dashboard, Team caseload is a compressed view of
+                  the same workload data for shift leads.
+                </>,
+              ]}
+            />
+            <GuideNote>
+              Severity weight is intentional: five low cases are not the same
+              load as two criticals. Rebalance on weighted score, not raw count
+              alone.
+            </GuideNote>
+          </GuideSection>
+
+          <GuideSection
+            id="task-inbox"
+            title="Task inbox"
+            intro="Tasks are concrete work items, often spawned from playbooks. The inbox surfaces them across every case."
+          >
+            <GuideSteps
+              steps={[
+                <>
+                  Open <LinkText href="/tasks">Tasks</LinkText>. Overdue items
+                  rise first, then due within 24 hours.
+                </>,
+                <>
+                  Filter by status, due window, and assignee (mine, unassigned,
+                  or a teammate). Mark done when the work is complete so SLA and
+                  playbook cadence stay accurate.
+                </>,
+                <>
+                  If a task is blocked, record why on the case (comment or
+                  waiting reason) so the next person is not guessing.
+                </>,
+              ]}
+            />
+          </GuideSection>
+
+          <GuideSection
+            id="observables-and-iocs"
+            title="Observables and IOCs"
+            intro="Observables are facts on a case (IP, domain, hash, email, …). An IOC flag means the team treats that value as malicious for this investigation."
+          >
+            <GuideSteps
+              steps={[
+                <>
+                  Add observables on the case. Prefer exact values; avoid
+                  free-text dumps that cannot be matched later.
+                </>,
+                <>
+                  Use{" "}
+                  <LinkText href="/observables">Observable search</LinkText> to
+                  see every case that shares a value — useful for campaign
+                  clustering.
+                </>,
+                <>
+                  Mark IOC only when evidence supports it. TLP on an observable
+                  can be stricter than the case so sharing stays controlled.
+                </>,
+                <>
+                  Enrichment (for example VirusTotal) may post findings as a
+                  comment. Treat machine output as evidence to review, not an
+                  automatic severity bump.
                 </>,
               ]}
             />
@@ -127,6 +303,32 @@ export default function GuidesPage() {
           </GuideSection>
 
           <GuideSection
+            id="cyber-brief-and-landscape"
+            title="Cyber brief and landscape"
+            intro="Situational awareness for the team — not a substitute for your own case queue."
+          >
+            <GuideSteps
+              steps={[
+                <>
+                  <LinkText href="/briefing">Cyber brief</LinkText> aggregates
+                  news and reports. Filter by source and watched vendors; mark
+                  vendors you care about so matches highlight.
+                </>,
+                <>
+                  <LinkText href="/threat-landscape">Threat landscape</LinkText>{" "}
+                  shows near-real-time attack activity from configured sources
+                  (for example Cloudflare Radar when a token is set).
+                </>,
+                <>
+                  Use these pages to brief the team or explain prioritisation —
+                  open or link a case when something becomes your org&rsquo;s
+                  problem.
+                </>,
+              ]}
+            />
+          </GuideSection>
+
+          <GuideSection
             id="integrations-and-enrichment"
             title="Integrations and enrichment"
             intro="Integrations connect external intelligence, case sources, outbound notifications, and response systems."
@@ -162,11 +364,106 @@ export default function GuidesPage() {
           >
             <p className="text-sm leading-6 text-slate-300">
               Administrators set schedules in{" "}
-              <LinkText href="/settings/integrations">Integrations</LinkText>.
+              <LinkText href="/settings/integrations">Integrations</LinkText>{" "}
+              and automation rules under{" "}
+              <LinkText href="/settings/automations">Automations</LinkText>.
               Choose a polling interval that respects source rate limits and
               the freshness your team needs. Check the last-run result before
               shortening a schedule, especially for large feeds.
             </p>
+          </GuideSection>
+
+          <GuideSection
+            id="attack-coverage"
+            title="ATT&CK coverage"
+            intro="Map techniques to cases so you can see what you actually investigate, not only what a detection product claims."
+          >
+            <GuideSteps
+              steps={[
+                <>
+                  On a case, attach MITRE ATT&CK techniques that fit the
+                  evidence. Prefer precision over dumping a whole tactic.
+                </>,
+                <>
+                  Review{" "}
+                  <LinkText href="/attack-coverage">ATT&CK coverage</LinkText>{" "}
+                  to spot repeated techniques and blank spots in your response
+                  history.
+                </>,
+                <>
+                  Use gaps to drive detection engineering and playbook work —
+                  not as a scoreboard.
+                </>,
+              ]}
+            />
+          </GuideSection>
+
+          <GuideSection
+            id="asset-context"
+            title="Assets and identities"
+            intro="Business context changes severity. A workstation and a payment host are not the same blast radius."
+          >
+            <GuideSteps
+              steps={[
+                <>
+                  Import or maintain assets and identities under{" "}
+                  <LinkText href="/asset-context">Assets & identities</LinkText>
+                  .
+                </>,
+                <>
+                  Keep owners and criticality current so case priority and
+                  routing reflect real risk.
+                </>,
+                <>
+                  Administrators control import and scoring settings under{" "}
+                  <LinkText href="/settings/asset-context">
+                    Settings, Asset context
+                  </LinkText>
+                  .
+                </>,
+              ]}
+            />
+          </GuideSection>
+
+          <GuideSection
+            id="settings-and-roles"
+            title="Settings and roles"
+            intro="Roles gate who can change organisation shape versus who can work cases."
+          >
+            <div className="grid gap-5 sm:grid-cols-3">
+              <GuideChoice title="Admin">
+                Configure the organisation: team, SLA, SSO, integrations,
+                tokens, custom fields, queues, and most settings. Also performs
+                analyst work.
+              </GuideChoice>
+              <GuideChoice title="Analyst">
+                Triage, comment, update cases, run allowed response actions, and
+                use operational features. Cannot change org-wide configuration.
+              </GuideChoice>
+              <GuideChoice title="Read only">
+                Inspect data without mutating state. Useful for stakeholders who
+                need visibility without write access.
+              </GuideChoice>
+            </div>
+            <GuideSteps
+              steps={[
+                <>
+                  Set SLA targets per severity under{" "}
+                  <LinkText href="/settings">Settings</LinkText> so dashboard
+                  breach counts match your policy.
+                </>,
+                <>
+                  Invite teammates and set roles carefully. Prefer least
+                  privilege for service accounts via API scopes, not a shared
+                  admin browser login.
+                </>,
+                <>
+                  Review{" "}
+                  <LinkText href="/settings/audit">Audit</LinkText> when
+                  investigating who changed what.
+                </>,
+              ]}
+            />
           </GuideSection>
 
           <GuideSection
@@ -300,6 +597,14 @@ function GuideChoice({
       <h3 className="text-sm font-semibold text-slate-100">{title}</h3>
       <p className="mt-1 text-sm leading-6 text-slate-400">{children}</p>
     </div>
+  );
+}
+
+function GuideNote({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="mt-4 rounded-md border border-[color:var(--color-navy-700)] bg-[color:var(--color-navy-900)] px-3 py-2 text-xs leading-5 text-slate-400">
+      {children}
+    </p>
   );
 }
 

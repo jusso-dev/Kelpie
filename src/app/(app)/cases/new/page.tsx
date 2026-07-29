@@ -8,6 +8,7 @@ import CreatableTagInput from "@/components/creatable-tag-input";
 import RelatedCaseSuggestions from "@/components/related-case-suggestions";
 import { DATA_CLASSIFICATION_SUGGESTIONS, normalizeTags } from "@/lib/tags";
 import { getTeamTags } from "@/lib/team-tags";
+import PageExplainer from "@/components/page-explainer";
 
 export default async function NewCasePage() {
   const user = await requireUser();
@@ -52,9 +53,7 @@ export default async function NewCasePage() {
     <div className="kelpie-page mx-auto max-w-6xl">
       <header>
         <h1>Open a new case</h1>
-        <p>
-          A case number is generated automatically per organisation.
-        </p>
+        <PageExplainer page="cases-new" />
       </header>
 
       {templates.length > 0 ? (

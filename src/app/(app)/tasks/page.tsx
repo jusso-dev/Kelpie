@@ -13,6 +13,7 @@ import { cases, caseTasks, users } from "@/db/schema";
 import { requireUser } from "@/lib/session";
 import { caseKnowExistsSql, resolveUserActor } from "@/lib/access";
 import TaskInboxRow from "@/components/task-inbox-row";
+import PageExplainer from "@/components/page-explainer";
 
 const PAGE_SIZE = 50;
 const STATUSES = ["open", "todo", "in_progress", "blocked", "done", "all"] as const;
@@ -220,9 +221,7 @@ export default async function TasksPage({
           <h1 className="text-2xl font-semibold tracking-tight text-slate-50">
             Work that needs attention across every case
           </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
-            Overdue work rises first, followed by tasks due in the next 24 hours.
-          </p>
+          <PageExplainer page="tasks" />
         </div>
         <Link href="/cases" className="kelpie-btn kelpie-btn-secondary">
           View case queue

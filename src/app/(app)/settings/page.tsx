@@ -9,6 +9,7 @@ import TokenList from "@/components/token-list";
 import TeamManagement from "@/components/team-management";
 import McpOnboarding from "@/components/mcp-onboarding";
 import { resolvePublicMcpUrl } from "@/lib/mcp/onboarding";
+import PageExplainer from "@/components/page-explainer";
 
 export default async function SettingsPage() {
   const user = await requireUser();
@@ -47,9 +48,10 @@ export default async function SettingsPage() {
     <div className="kelpie-page max-w-6xl">
       <header>
         <h1>Settings</h1>
-        <p>
+        <p className="text-sm text-slate-400">
           Organisation: {user.organisationName}
         </p>
+        <PageExplainer page="settings" />
       </header>
 
       <section className="kelpie-section">

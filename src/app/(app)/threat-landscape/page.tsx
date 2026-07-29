@@ -5,6 +5,7 @@ import { getThreatLandscapeData } from "@/lib/threat-landscape";
 import ThreatLandscapeMap from "@/components/threat-landscape-map";
 import ThreatLandscapeInsights from "@/components/threat-landscape-insights";
 import LocalDateTime from "@/components/local-date-time";
+import PageExplainer from "@/components/page-explainer";
 
 export default async function ThreatLandscapePage() {
   const user = await requireUser();
@@ -21,10 +22,7 @@ export default async function ThreatLandscapePage() {
           <h1 className="text-2xl font-semibold text-slate-50">
             Global threat activity
           </h1>
-          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-400">
-            A current view of application-layer attacks mitigated by Cloudflare.
-            This is observed traffic—not attribution or proof of a hostile campaign.
-          </p>
+          <PageExplainer page="threat-landscape" className="mt-1 max-w-3xl" />
         </div>
         {data.lastUpdated ? (
           <div className="text-right text-xs text-slate-500">

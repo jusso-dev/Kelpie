@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/session";
 import { feedKinds } from "@/actions/ti";
 import TiFeedSettings from "@/components/ti-feed-settings";
 import TiBrowser from "@/components/ti-browser";
+import PageExplainer from "@/components/page-explainer";
 
 export default async function ThreatIntelPage() {
   const user = await requireUser();
@@ -22,10 +23,7 @@ export default async function ThreatIntelPage() {
     <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold">Threat intelligence</h1>
-        <p className="text-sm text-slate-400">
-          Browse the indicator store and manage the feeds that populate it.
-          Matches are attached to observables automatically.
-        </p>
+        <PageExplainer page="ti" />
       </header>
 
       <section>

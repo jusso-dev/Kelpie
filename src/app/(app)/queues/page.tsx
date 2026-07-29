@@ -9,6 +9,7 @@ import {
   listQueuesCore,
 } from "@/lib/queues-core";
 import { TeamQueueAdmin } from "@/components/team-queue-admin";
+import PageExplainer from "@/components/page-explainer";
 
 export default async function QueuesPage() {
   const user = await requireUser();
@@ -39,11 +40,7 @@ export default async function QueuesPage() {
         <h1 className="text-3xl font-semibold tracking-tight text-slate-50">
           Team queues, workload, and queue health.
         </h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
-          Work can sit with a team before an analyst picks it up. Workload
-          excludes closed cases and weights by severity; queue health tracks
-          aging and SLA risk per queue.
-        </p>
+        <PageExplainer page="queues" />
       </header>
 
       <section className="kelpie-panel p-5">
