@@ -7,12 +7,14 @@ import { reverseDnsProvider } from "./providers/reverse-dns";
 import { urlParseProvider } from "./providers/url-parse";
 import { virusTotalProvider } from "./providers/virustotal";
 import { tiProvider } from "./providers/ti";
+import { brolgaProvider } from "./providers/brolga";
 
 const allProviders: EnrichmentProvider[] = [
   reverseDnsProvider,
   urlParseProvider,
   virusTotalProvider,
   tiProvider,
+  brolgaProvider,
 ];
 
 export function listProviders() {

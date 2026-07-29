@@ -67,7 +67,7 @@ export const PAGE_HELP: Record<PageHelpKey, PageHelp> = {
   ti: {
     summary:
       "Browse indicators loaded from feeds. A match is enrichment, not a verdict — validate before you escalate.",
-    tip: "Admins manage feed URLs and poll intervals under Integrations.",
+    tip: "Bulk MISP/TAXII will move to Brolga; local feeds are a stopgap. Wire Brolga under Integrations when ready.",
     guideHref: "/guides#threat-intelligence",
   },
   briefing: {

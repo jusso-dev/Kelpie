@@ -85,3 +85,92 @@ export async function removeVirusTotalSettings(): Promise<void> {
     .where(eq(organisations.id, user.organisationId));
   revalidatePath("/settings/integrations");
 }
+
+function brolgaBaseUrlFrom(formData: FormData): string {
+  return String(formData.get("baseUrl") ?? "").trim();
+}
+
+function brolgaEnabledFrom(formData: FormData): boolean {
+  const raw = formData.get("enabled");
+  return raw === "on" || raw === "true" || raw === "1";
+}
+
+function brolgaTimeoutFrom(formData: FormData): number {
+  const timeout = Number(formData.get("timeoutMs") ?? 8000);
+  if (!Number.isInteger(timeout) || timeout < 1000 || timeout > 30000) {
+    throw new Error("Timeout must be between 1000 and 30000 milliseconds.");
+  }
+  return timeout;
+}
+
+export async function saveBrolgaSettings(formData: FormData): Promise<void> {
+  const user = await requireRole(["admin"]);
+  const baseUrlRaw = brolgaBaseUrlFrom(formData);
+  const token = apiKeyFrom(formData);
+  const enabled = brolgaEnabledFrom(formData);
+  const timeoutMs = brolgaTimeoutFrom(formData);
+
+  let baseUrl: string | null = null;
+  if (baseUrlRaw) {
+    let parsed: URL;
+    try {
+      parsed = new URL(baseUrlRaw);
+    } catch {
+      throw new Error("Brolga base URL is invalid.");
+    }
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      throw new Error("Brolga base URL must use HTTP or HTTPS.");
+    }
+    baseUrl = parsed.origin;
+  }
+
+  const settings = await organisationSettings(user.organisationId);
+  const existingUrl =
+    typeof settings.brolga_base_url === "string"
+      ? settings.brolga_base_url.trim()
+      : "";
+  if (enabled && !baseUrl && !existingUrl && !process.env.BROLGA_BASE_URL?.trim()) {
+    throw new Error("Enter a Brolga base URL before enabling the integration.");
+  }
+
+  await db
+    .update(organisations)
+    .set({
+      settings: {
+        ...settings,
+        ...(baseUrl ? { brolga_base_url: baseUrl } : {}),
+        ...(token ? { brolga_api_token: token } : {}),
+        brolga_enabled: enabled,
+        brolga_timeout_ms: timeoutMs,
+      },
+    })
+    .where(eq(organisations.id, user.organisationId));
+  revalidatePath("/settings/integrations");
+}
+
+export async function testBrolgaSettings(): Promise<{
+  ok: boolean;
+  message: string;
+  httpStatus?: number;
+}> {
+  const user = await requireRole(["admin"]);
+  const { testBrolgaConnection } = await import("@/lib/brolga/client");
+  return testBrolgaConnection(user.organisationId);
+}
+
+export async function removeBrolgaSettings(): Promise<void> {
+  const user = await requireRole(["admin"]);
+  const settings = await organisationSettings(user.organisationId);
+  const {
+    brolga_base_url: _url,
+    brolga_api_token: _token,
+    brolga_enabled: _enabled,
+    brolga_timeout_ms: _timeout,
+    ...next
+  } = settings;
+  await db
+    .update(organisations)
+    .set({ settings: next })
+    .where(eq(organisations.id, user.organisationId));
+  revalidatePath("/settings/integrations");
+}

@@ -15,11 +15,13 @@ import ResponseActionSettings from "@/components/response-action-settings";
 import CaseSourceSettings from "@/components/case-source-settings";
 import AutomationSchedules from "@/components/automation-schedules";
 import VirusTotalSettings from "@/components/virustotal-settings";
+import BrolgaSettings from "@/components/brolga-settings";
 import WebhookSettings from "@/components/webhook-settings";
 import TawnySettings from "@/components/tawny-settings";
 import IntegrationHealthPanel from "@/components/integration-health-panel";
 import SyncConflictQueue from "@/components/sync-conflict-queue";
 import { getVirusTotalConfiguration } from "@/lib/enrichment/providers/virustotal";
+import { getBrolgaConfiguration } from "@/lib/brolga/config";
 import { TAWNY_SOURCE_SYSTEM } from "@/lib/case-source-identity";
 import { listOrganisationHealth } from "@/lib/integrations/health";
 import { listOpenConflicts } from "@/lib/integrations/conflicts";
@@ -36,6 +38,7 @@ export default async function IntegrationsSettingsPage() {
     actionKinds,
     webhookRows,
     virusTotal,
+    brolga,
     tawnyStatusRows,
     tawnyCaseCountRows,
     healthConnections,
@@ -79,6 +82,7 @@ export default async function IntegrationsSettingsPage() {
       .where(eq(webhooks.organisationId, user.organisationId))
       .orderBy(desc(webhooks.createdAt)),
     getVirusTotalConfiguration(user.organisationId),
+    getBrolgaConfiguration(user.organisationId),
     db
       .select()
       .from(inboundSourceStatus)
@@ -244,6 +248,7 @@ export default async function IntegrationsSettingsPage() {
           </p>
         </div>
         <VirusTotalSettings configuration={virusTotal} isAdmin={isAdmin} />
+        <BrolgaSettings configuration={brolga} isAdmin={isAdmin} />
       </section>
 
       <section className="kelpie-section">

@@ -298,6 +298,17 @@ export default function GuidesPage() {
                   Treat a match as enrichment. Validate it before changing case
                   severity, scope, or response actions.
                 </>,
+                <>
+                  <strong className="font-medium text-slate-200">Brolga</strong>{" "}
+                  is the planned central TI context engine (MISP, TAXII, bulk
+                  feeds, graph). Configure it under Integrations when deployed;
+                  Kelpie will request compact context packs for observables
+                  rather than re-ingesting every upstream. See{" "}
+                  <code className="text-xs text-slate-200">
+                    docs/brolga-integration.md
+                  </code>{" "}
+                  in the repository for the HTTP contract.
+                </>,
               ]}
             />
           </GuideSection>

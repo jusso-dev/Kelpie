@@ -45,6 +45,7 @@
     "test:vendor-news": "tsx scripts/test-vendor-news.ts",
     "test:threat-landscape": "tsx scripts/test-threat-landscape.ts",
     "test:virustotal": "tsx scripts/test-virustotal.ts",
+    "test:brolga-contract": "tsx scripts/test-brolga-contract.ts",
     "test:automation-domain": "tsx scripts/test-automation-domain.ts",
     "test:automation-runtime": "tsx scripts/test-automation-runtime.ts",
     "test:response-action-approval": "tsx scripts/test-response-action-approval.ts",
