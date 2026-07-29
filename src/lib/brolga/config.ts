@@ -103,8 +103,10 @@ export function configurationFromSettings(
     tokenSource,
     urlSource,
     timeoutMs: clampTimeout(settings.brolga_timeout_ms),
-    healthPath: "/v1/health",
-    contextPath: "/v1/context",
+    // Brolga versions its routes in the path and serves them under `/api/v1` — see its
+    // docs/API.md. The base URL is reduced to an origin above, so the full prefix belongs here.
+    healthPath: "/api/v1/health",
+    contextPath: "/api/v1/context",
   };
 }
 
