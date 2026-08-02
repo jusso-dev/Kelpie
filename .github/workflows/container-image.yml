@@ -144,16 +144,18 @@ jobs:
           test -n "$AMD64_DIGEST"
           test -n "$ARM64_DIGEST"
 
+          primary_tag=""
           while IFS= read -r tag; do
             [ -n "$tag" ] || continue
+            [ -n "$primary_tag" ] || primary_tag="$tag"
             docker buildx imagetools create \
-              --metadata-file manifest-metadata.json \
               --tag "$tag" \
               "$IMAGE_REF@$AMD64_DIGEST" \
               "$IMAGE_REF@$ARM64_DIGEST"
           done <<< "$TAGS"
 
-          manifest_digest="$(jq -r '."containerimage.digest"' manifest-metadata.json)"
+          test -n "$primary_tag"
+          manifest_digest="$(docker buildx imagetools inspect "$primary_tag" | awk '$1 == "Digest:" { print $2; exit }')"
           test -n "$manifest_digest"
           test "$manifest_digest" != "null"
           echo "digest=$manifest_digest" >> "$GITHUB_OUTPUT"
