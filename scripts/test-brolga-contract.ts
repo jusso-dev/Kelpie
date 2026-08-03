@@ -61,6 +61,8 @@ function testConfig() {
   assert.equal(enabled.timeoutMs, 12000);
   assert.equal(enabled.contextPath, "/api/v1/context");
   assert.equal(enabled.healthPath, "/api/v1/health");
+  assert.equal(enabled.readyPath, "/api/v1/ready");
+  assert.equal(enabled.statsPath, "/api/v1/stats");
 
   assert.equal(
     BROLGA_CONTEXT_REQUEST_SCHEMA,

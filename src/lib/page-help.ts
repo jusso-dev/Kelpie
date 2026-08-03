@@ -66,8 +66,8 @@ export const PAGE_HELP: Record<PageHelpKey, PageHelp> = {
   },
   ti: {
     summary:
-      "Browse indicators loaded from feeds. A match is enrichment, not a verdict — validate before you escalate.",
-    tip: "Bulk MISP/TAXII will move to Brolga; local feeds are a stopgap. Wire Brolga under Integrations when ready.",
+      "Live threat-intelligence volume from Brolga. Case enrichment pulls context packs; matches are context, not a verdict.",
+    tip: "OpenCTI and other upstreams feed Brolga. Configure the link under Settings → Integrations.",
     guideHref: "/guides#threat-intelligence",
   },
   briefing: {

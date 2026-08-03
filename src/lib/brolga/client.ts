@@ -215,3 +215,223 @@ export function packDispositionSummary(pack: BrolgaContextPack): string {
   }
   return parts.length > 0 ? parts.join(" · ") : "Context pack received";
 }
+
+/** Store counts from `GET /api/v1/stats`. */
+export type BrolgaStoreStats = {
+  schema_version: number;
+  entities: number;
+  relationships: number;
+  claims: number;
+  sightings: number;
+  sources: number;
+  quarantined: number;
+};
+
+/** Snapshot for the Threat Intelligence page. */
+export type BrolgaStatsSnapshot = {
+  status: "ok" | "unconfigured" | "disabled" | "unavailable" | "error";
+  message?: string;
+  baseUrl: string | null;
+  enabled: boolean;
+  fetchedAt: string;
+  health?: { status: string; version?: string };
+  ready?: { status: string; schema_version: number; entities: number };
+  stats?: BrolgaStoreStats;
+};
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function unwrapEnvelopeData(json: unknown): Record<string, unknown> | null {
+  const root = asRecord(json);
+  if (!root) return null;
+  const data = asRecord(root.data);
+  return data ?? root;
+}
+
+function parseStoreStats(json: unknown): BrolgaStoreStats | null {
+  const data = unwrapEnvelopeData(json);
+  if (!data) return null;
+  const num = (key: string): number | null => {
+    const v = data[key];
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+    if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))) {
+      return Number(v);
+    }
+    return null;
+  };
+  const schema_version = num("schema_version");
+  const entities = num("entities");
+  const relationships = num("relationships");
+  const claims = num("claims");
+  const sightings = num("sightings");
+  const sources = num("sources");
+  const quarantined = num("quarantined");
+  if (
+    schema_version === null ||
+    entities === null ||
+    relationships === null ||
+    claims === null ||
+    sightings === null ||
+    sources === null ||
+    quarantined === null
+  ) {
+    return null;
+  }
+  return {
+    schema_version,
+    entities,
+    relationships,
+    claims,
+    sightings,
+    sources,
+    quarantined,
+  };
+}
+
+/**
+ * Pull live store stats from Brolga for the TI dashboard.
+ * Never throws — always returns a status the UI can render.
+ */
+export async function fetchBrolgaStats(
+  organisationId: string,
+): Promise<BrolgaStatsSnapshot> {
+  const fetchedAt = new Date().toISOString();
+  const config = await getBrolgaConfiguration(organisationId);
+
+  if (!config.configured || !config.baseUrl) {
+    return {
+      status: "unconfigured",
+      message:
+        "Brolga is not configured. Set base URL under Settings → Integrations.",
+      baseUrl: null,
+      enabled: false,
+      fetchedAt,
+    };
+  }
+  if (!config.enabled) {
+    return {
+      status: "disabled",
+      message: "Brolga is configured but disabled for this organisation.",
+      baseUrl: config.baseUrl,
+      enabled: false,
+      fetchedAt,
+    };
+  }
+
+  const token = await getBrolgaApiToken(organisationId);
+  const headers = authHeaders(token);
+
+  async function getJson(path: string): Promise<{ ok: boolean; status: number; json: unknown }> {
+    const url = brolgaUrl(config, path);
+    await assertSafeOutboundUrl(url);
+    const res = await safeFetch(url, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(config.timeoutMs),
+    });
+    const json: unknown = await res.json().catch(() => null);
+    return { ok: res.ok, status: res.status, json };
+  }
+
+  try {
+    const [healthRes, readyRes, statsRes] = await Promise.all([
+      getJson(config.healthPath),
+      getJson(config.readyPath),
+      getJson(config.statsPath),
+    ]);
+
+    if (!healthRes.ok && !statsRes.ok) {
+      const networkish = healthRes.status === 0;
+      return {
+        status: networkish || healthRes.status >= 500 ? "unavailable" : "error",
+        message: `Brolga returned HTTP ${healthRes.status || statsRes.status}.`,
+        baseUrl: config.baseUrl,
+        enabled: true,
+        fetchedAt,
+      };
+    }
+
+    const healthBody = asRecord(healthRes.json);
+    const readyBody = asRecord(readyRes.json);
+    const stats = parseStoreStats(statsRes.json);
+
+    if (!stats) {
+      return {
+        status: "error",
+        message: statsRes.ok
+          ? "Brolga /stats response could not be parsed."
+          : `Brolga /stats returned HTTP ${statsRes.status}.`,
+        baseUrl: config.baseUrl,
+        enabled: true,
+        fetchedAt,
+        health:
+          healthBody && typeof healthBody.status === "string"
+            ? {
+                status: healthBody.status,
+                version:
+                  typeof healthBody.version === "string"
+                    ? healthBody.version
+                    : undefined,
+              }
+            : undefined,
+      };
+    }
+
+    return {
+      status: "ok",
+      baseUrl: config.baseUrl,
+      enabled: true,
+      fetchedAt,
+      health:
+        healthBody && typeof healthBody.status === "string"
+          ? {
+              status: healthBody.status,
+              version:
+                typeof healthBody.version === "string"
+                  ? healthBody.version
+                  : undefined,
+            }
+          : undefined,
+      ready:
+        readyBody && typeof readyBody.status === "string"
+          ? {
+              status: readyBody.status,
+              schema_version:
+                typeof readyBody.schema_version === "number"
+                  ? readyBody.schema_version
+                  : stats.schema_version,
+              entities:
+                typeof readyBody.entities === "number"
+                  ? readyBody.entities
+                  : stats.entities,
+            }
+          : undefined,
+      stats,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Brolga stats failed";
+    if (
+      /ECONNREFUSED|ENOTFOUND|ETIMEDOUT|fetch failed|network|timeout|non-public/i.test(
+        message,
+      )
+    ) {
+      return {
+        status: "unavailable",
+        message: `Brolga unreachable: ${message}`,
+        baseUrl: config.baseUrl,
+        enabled: true,
+        fetchedAt,
+      };
+    }
+    return {
+      status: "error",
+      message,
+      baseUrl: config.baseUrl,
+      enabled: true,
+      fetchedAt,
+    };
+  }
+}

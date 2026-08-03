@@ -23,9 +23,13 @@ export type BrolgaConfiguration = {
   tokenSource: "organisation" | "environment" | null;
   urlSource: "organisation" | "environment" | null;
   timeoutMs: number;
-  /** Planned health endpoint for connectivity checks. */
+  /** Health endpoint for connectivity checks. */
   healthPath: string;
-  /** Planned context endpoint. */
+  /** Readiness endpoint (store answers). */
+  readyPath: string;
+  /** Store count endpoint. */
+  statsPath: string;
+  /** Context pack endpoint. */
   contextPath: string;
 };
 
@@ -106,6 +110,8 @@ export function configurationFromSettings(
     // Brolga versions its routes in the path and serves them under `/api/v1` — see its
     // docs/API.md. The base URL is reduced to an origin above, so the full prefix belongs here.
     healthPath: "/api/v1/health",
+    readyPath: "/api/v1/ready",
+    statsPath: "/api/v1/stats",
     contextPath: "/api/v1/context",
   };
 }

@@ -277,33 +277,32 @@ export default function GuidesPage() {
           <GuideSection
             id="threat-intelligence"
             title="Threat intelligence"
-            intro="Threat feeds provide context, not a verdict. Confidence is the source score and should be considered alongside recency, feed reputation, and case evidence."
+            intro="Brolga holds active threat intelligence. Kelpie shows live store stats and enriches cases with context packs. A match is context, not a verdict."
           >
             <GuideSteps
               steps={[
                 <>
-                  Administrators choose and maintain sources in{" "}
+                  Administrators connect Brolga under{" "}
                   <LinkText href="/settings/integrations">
                     Integrations
                   </LinkText>
-                  . Load the supplied defaults only when they match your
-                  operating needs.
+                  . OpenCTI and other upstreams feed Brolga; Kelpie does not
+                  poll external TI lists.
                 </>,
                 <>
-                  Search the <LinkText href="/ti">Threat intel</LinkText> store
-                  by value, type, feed, tag, or minimum confidence. Results are
-                  paginated so large feeds remain usable.
+                  Open{" "}
+                  <LinkText href="/ti">Threat intel</LinkText> for live entity,
+                  claim, source, and quarantine counts from Brolga.
                 </>,
                 <>
-                  Treat a match as enrichment. Validate it before changing case
-                  severity, scope, or response actions.
+                  Treat enrichment matches as context. Validate before changing
+                  case severity, scope, or response actions.
                 </>,
                 <>
                   <strong className="font-medium text-slate-200">Brolga</strong>{" "}
-                  is the planned central TI context engine (MISP, TAXII, bulk
-                  feeds, graph). Configure it under Integrations when deployed;
-                  Kelpie will request compact context packs for observables
-                  rather than re-ingesting every upstream. See{" "}
+                  is the central TI context engine. Configure it under
+                  Integrations; Kelpie requests compact context packs for
+                  observables rather than re-ingesting every upstream. See{" "}
                   <code className="text-xs text-slate-200">
                     docs/brolga-integration.md
                   </code>{" "}

@@ -27,9 +27,12 @@ export {
 
 export {
   brolgaUrl,
+  fetchBrolgaStats,
   packDispositionSummary,
   requestBrolgaContext,
   testBrolgaConnection,
+  type BrolgaStatsSnapshot,
+  type BrolgaStoreStats,
 } from "./client";
 
 export { lookupBrolgaForObservable } from "./lookup";

@@ -5,7 +5,6 @@ import {
   cases,
   inboundSourceStatus,
   responseActions,
-  tiFeeds,
   webhooks,
 } from "@/db/schema";
 import { and, count, desc, eq } from "drizzle-orm";
@@ -33,7 +32,6 @@ export default async function IntegrationsSettingsPage() {
   const canResolveConflicts = isAdmin || user.role === "analyst";
   const [
     sources,
-    feeds,
     actions,
     actionKinds,
     webhookRows,
@@ -58,18 +56,6 @@ export default async function IntegrationsSettingsPage() {
       .from(caseSources)
       .where(eq(caseSources.organisationId, user.organisationId))
       .orderBy(desc(caseSources.createdAt)),
-    db
-      .select({
-        id: tiFeeds.id,
-        name: tiFeeds.name,
-        isActive: tiFeeds.isActive,
-        pollIntervalMinutes: tiFeeds.pollIntervalMinutes,
-        lastPolledAt: tiFeeds.lastPolledAt,
-        lastError: tiFeeds.lastError,
-      })
-      .from(tiFeeds)
-      .where(eq(tiFeeds.organisationId, user.organisationId))
-      .orderBy(desc(tiFeeds.createdAt)),
     db
       .select()
       .from(responseActions)
@@ -255,32 +241,22 @@ export default async function IntegrationsSettingsPage() {
         <div className="kelpie-section-header">
           <h2>Automation schedules</h2>
           <p>
-            Control how often the Redis-backed BullMQ worker polls approved TI
-            feeds and case sources. Changes are applied within one minute.
+            Control how often the Redis-backed BullMQ worker polls case sources.
+            Threat intelligence is served by Brolga (no local feed polling).
+            Changes are applied within one minute.
           </p>
         </div>
         <AutomationSchedules
           canEdit={isAdmin}
-          jobs={[
-            ...feeds.map((feed) => ({
-              id: feed.id,
-              kind: "threat_intelligence" as const,
-              name: feed.name,
-              intervalMinutes: feed.pollIntervalMinutes,
-              isActive: feed.isActive,
-              lastRunAt: feed.lastPolledAt?.toISOString() ?? null,
-              lastError: feed.lastError,
-            })),
-            ...sources.map((source) => ({
-              id: source.id,
-              kind: "case_source" as const,
-              name: source.name,
-              intervalMinutes: source.pollIntervalMinutes,
-              isActive: source.isActive,
-              lastRunAt: source.lastPolledAt?.toISOString() ?? null,
-              lastError: source.lastError,
-            })),
-          ]}
+          jobs={sources.map((source) => ({
+            id: source.id,
+            kind: "case_source" as const,
+            name: source.name,
+            intervalMinutes: source.pollIntervalMinutes,
+            isActive: source.isActive,
+            lastRunAt: source.lastPolledAt?.toISOString() ?? null,
+            lastError: source.lastError,
+          }))}
         />
       </section>
 

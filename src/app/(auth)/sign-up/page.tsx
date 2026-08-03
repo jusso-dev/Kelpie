@@ -12,7 +12,6 @@ export default function SignUpPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [organisationName, setOrganisationName] = useState("");
-  const [loadStarterFeeds, setLoadStarterFeeds] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -34,7 +33,8 @@ export default function SignUpPage() {
     const onboard = await fetch("/api/onboarding", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ organisationName, loadStarterFeeds }),
+      // TI is served by Brolga; do not seed local starter feeds.
+      body: JSON.stringify({ organisationName, loadStarterFeeds: false }),
     });
     setPending(false);
     if (!onboard.ok) {
@@ -81,23 +81,6 @@ export default function SignUpPage() {
             placeholder="Acme SOC"
           />
         </div>
-        <label className="flex cursor-pointer items-start gap-3 rounded border border-[color:var(--color-navy-700)] p-3">
-          <input
-            type="checkbox"
-            className="kelpie-checkbox mt-0.5"
-            checked={loadStarterFeeds}
-            onChange={(event) => setLoadStarterFeeds(event.target.checked)}
-          />
-          <span>
-            <span className="block text-sm text-slate-200">
-              Load starter threat intelligence feeds
-            </span>
-            <span className="mt-1 block text-xs text-slate-500">
-              Adds seven curated public OSINT sources. You can edit or remove them later.
-              You can edit, disable, or delete them later.
-            </span>
-          </span>
-        </label>
         <div>
           <label
             htmlFor="sign-up-email"
