@@ -5,7 +5,7 @@ This package runs published Kelpie images; it never builds source on server.
 ## Preconditions
 
 - Image exists publicly at `ghcr.io/jusso-dev/kelpie`.
-- Host architecture is x86_64/AMD64.
+- Host architecture is x86_64/AMD64 or ARM64.
 - Final HTTPS origin, DNS, and reverse proxy are ready before external exposure.
 - Host has Docker Engine and Docker Compose v2.
 

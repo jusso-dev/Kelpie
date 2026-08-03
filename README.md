@@ -301,7 +301,7 @@ Then visit http://localhost:3000 and sign in as `admin@acme.local` / `kelpieadmi
 
 ## Docker Compose (self-hosted)
 
-The production compose file pulls the `linux/amd64` image from GitHub Container Registry, applies migrations before starting Kelpie, keeps Postgres off the host network, and binds Kelpie to loopback for a local reverse proxy. Published images target x86_64 hosts such as the Ubuntu-based homelab deployment.
+The production compose file pulls the multi-architecture image from GitHub Container Registry, applies migrations before starting Kelpie, keeps Postgres off the host network, and binds Kelpie to loopback for a local reverse proxy. Published images support both `linux/amd64` and `linux/arm64` hosts.
 
 ```bash
 cp .env.example .env
