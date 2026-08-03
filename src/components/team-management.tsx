@@ -89,7 +89,7 @@ export default function TeamManagement({
         </p>
       )}
 
-      <div className="overflow-hidden rounded-lg border border-[color:var(--color-navy-700)]">
+      <div className="overflow-hidden rounded-lg border border-[color:var(--color-navy-700)] lg:overflow-visible">
         <div className="hidden grid-cols-[minmax(10rem,1fr)_minmax(13rem,1.35fr)_minmax(14rem,1.15fr)_minmax(9rem,.7fr)_auto] gap-4 border-b border-[color:var(--color-navy-700)] px-4 py-3 text-[10px] uppercase tracking-wider text-slate-500 lg:grid">
           <span>Name</span>
           <span>Email</span>
